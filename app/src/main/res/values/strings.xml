@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LocalLlama</string>
+
+    <string name="no_model_loaded">No model loaded</string>
+    <string name="import_from_device">Import GGUF file…</string>
+    <string name="cpu_only">Use CPU only</string>
+    <string name="use_gpu">Use GPU (Vulkan)</string>
+    <string name="hf_url_hint">Hugging Face .gguf URL</string>
+    <string name="download">Download</string>
+    <string name="message_hint">Message the model…</string>
+    <string name="send">Send</string>
+</resources>
