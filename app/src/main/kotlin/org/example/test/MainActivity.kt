@@ -42,6 +42,7 @@ import org.example.test.onboarding.OnboardingPreferences
 import org.example.test.perf.PerformanceMonitor
 import org.example.test.ui.DrawingContextToolbar
 import org.example.test.ui.DrawingToolsPanel
+import org.example.test.ui.HistoricalDataDialog
 import org.example.test.ui.LiveTradePanel
 import org.example.test.ui.NeumorphicInsetFrameDrawable
 import org.example.test.ui.NeumorphicPillDrawable
@@ -179,6 +180,9 @@ class MainActivity : AppCompatActivity() {
         changeSkeleton = findViewById(R.id.changeSkeleton)
         drawingToolsButton = findViewById(R.id.drawingToolsButton)
         timeframeExpandButton = findViewById(R.id.timeframeExpandButton)
+        timeframeExpandButton.setOnClickListener {
+            HistoricalDataDialog(this).show()
+        }
         drawingContextToolbar = findViewById(R.id.drawingContextToolbar)
         paragraphButton = findViewById(R.id.paragraphButton)
         paragraphButton.setOnClickListener {
