@@ -432,9 +432,26 @@ class CandlestickChartView @JvmOverloads constructor(
             invalidate()
         }
 
-    private var isCrosshairActive = false
+    /**
+     * The long-press crosshair now has three states instead of just
+     * on/off: [isCrosshairDragging] while a finger is actively positioning
+     * it (either right after the long-press that created it, or after
+     * re-grabbing it - see [handleCrosshairDragTouch]); [isCrosshairLocked]
+     * once that finger lifts, when it stays drawn at its last position
+     * instead of disappearing; and visible (see [isCrosshairVisible])
+     * whenever either of those is true. [crosshairIntersectionX]/[Y] track
+     * where it was actually drawn last (the vertical line snaps to the
+     * nearest candle, so this can differ slightly from the raw touch
+     * point) - that's what a re-grab tap is measured against, not the raw
+     * coordinates.
+     */
+    private var isCrosshairDragging = false
+    private var isCrosshairLocked = false
+    private val isCrosshairVisible: Boolean get() = isCrosshairDragging || isCrosshairLocked
     private var crosshairRawX = 0f
     private var crosshairRawY = 0f
+    private var crosshairIntersectionX = 0f
+    private var crosshairIntersectionY = 0f
 
     private var isDrawingCrosshairActive = false
     private var hasSeededDrawingCrosshair = false
@@ -842,7 +859,7 @@ class CandlestickChartView @JvmOverloads constructor(
                 distanceY: Float,
             ): Boolean {
 
-                if (!isPinching && !isCrosshairActive) {
+                if (!isPinching && !isCrosshairDragging) {
                     applyPan(distanceY)
                     applyTimePan(distanceX)
                 }
@@ -857,6 +874,18 @@ class CandlestickChartView @JvmOverloads constructor(
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
 
                 if (isPinching) return false
+
+                // A locked crosshair's own grab point is handled earlier, in
+                // handleCrosshairDragTouch's ACTION_DOWN check, which
+                // consumes the whole gesture before it ever reaches here -
+                // so any tap that does reach this point while locked is, by
+                // definition, a tap elsewhere, and closes it.
+                if (isCrosshairLocked) {
+                    isCrosshairLocked = false
+                    invalidate()
+                    return true
+                }
+
                 val hitIndex = findDrawingHit(e.x, e.y)
                 if (hitIndex != selectedDrawingIndex) {
                     selectedDrawingIndex = hitIndex
@@ -868,7 +897,8 @@ class CandlestickChartView @JvmOverloads constructor(
 
             override fun onLongPress(e: MotionEvent) {
                 if (isPinching || candles.isEmpty()) return
-                isCrosshairActive = true
+                isCrosshairDragging = true
+                isCrosshairLocked = false
                 crosshairRawX = e.x
                 crosshairRawY = e.y
                 performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
@@ -877,7 +907,61 @@ class CandlestickChartView @JvmOverloads constructor(
         },
     )
 
+    /**
+     * Handles re-grabbing and re-dragging an already-[isCrosshairLocked]
+     * crosshair, entirely separately from [panGestureDetector]: a DOWN
+     * landing within [handleGrabRadiusPx] of where the crosshair was last
+     * drawn (see [crosshairIntersectionX]/[Y]) starts a drag and consumes
+     * the whole gesture (so the chart doesn't also try to pan underneath
+     * it); everything else about that DOWN is left alone so a miss falls
+     * through to the normal tap/long-press/scroll handling in
+     * [panGestureDetector] - a plain tap there closes the crosshair (see
+     * `onSingleTapConfirmed`), a hold starts a fresh one (see
+     * `onLongPress`), and a drag pans the chart as usual.
+     */
+    private fun handleCrosshairDragTouch(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            if (!isCrosshairLocked || isCrosshairDragging) return false
+            val distance = hypot(
+                (event.x - crosshairIntersectionX).toDouble(),
+                (event.y - crosshairIntersectionY).toDouble(),
+            )
+            if (distance > handleGrabRadiusPx) return false
+            isCrosshairDragging = true
+            isCrosshairLocked = false
+            crosshairRawX = event.x
+            crosshairRawY = event.y
+            invalidate()
+            return true
+        }
+
+        if (!isCrosshairDragging) return false
+
+        when (event.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                crosshairRawX = event.getX(0)
+                crosshairRawY = event.getY(0)
+                invalidate()
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
+                isCrosshairDragging = false
+                isCrosshairLocked = true
+                invalidate()
+            }
+            else -> return false
+        }
+        return true
+    }
+
+    /** Notified on every touch delivered to this view, for the performance HUD's latency readout. */
+    var touchListener: (() -> Unit)? = null
+
+    /** Notified after every completed draw pass with its wall-clock duration in nanoseconds. */
+    var drawDurationListener: ((Long) -> Unit)? = null
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        touchListener?.invoke()
+
         if (activeDrawingTool != DrawingTool.NONE) {
             return handleDrawingTouch(event)
         }
@@ -887,12 +971,18 @@ class CandlestickChartView @JvmOverloads constructor(
             return true
         }
 
+        if (handleCrosshairDragTouch(event)) {
+            parent?.requestDisallowInterceptTouchEvent(true)
+            return true
+        }
+
         when (event.actionMasked) {
             MotionEvent.ACTION_POINTER_DOWN -> {
                 if (event.pointerCount == 2) {
                     startPinch(event)
-                    if (isCrosshairActive) {
-                        isCrosshairActive = false
+                    if (isCrosshairVisible) {
+                        isCrosshairDragging = false
+                        isCrosshairLocked = false
                         invalidate()
                     }
                 }
@@ -900,18 +990,10 @@ class CandlestickChartView @JvmOverloads constructor(
             MotionEvent.ACTION_MOVE -> {
                 if (isPinching) {
                     updatePinch(event)
-                } else if (isCrosshairActive) {
-                    crosshairRawX = event.getX(0)
-                    crosshairRawY = event.getY(0)
-                    invalidate()
                 }
             }
             MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (isPinching) endPinch()
-                if (isCrosshairActive) {
-                    isCrosshairActive = false
-                    invalidate()
-                }
             }
         }
 
@@ -1297,7 +1379,12 @@ class CandlestickChartView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        val drawStartNanos = System.nanoTime()
+        drawChartInternal(canvas)
+        drawDurationListener?.invoke(System.nanoTime() - drawStartNanos)
+    }
 
+    private fun drawChartInternal(canvas: Canvas) {
         val chartRight = width - priceAxisWidth
         val chartBottom = height - timeAxisHeight
 
@@ -1517,7 +1604,7 @@ class CandlestickChartView @JvmOverloads constructor(
         maxPrice: Double,
     ) {
         val slotWidth = timeRange.barSpacingPx
-        if (!isCrosshairActive || candles.isEmpty() || slotWidth <= 0f) return
+        if (!isCrosshairVisible || candles.isEmpty() || slotWidth <= 0f) return
 
         val y = crosshairRawY.coerceIn(0f, priceAreaHeight)
         canvas.drawLine(0f, y, chartRight, y, crosshairLinePaint)
@@ -1526,6 +1613,12 @@ class CandlestickChartView @JvmOverloads constructor(
         val index = round(crosshairRawX / slotWidth + leftIndex).toInt().coerceIn(0, candles.size - 1)
         val x = ((index - leftIndex) * slotWidth).toFloat()
         canvas.drawLine(x, 0f, x, chartBottom, crosshairLinePaint)
+
+        // Remembered so a later re-grab tap (see handleCrosshairDragTouch)
+        // is measured against where the lines were actually drawn, not the
+        // raw touch point that positioned them.
+        crosshairIntersectionX = x
+        crosshairIntersectionY = y
 
         val price = maxPrice - (y / priceAreaHeight) * (maxPrice - minPrice)
         val priceLabel = formatPrice(price)

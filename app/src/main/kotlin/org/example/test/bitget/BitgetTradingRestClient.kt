@@ -16,32 +16,68 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * Talks to Bitget's v2 mix (futures) trading endpoints in **Demo Trading**
- * mode: https://www.bitget.com/api-doc/contract/demotrading/restapi
+ * Which Bitget matching engine a request should be routed to.
  *
- * Every request here is signed with a Demo API Key and carries the
- * `paptrading: 1` header, which routes it to Bitget's simulated matching
- * engine instead of the live one. Balances, positions and order history for
- * a demo account live entirely on Bitget's servers, so they persist across
- * app restarts as long as the same Demo API Key is used.
+ * - [LIVE]: the real matching engine. Orders are funded with real balance.
+ * - [DEMO]: Bitget's Demo Trading / paper-trading sandbox
+ *   (https://www.bitget.com/api-doc/contract/demotrading/restapi). Same
+ *   endpoints, same request shape, same `productType` ("USDT-FUTURES" for
+ *   USDT-margined contracts) - the *only* difference is a `paptrading: 1`
+ *   header on every request, which is what actually does the routing.
+ *
+ * (The legacy v1 API used separate simulation-only product types instead of
+ * a header - e.g. `sumcbl` for a USDT-margined simulated contract, or a
+ * `S`-prefixed symbol/productType such as `SUSDT-FUTURES`. Bitget's current
+ * v2 Demo Trading REST API - the one this client talks to - replaced that
+ * scheme with the `paptrading` header below, so ordinary product types are
+ * used for both environments.)
  */
-class BitgetPaperTradingRestClient(
+enum class BitgetEnvironment { LIVE, DEMO }
+
+class BitgetNotAuthenticatedException(environment: BitgetEnvironment) : IOException(
+    if (environment == BitgetEnvironment.DEMO) "No Bitget Demo API Key configured" else "No Bitget API Key configured"
+)
+
+class BitgetApiException(val code: String, message: String) : IOException(message)
+
+/**
+ * A single, configurable HTTP client/request wrapper for Bitget's v2 mix
+ * (futures) trading REST endpoints, covering both the real matching engine
+ * and Bitget's Demo Trading sandbox.
+ *
+ * Every request is:
+ *  - Authenticated with the caller's API key/secret/passphrase via
+ *    [BitgetRequestSigner] (HMAC-SHA256 of timestamp + method + path + body).
+ *  - Dynamically routed to Demo Trading by appending the `paptrading: 1`
+ *    header whenever [environment] currently reports [BitgetEnvironment.DEMO]
+ *    - evaluated fresh on *every* request, not cached, so a runtime
+ *      Live/Demo toggle (or switching which saved credentials are active)
+ *      takes effect on the very next call without recreating this client.
+ *  - Tagged with the configured [productType] (defaults to the standard
+ *    USDT-margined futures type, "USDT-FUTURES") wherever Bitget's API
+ *    requires one: fetching balances, fetching positions, and placing or
+ *    closing orders.
+ *
+ * A stray `paptrading` header sent on a request meant for the live engine
+ * (or omitted on one meant for Demo Trading) is exactly the kind of bug
+ * that would silently route real money into the sandbox or vice versa, so
+ * that header is applied in exactly one place: [applyAuthHeaders].
+ */
+class BitgetTradingRestClient(
+    private val environment: () -> BitgetEnvironment,
     private val credentialsProvider: () -> BitgetCredentials?,
+    private val productType: String = "USDT-FUTURES",
     private val httpClient: OkHttpClient = OkHttpClient(),
 ) {
     private companion object {
-        const val TAG = "BitgetPaperTrading"
+        const val TAG = "BitgetTradingRest"
         const val BASE_URL = "https://api.bitget.com"
-        const val PRODUCT_TYPE = "USDT-FUTURES"
         const val JSON_MEDIA_TYPE = "application/json"
     }
 
-    class NotAuthenticatedException : IOException("No Bitget Demo API Key configured")
-    class BitgetApiException(val code: String, message: String) : IOException(message)
-
     suspend fun fetchPosition(symbol: String): PaperPosition? {
         val path = "/api/v2/mix/position/single-position"
-        val query = "symbol=$symbol&productType=$PRODUCT_TYPE&marginCoin=USDT"
+        val query = "symbol=$symbol&productType=$productType&marginCoin=USDT"
         val json = get(path, query)
         val rows = json.optJSONArray("data") ?: JSONArray()
         for (i in 0 until rows.length()) {
@@ -53,7 +89,7 @@ class BitgetPaperTradingRestClient(
 
     suspend fun fetchAllPositions(): List<PaperPosition> {
         val path = "/api/v2/mix/position/all-position"
-        val query = "productType=$PRODUCT_TYPE&marginCoin=USDT"
+        val query = "productType=$productType&marginCoin=USDT"
         val json = get(path, query)
         val rows = json.optJSONArray("data") ?: JSONArray()
         return buildList(rows.length()) {
@@ -63,9 +99,23 @@ class BitgetPaperTradingRestClient(
         }
     }
 
+    /**
+     * Fetches the Bitget account's UID (User ID) - the numeric identifier
+     * Bitget shows on the account/API-key pages, distinct from the API key
+     * itself. `/api/v2/spot/account/info` is an account-level endpoint (not
+     * `mix`-specific), so the same call works for both [BitgetEnvironment.LIVE]
+     * and [BitgetEnvironment.DEMO] - a Demo API Key reports the UID of the
+     * demo account it was created under.
+     */
+    suspend fun fetchUserId(): String? {
+        val json = get("/api/v2/spot/account/info", "")
+        val data = json.optJSONObject("data") ?: return null
+        return data.optString("userId").takeIf { it.isNotBlank() }
+    }
+
     suspend fun fetchAccountBalance(): PaperAccountBalance? {
         val path = "/api/v2/mix/account/accounts"
-        val query = "productType=$PRODUCT_TYPE"
+        val query = "productType=$productType"
         val json = get(path, query)
         val rows = json.optJSONArray("data") ?: JSONArray()
         for (i in 0 until rows.length()) {
@@ -86,7 +136,7 @@ class BitgetPaperTradingRestClient(
         val path = "/api/v2/mix/account/set-leverage"
         val body = JSONObject().apply {
             put("symbol", symbol)
-            put("productType", PRODUCT_TYPE)
+            put("productType", productType)
             put("marginCoin", "USDT")
             put("leverage", leverage.toString())
         }
@@ -96,10 +146,10 @@ class BitgetPaperTradingRestClient(
 
     /** Opens or adds to a position in [ticket.side] with a market order. */
     suspend fun openPosition(ticket: OrderTicket): PlacedOrder {
-        val clientOrderId = "paper-${System.currentTimeMillis()}"
+        val clientOrderId = "${orderIdPrefix()}-${System.currentTimeMillis()}"
         val body = JSONObject().apply {
             put("symbol", ticket.symbol)
-            put("productType", PRODUCT_TYPE)
+            put("productType", productType)
             put("marginMode", ticket.marginMode)
             put("marginCoin", "USDT")
             put("size", ticket.sizeInBaseCoin)
@@ -118,10 +168,10 @@ class BitgetPaperTradingRestClient(
 
     /** Closes (all or part of) an existing position with a reduce-only market order. */
     suspend fun closePosition(symbol: String, side: PositionSide, sizeInBaseCoin: String, marginMode: String = "crossed"): PlacedOrder {
-        val clientOrderId = "paper-close-${System.currentTimeMillis()}"
+        val clientOrderId = "${orderIdPrefix()}-close-${System.currentTimeMillis()}"
         val body = JSONObject().apply {
             put("symbol", symbol)
-            put("productType", PRODUCT_TYPE)
+            put("productType", productType)
             put("marginMode", marginMode)
             put("marginCoin", "USDT")
             put("size", sizeInBaseCoin)
@@ -138,6 +188,8 @@ class BitgetPaperTradingRestClient(
             clientOrderId = data.optString("clientOid", clientOrderId),
         )
     }
+
+    private fun orderIdPrefix(): String = if (environment() == BitgetEnvironment.DEMO) "paper" else "live"
 
     private fun parsePosition(row: JSONObject): PaperPosition? {
         val total = row.optString("total", "0").toDoubleOrNull() ?: 0.0
@@ -156,7 +208,7 @@ class BitgetPaperTradingRestClient(
     }
 
     private suspend fun get(path: String, query: String): JSONObject {
-        val credentials = credentialsProvider() ?: throw NotAuthenticatedException()
+        val credentials = credentialsProvider() ?: throw BitgetNotAuthenticatedException(environment())
         val timestamp = System.currentTimeMillis().toString()
         val requestPath = if (query.isBlank()) path else "$path?$query"
         val sign = BitgetRequestSigner.sign(credentials.secretKey, timestamp, "GET", requestPath, "")
@@ -171,7 +223,7 @@ class BitgetPaperTradingRestClient(
     }
 
     private suspend fun post(path: String, body: JSONObject): JSONObject {
-        val credentials = credentialsProvider() ?: throw NotAuthenticatedException()
+        val credentials = credentialsProvider() ?: throw BitgetNotAuthenticatedException(environment())
         val timestamp = System.currentTimeMillis().toString()
         val bodyString = body.toString()
         val sign = BitgetRequestSigner.sign(credentials.secretKey, timestamp, "POST", path, bodyString)
@@ -185,14 +237,28 @@ class BitgetPaperTradingRestClient(
         return parseResponse(executeAsync(request))
     }
 
-    private fun Request.Builder.applyAuthHeaders(credentials: BitgetCredentials, timestamp: String, sign: String): Request.Builder =
-        header("ACCESS-KEY", credentials.apiKey)
+    /**
+     * Applies auth headers to every request, and - the whole point of this
+     * class - dynamically appends `paptrading: 1` when [environment]
+     * currently resolves to [BitgetEnvironment.DEMO]. [environment] is
+     * re-evaluated on every call rather than captured once at construction
+     * time, so this client stays correct even when demo mode is toggled
+     * at runtime (e.g. a Mainnet/Testnet switch in the UI) without needing
+     * a new client instance.
+     */
+    private fun Request.Builder.applyAuthHeaders(credentials: BitgetCredentials, timestamp: String, sign: String): Request.Builder {
+        val builder = header("ACCESS-KEY", credentials.apiKey)
             .header("ACCESS-SIGN", sign)
             .header("ACCESS-TIMESTAMP", timestamp)
             .header("ACCESS-PASSPHRASE", credentials.passphrase)
             .header("Content-Type", JSON_MEDIA_TYPE)
             .header("locale", "en-US")
-            .header("paptrading", "1") // routes the request to Bitget's demo/paper matching engine
+        return if (environment() == BitgetEnvironment.DEMO) {
+            builder.header("paptrading", "1") // routes this request to Bitget's demo/paper matching engine
+        } else {
+            builder
+        }
+    }
 
     private fun parseResponse(body: String): JSONObject {
         val json = JSONObject(body)
@@ -209,7 +275,7 @@ class BitgetPaperTradingRestClient(
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
-                    Log.w(TAG, "Demo trading request failed: ${e.message}")
+                    Log.w(TAG, "Trading request failed: ${e.message}")
                     continuation.resumeWithException(e)
                 }
 

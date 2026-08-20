@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<org.example.test.ui.ScrollRevealContainer xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/chartSectionContainer"
@@ -100,6 +100,12 @@
                     android:textColor="#22D3C5"
                     android:text="@string/live_label" />
             </LinearLayout>
+
+            <org.example.test.ui.PerformanceHudView
+                android:id="@+id/performanceHud"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp" />
         </LinearLayout>
 
         <LinearLayout
@@ -155,85 +161,135 @@
         </LinearLayout>
     </LinearLayout>
 
-    <FrameLayout
-        android:id="@+id/chartCanvas"
+    <LinearLayout
+        android:id="@+id/connectivityBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="9dp"
+        android:paddingBottom="9dp"
+        android:background="@drawable/bg_connectivity_banner"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <TextView
+            android:id="@+id/connectivityBannerText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="12sp"
+            android:textColor="#FFC94D"
+            android:lineSpacingExtra="2dp"
+            tools:text="Can't reach Bitget. This may be an ISP block rather than a connection problem - try a VPN or a different network." />
+
+        <TextView
+            android:id="@+id/connectivityBannerRetry"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="#FFC94D"
+            android:text="@string/connectivity_banner_retry"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/connectivityBannerDismiss"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_marginStart="2dp"
+            android:gravity="center"
+            android:textSize="15sp"
+            android:textColor="#8A6B1F"
+            android:text="@string/connectivity_banner_dismiss"
+            android:clickable="true"
+            android:focusable="true" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/chartAndQuickTradeContainer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="14dp">
+        android:orientation="vertical">
 
-        <org.example.test.chart.DepthHeatmapView
-            android:id="@+id/depthHeatmap"
+        <FrameLayout
+            android:id="@+id/chartCanvas"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            tools:background="#131722" />
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="14dp">
 
-        <org.example.test.chart.CandlestickChartView
-            android:id="@+id/candleChart"
+            <org.example.test.chart.DepthHeatmapView
+                android:id="@+id/depthHeatmap"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                tools:background="#131722" />
+
+            <org.example.test.chart.CandlestickChartView
+                android:id="@+id/candleChart"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <org.example.test.ui.DrawingContextToolbar
+                android:id="@+id/drawingContextToolbar"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|start"
+                android:visibility="gone" />
+
+            <!--
+                Always-on quick-trade drawer handle. Docked to the bottom-center of the
+                chart canvas itself (above the timeframe row / drawer, horizontally
+                centered on the full screen width) so it stays visible even while the
+                drawer is fully collapsed and GONE. Dragging it drives the same reveal
+                gesture as the drawer's own internal grab handle; it fades out once the
+                drawer is visible so the two handles never show at once (see
+                MainActivity#applyQuickTradeProgress).
+            -->
+            <FrameLayout
+                android:id="@+id/quickTradeHandleIndicator"
+                android:layout_width="56dp"
+                android:layout_height="24dp"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_marginBottom="6dp"
+                android:background="@drawable/bg_quick_trade_handle_backdrop"
+                android:clickable="true"
+                android:focusable="true">
+
+                <View
+                    android:layout_width="32dp"
+                    android:layout_height="4dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/bg_quick_trade_handle_grip" />
+
+            </FrameLayout>
+
+        </FrameLayout>
+
+        <org.example.test.ui.QuickTradePanel
+            android:id="@+id/quickTradePanel"
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-
-        <org.example.test.ui.DrawingContextToolbar
-            android:id="@+id/drawingContextToolbar"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="top|start"
+            android:layout_height="0dp"
+            android:layout_weight="0"
+            android:layout_marginTop="0dp"
             android:visibility="gone" />
 
-        <LinearLayout
-            android:id="@+id/chartOrderButtonsRow"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom|end"
-            android:layout_marginEnd="72dp"
-            android:layout_marginBottom="24dp"
-            android:orientation="horizontal"
-            android:visibility="gone">
-
-            <Button
-                android:id="@+id/chartLongButton"
-                style="?android:attr/borderlessButtonStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="30dp"
-                android:minWidth="0dp"
-                android:minHeight="0dp"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:paddingTop="0dp"
-                android:paddingBottom="0dp"
-                android:background="@drawable/bg_chart_long_button"
-                android:text="@string/chart_long_button_label"
-                android:textAllCaps="false"
-                android:textSize="12.5sp"
-                android:textStyle="bold"
-                android:textColor="#FFFFFF"
-                android:contentDescription="@string/chart_long_button_content_description" />
-
-            <Button
-                android:id="@+id/chartShortButton"
-                style="?android:attr/borderlessButtonStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="30dp"
-                android:layout_marginStart="8dp"
-                android:minWidth="0dp"
-                android:minHeight="0dp"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:paddingTop="0dp"
-                android:paddingBottom="0dp"
-                android:background="@drawable/bg_chart_short_button"
-                android:text="@string/chart_short_button_label"
-                android:textAllCaps="false"
-                android:textSize="12.5sp"
-                android:textStyle="bold"
-                android:textColor="#FFFFFF"
-                android:contentDescription="@string/chart_short_button_content_description" />
-
-        </LinearLayout>
-
-    </FrameLayout>
+    </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/bottomControlsRow"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="#050608"
@@ -276,4 +332,4 @@
             android:contentDescription="@string/drawing_tools_content_description" />
     </LinearLayout>
 
-</LinearLayout>
+</org.example.test.ui.ScrollRevealContainer>

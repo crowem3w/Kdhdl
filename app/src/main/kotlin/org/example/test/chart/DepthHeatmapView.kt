@@ -349,10 +349,42 @@ class DepthHeatmapView @JvmOverloads constructor(
 
         if (!priceRangeInitialized || plotWidthPx <= 0 || plotHeightPx <= 0) return
 
+        computePeakNode()
         drawHistogramBars(canvas)
         drawFarBookLevels(canvas)
         drawMidPriceLine(canvas)
         drawDepthLadder(canvas)
+    }
+
+    private var peakNearRow: Int = -1
+    private var peakFarPrice: Double? = null
+
+    private fun computePeakNode() {
+        peakNearRow = -1
+        peakFarPrice = null
+        var bestVolume = negligibleRowVolume
+
+        val bids = bidRowVolume
+        val asks = askRowVolume
+        if (bids.isNotEmpty() && rowSpanPrice > 0.0 && maxPrice > minPrice) {
+            for (row in bids.indices) {
+                val volume = blendedCombinedVolume(bids, asks, row)
+                if (volume > bestVolume) {
+                    bestVolume = volume
+                    peakNearRow = row
+                    peakFarPrice = null
+                }
+            }
+        }
+
+        for ((price, level) in farBookLevelsByPrice()) {
+            if (price in minPrice..maxPrice) continue
+            if (level.volume > bestVolume) {
+                bestVolume = level.volume
+                peakNearRow = -1
+                peakFarPrice = price
+            }
+        }
     }
 
     private var viewportWidthPx = 0
@@ -362,6 +394,8 @@ class DepthHeatmapView @JvmOverloads constructor(
     private val bidPeakColor = Color.parseColor("#00FF7F")
     private val askMidColor = Color.parseColor("#C24070")
     private val askPeakColor = Color.parseColor("#FF007F")
+
+    private val highestIntensityColor = Color.parseColor("#FFEE00")
 
     private fun lerpRgb(from: Int, to: Int, t: Float, alpha: Int = 255): Int {
         val ct = t.coerceIn(0f, 1f)
@@ -406,23 +440,31 @@ class DepthHeatmapView @JvmOverloads constructor(
             val top = gridTopPx + row * rowHeightPx
             val bottom = top + rowHeightPx
             val isBid = bids[row] >= asks[row]
-            drawHeatmapNode(canvas, top, bottom, barWidthPx, density, isBid)
+            drawHeatmapNode(canvas, top, bottom, barWidthPx, density, isBid, isPeak = row == peakNearRow)
         }
     }
 
-    private fun drawHeatmapNode(canvas: Canvas, top: Float, bottom: Float, barWidthPx: Float, density: Float, isBid: Boolean) {
+    private fun drawHeatmapNode(
+        canvas: Canvas,
+        top: Float,
+        bottom: Float,
+        barWidthPx: Float,
+        density: Float,
+        isBid: Boolean,
+        isPeak: Boolean = false,
+    ) {
         if (barWidthPx <= 0f) return
         val rightEdge = plotWidthPx.toFloat()
         val left = rightEdge - barWidthPx
         reusableRect.set(left, top, rightEdge, bottom)
 
-        barPaint.alpha = alphaFor(density)
+        barPaint.alpha = if (isPeak) 255 else alphaFor(density)
         val fadeWidth = min(nodeEdgeFadeWidthPx, barWidthPx)
         val fadeFraction = (fadeWidth / barWidthPx).coerceIn(0.001f, 0.999f)
         val transparentNeutral = Color.argb(
             0, Color.red(neutralLowColor), Color.green(neutralLowColor), Color.blue(neutralLowColor),
         )
-        val peakColor = colorForDensity(isBid, density)
+        val peakColor = if (isPeak) highestIntensityColor else colorForDensity(isBid, density)
         barPaint.shader = LinearGradient(
             left, 0f, rightEdge, 0f,
             intArrayOf(transparentNeutral, neutralLowColor, peakColor),
@@ -690,7 +732,7 @@ class DepthHeatmapView @JvmOverloads constructor(
             val top = y - halfRow
             val bottom = y + halfRow
             val barWidthPx = minBarWidthPx + (maxBarWidthPx - minBarWidthPx) * density
-            drawHeatmapNode(canvas, top, bottom, barWidthPx, density, level.isBid)
+            drawHeatmapNode(canvas, top, bottom, barWidthPx, density, level.isBid, isPeak = peakFarPrice == price)
         }
     }
 

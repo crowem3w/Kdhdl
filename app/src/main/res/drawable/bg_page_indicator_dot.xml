@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Base shape for the splash pagination dots. Color and scale are both driven at
-     runtime (SplashActivity) so the same drawable instance can be tinted/animated
-     per-dot without stepping on the other dots' state. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="oval">
-    <solid android:color="#FFFFFF" />
-</shape>

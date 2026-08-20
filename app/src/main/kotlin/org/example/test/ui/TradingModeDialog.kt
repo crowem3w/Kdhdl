@@ -35,10 +35,13 @@ import org.example.test.R
  */
 class TradingModeDialog(
     context: Context,
-    private val paperTradingContent: View,
+    private val paperAccountContent: PaperTradingAccountPanel,
+    private val paperHistoryContent: View,
+    private val liveTradingContent: View,
+    private val onExportReport: () -> Unit,
 ) : Dialog(context, R.style.TradingModalTheme) {
 
-    private enum class Screen { OPTIONS, PAPER, LIVE, AGENTIC }
+    private enum class Screen { OPTIONS, PAPER_ACCOUNT, PAPER_HISTORY, LIVE }
 
     private companion object {
         // Android has no native 0-100% "blurriness" scale, so these two
@@ -77,8 +80,6 @@ class TradingModeDialog(
     private lateinit var backButton: TextView
     private lateinit var contentContainer: FrameLayout
     private val optionsScreen by lazy { buildOptionsScreen() }
-    private val liveTradingScreen by lazy { buildPlaceholderScreen("Live trading isn't available yet", "This mode will connect to your real Bitget account.") }
-    private val agenticTradingScreen by lazy { buildPlaceholderScreen("Agentic trading isn't available yet", "This mode will let an AI agent trade on your behalf.") }
 
     private fun dp(value: Int): Int = (value * context.resources.displayMetrics.density).toInt()
 
@@ -88,6 +89,10 @@ class TradingModeDialog(
         setCancelable(true)
         setCanceledOnTouchOutside(true)
         applyWindowBlur()
+        paperAccountContent.setNavigationCallbacks(
+            onOpenHistory = { showScreen(Screen.PAPER_HISTORY) },
+            onExportReport = onExportReport,
+        )
         showScreen(Screen.OPTIONS)
     }
 
@@ -195,7 +200,7 @@ class TradingModeDialog(
             isFocusable = true
             setPadding(0, 0, dp(10), 0)
             visibility = View.GONE
-            setOnClickListener { showScreen(Screen.OPTIONS) }
+            setOnClickListener { showScreen(backTargetFor(currentScreen)) }
         }
 
         titleText = TextView(context).apply {
@@ -222,12 +227,26 @@ class TradingModeDialog(
         return row
     }
 
-    /** Opens the dialog straight to the paper trading order screen, skipping the mode picker. */
+    /** Opens the dialog straight to the paper trading account screen, skipping the mode picker. */
     fun showPaperTradingScreen() {
-        showScreen(Screen.PAPER)
+        showScreen(Screen.PAPER_ACCOUNT)
+    }
+
+    /** Opens the dialog straight to the live trading order screen, skipping the mode picker. */
+    fun showLiveTradingScreen() {
+        showScreen(Screen.LIVE)
+    }
+
+    private var currentScreen: Screen = Screen.OPTIONS
+
+    /** Where the back chevron returns to from each screen - a shallow, one-level-deep back stack. */
+    private fun backTargetFor(screen: Screen): Screen = when (screen) {
+        Screen.PAPER_HISTORY -> Screen.PAPER_ACCOUNT
+        else -> Screen.OPTIONS
     }
 
     private fun showScreen(screen: Screen) {
+        currentScreen = screen
         contentContainer.removeAllViews()
         when (screen) {
             Screen.OPTIONS -> {
@@ -235,30 +254,34 @@ class TradingModeDialog(
                 backButton.visibility = View.GONE
                 contentContainer.addView(optionsScreen)
             }
-            Screen.PAPER -> {
+            Screen.PAPER_ACCOUNT -> {
                 titleText.text = "Paper Trading"
                 backButton.visibility = View.VISIBLE
-                (paperTradingContent.parent as? ViewGroup)?.removeView(paperTradingContent)
-                val scroll = ScrollView(context).apply {
-                    isFillViewport = true
-                    layoutParams = FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    )
-                    addView(paperTradingContent)
-                }
-                contentContainer.addView(scroll)
+                contentContainer.addView(scrollableCopy(paperAccountContent))
+            }
+            Screen.PAPER_HISTORY -> {
+                titleText.text = "Account History"
+                backButton.visibility = View.VISIBLE
+                contentContainer.addView(scrollableCopy(paperHistoryContent))
             }
             Screen.LIVE -> {
                 titleText.text = "Live Trading"
                 backButton.visibility = View.VISIBLE
-                contentContainer.addView(liveTradingScreen)
+                contentContainer.addView(scrollableCopy(liveTradingContent))
             }
-            Screen.AGENTIC -> {
-                titleText.text = "Agentic Trading"
-                backButton.visibility = View.VISIBLE
-                contentContainer.addView(agenticTradingScreen)
-            }
+        }
+    }
+
+    /** Wraps [content] in a fresh scroll container, detaching it from any previous parent first. */
+    private fun scrollableCopy(content: View): View {
+        (content.parent as? ViewGroup)?.removeView(content)
+        return ScrollView(context).apply {
+            isFillViewport = true
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+            addView(content)
         }
     }
 
@@ -269,17 +292,10 @@ class TradingModeDialog(
 
         val paperRow = buildOptionRow(
             title = "Paper Trading",
-            subtitle = "Practice with virtual funds on Bitget's demo account",
+            subtitle = "Practice with a free local account - no exchange required",
             iconRes = R.drawable.ic_mode_paper,
             tintIcon = true,
-            onClick = { showScreen(Screen.PAPER) },
-        )
-        val agenticRow = buildOptionRow(
-            title = "Agentic Trading",
-            subtitle = "Let an AI agent trade on your behalf",
-            iconRes = R.drawable.ic_mode_agentic,
-            tintIcon = true,
-            onClick = { showScreen(Screen.AGENTIC) },
+            onClick = { showScreen(Screen.PAPER_ACCOUNT) },
         )
         val liveRow = buildOptionRow(
             title = "Live Trading",
@@ -290,8 +306,6 @@ class TradingModeDialog(
         )
 
         container.addView(paperRow)
-        container.addView(divider())
-        container.addView(agenticRow)
         container.addView(divider())
         container.addView(liveRow)
         return container
@@ -357,26 +371,6 @@ class TradingModeDialog(
         return row
     }
 
-    // ---- Screen: blank/placeholder content (Live Trading, Agentic Trading) ----
+    // ---- Screen: blank/placeholder content (Live Trading) ----
 
-    private fun buildPlaceholderScreen(title: String, subtitle: String): View =
-        LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(8), dp(28), dp(8), dp(28))
-            addView(TextView(context).apply {
-                text = title
-                textSize = 14f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(labelColor)
-                gravity = Gravity.CENTER
-            })
-            addView(TextView(context).apply {
-                text = subtitle
-                textSize = 12.5f
-                setTextColor(mutedColor)
-                gravity = Gravity.CENTER
-                setPadding(dp(12), dp(6), dp(12), 0)
-            })
-        }
 }

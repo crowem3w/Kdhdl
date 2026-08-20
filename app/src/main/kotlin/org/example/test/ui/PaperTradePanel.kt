@@ -9,26 +9,29 @@ import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
-import org.example.test.bitget.BitgetCredentials
+import org.example.test.bitget.PaperAccount
 import org.example.test.bitget.PaperAccountBalance
 import org.example.test.bitget.PaperPosition
-import org.example.test.bitget.PaperTradingConnectionState
+import org.example.test.bitget.PendingLimitOrder
 import org.example.test.bitget.PositionSide
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 /**
- * Self-contained "paper trading" panel: demo account balance, open
- * positions with live PnL, and controls to open/close positions with market
- * orders against Bitget's Demo Trading API.
+ * Self-contained "paper trading" panel: a fully local, on-device demo
+ * account (no exchange, no API key) with a virtual USDT balance, open
+ * positions with live PnL, and controls to open/close positions with
+ * simulated market orders filled at the app's own live mark price.
  *
  * This view holds no trading state itself - it just renders whatever
- * [PaperTradingRepository] gives it and forwards user actions back out
- * through [Callbacks]. The actual balances/positions live on Bitget's
- * servers under the user's Demo API Key.
+ * [org.example.test.bitget.PaperTradingRepository] gives it and forwards
+ * user actions back out through [Callbacks]. Everything it shows - the
+ * account, its balance, its positions - lives only on this device.
  */
 class PaperTradePanel @JvmOverloads constructor(
     context: Context,
@@ -37,10 +40,12 @@ class PaperTradePanel @JvmOverloads constructor(
 ) : LinearLayout(context, attrs, defStyleAttr) {
 
     class Callbacks(
-        val onCredentialsSubmitted: (BitgetCredentials) -> Unit,
-        val onCredentialsCleared: () -> Unit,
+        val onCreateAccount: (startingBalance: Double) -> Unit,
+        val onDeposit: (amount: Double) -> Unit,
+        val onResetAccount: () -> Unit,
         val onOpenPosition: (side: PositionSide, size: String, leverage: Int) -> Unit,
         val onClosePosition: (PaperPosition) -> Unit,
+        val onCancelPendingOrder: (PendingLimitOrder) -> Unit = {},
     )
 
     private val surfaceColor = Color.parseColor("#1E222D")
@@ -51,17 +56,23 @@ class PaperTradePanel @JvmOverloads constructor(
     private val bearColor = Color.parseColor("#EF5350")
     private val fieldBackground = Color.parseColor("#131722")
 
-    private var callbacks: Callbacks? = null
-    private var savedCredentials: BitgetCredentials? = null
+    private val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.US)
 
-    private lateinit var statusDot: View
-    private lateinit var statusText: TextView
-    private lateinit var settingsButton: TextView
+    private var callbacks: Callbacks? = null
+    private var currentAccount: PaperAccount? = null
+    private var nextDepositAvailableAt: Long? = null
+
+    private lateinit var accountText: TextView
+    private lateinit var actionButton: TextView
+    private lateinit var contentSwitcher: FrameLayout
+    private lateinit var noAccountView: View
+    private lateinit var tradingContent: View
     private lateinit var balanceText: TextView
     private lateinit var balancePnlText: TextView
-    private lateinit var progressBar: ProgressBar
     private lateinit var emptyStateText: TextView
     private lateinit var positionsContainer: LinearLayout
+    private lateinit var pendingOrdersHeader: TextView
+    private lateinit var pendingOrdersContainer: LinearLayout
     private lateinit var sizeInput: EditText
     private lateinit var leverageInput: EditText
     private lateinit var submitOrderButton: Button
@@ -79,24 +90,12 @@ class PaperTradePanel @JvmOverloads constructor(
         setPadding(dp(14), dp(12), dp(14), dp(14))
 
         addView(buildHeaderRow())
-        addView(buildBalanceRow())
-        addView(spacer(10))
-        addView(buildOrderEntryRow())
-        addView(spacer(10))
-        addView(buildDivider())
-        addView(spacer(8))
-        addView(buildPositionsHeader())
 
-        emptyStateText = TextView(context).apply {
-            text = "No open positions"
-            textSize = 12.5f
-            setTextColor(mutedColor)
-            setPadding(0, dp(6), 0, dp(2))
-        }
-        addView(emptyStateText)
-
-        positionsContainer = LinearLayout(context).apply { orientation = VERTICAL }
-        addView(positionsContainer)
+        contentSwitcher = FrameLayout(context)
+        noAccountView = buildNoAccountView()
+        tradingContent = buildTradingContent()
+        contentSwitcher.addView(noAccountView)
+        addView(contentSwitcher)
     }
 
     fun bind(callbacks: Callbacks) {
@@ -121,29 +120,31 @@ class PaperTradePanel @JvmOverloads constructor(
     }
 
     fun render(
-        connectionState: PaperTradingConnectionState,
+        account: PaperAccount?,
         balance: PaperAccountBalance?,
         positions: List<PaperPosition>,
+        pendingOrders: List<PendingLimitOrder> = emptyList(),
         lastError: String?,
-        credentials: BitgetCredentials?,
+        nextDepositAvailableAt: Long?,
     ) {
-        savedCredentials = credentials
+        currentAccount = account
+        this.nextDepositAvailableAt = nextDepositAvailableAt
 
-        val (dotColor, label) = when (connectionState) {
-            PaperTradingConnectionState.NOT_CONFIGURED -> mutedColor to "Not connected"
-            PaperTradingConnectionState.LOADING -> mutedColor to "Connecting…"
-            PaperTradingConnectionState.LIVE -> bullColor to "Demo account live"
-            PaperTradingConnectionState.ERROR -> bearColor to (lastError ?: "Error")
+        if (account == null) {
+            accountText.text = "No local account yet"
+            actionButton.text = "+ Create Account"
+            actionButton.setOnClickListener { showCreateAccountDialog() }
+            swapContent(noAccountView)
+            return
         }
-        statusDot.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(dotColor) }
-        statusText.text = label
-        statusText.setTextColor(if (connectionState == PaperTradingConnectionState.ERROR) bearColor else mutedColor)
 
-        progressBar.visibility = if (connectionState == PaperTradingConnectionState.LOADING) View.VISIBLE else View.GONE
+        accountText.text = "Account #${account.id} \u00B7 opened ${dateFormat.format(Date(account.createdAt))}"
+        actionButton.text = "+ Deposit"
+        actionButton.setOnClickListener { showDepositDialog() }
+        swapContent(tradingContent)
 
-        val ordersEnabled = connectionState == PaperTradingConnectionState.LIVE
-        submitOrderButton.isEnabled = ordersEnabled
-        submitOrderButton.alpha = if (ordersEnabled) 1f else 0.5f
+        submitOrderButton.isEnabled = true
+        submitOrderButton.alpha = 1f
 
         if (balance != null) {
             balanceText.text = String.format(Locale.US, "%,.2f USDT", balance.equity)
@@ -156,6 +157,13 @@ class PaperTradePanel @JvmOverloads constructor(
         }
 
         renderPositions(positions)
+        renderPendingOrders(pendingOrders)
+    }
+
+    private fun swapContent(view: View) {
+        if (contentSwitcher.childCount == 1 && contentSwitcher.getChildAt(0) === view) return
+        contentSwitcher.removeAllViews()
+        contentSwitcher.addView(view)
     }
 
     private fun renderPositions(positions: List<PaperPosition>) {
@@ -166,7 +174,69 @@ class PaperTradePanel @JvmOverloads constructor(
         }
     }
 
+    private fun renderPendingOrders(pendingOrders: List<PendingLimitOrder>) {
+        pendingOrdersContainer.removeAllViews()
+        pendingOrdersHeader.visibility = if (pendingOrders.isEmpty()) View.GONE else View.VISIBLE
+        for (order in pendingOrders) {
+            pendingOrdersContainer.addView(buildPendingOrderRow(order))
+        }
+    }
+
+    private fun buildPendingOrderRow(order: PendingLimitOrder): View {
+        val isLong = order.side == PositionSide.LONG
+        val sideColor = if (isLong) bullColor else bearColor
+
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8), 0, dp(8))
+        }
+
+        val infoColumn = LinearLayout(context).apply {
+            orientation = VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        infoColumn.addView(
+            TextView(context).apply {
+                text = if (isLong) "LONG limit ${order.leverage}x" else "SHORT limit ${order.leverage}x"
+                textSize = 11f
+                setTextColor(sideColor)
+            },
+        )
+        infoColumn.addView(
+            TextView(context).apply {
+                text = String.format(Locale.US, "%.4f @ %,.2f", order.sizeInBaseCoin, order.limitPrice)
+                textSize = 11.5f
+                setTextColor(mutedColor)
+            },
+        )
+
+        val cancelButton = TextView(context).apply {
+            text = "Cancel"
+            textSize = 12f
+            setTextColor(labelColor)
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(8).toFloat()
+                setStroke(dp(1), borderColor)
+            }
+            setOnClickListener { callbacks?.onCancelPendingOrder?.invoke(order) }
+        }
+
+        row.addView(infoColumn)
+        row.addView(cancelButton)
+        return row
+    }
+
+    // ---- Header: title + context-sensitive action button ----
+
     private fun buildHeaderRow(): View {
+        val outer = LinearLayout(context).apply {
+            orientation = VERTICAL
+        }
+
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -178,45 +248,117 @@ class PaperTradePanel @JvmOverloads constructor(
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        settingsButton = TextView(context).apply {
-            text = "⚙ Demo API Key"
+        actionButton = TextView(context).apply {
+            text = "+ Create Account"
             textSize = 12f
             setTextColor(mutedColor)
             isClickable = true
             isFocusable = true
             setPadding(dp(8), dp(4), dp(8), dp(4))
-            setOnClickListener { showCredentialsDialog() }
         }
         row.addView(title)
-        row.addView(settingsButton)
-        return row
+        row.addView(actionButton)
+        outer.addView(row)
+
+        accountText = TextView(context).apply {
+            text = "No local account yet"
+            textSize = 10.5f
+            setTextColor(mutedColor)
+            setPadding(0, dp(2), 0, dp(6))
+            isLongClickable = true
+            setOnLongClickListener {
+                if (currentAccount != null) showResetAccountConfirmation()
+                true
+            }
+        }
+        outer.addView(accountText)
+
+        return outer
     }
+
+    // ---- Empty state: no local account yet ----
+
+    private fun buildNoAccountView(): View =
+        LinearLayout(context).apply {
+            orientation = VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(6), dp(18), dp(6), dp(18))
+            addView(
+                TextView(context).apply {
+                    text = "Practice with a free, local paper trading account"
+                    textSize = 12.5f
+                    setTextColor(mutedColor)
+                    gravity = Gravity.CENTER
+                },
+            )
+            addView(
+                TextView(context).apply {
+                    text = "Runs entirely on this device - no exchange, no API key. Deposits are limited to once a month."
+                    textSize = 11f
+                    setTextColor(mutedColor)
+                    gravity = Gravity.CENTER
+                    setPadding(dp(8), dp(6), dp(8), dp(14))
+                },
+            )
+            addView(
+                Button(context).apply {
+                    isAllCaps = false
+                    text = "Create Paper Trading Account"
+                    setTextColor(Color.WHITE)
+                    background = pillBackground(bullColor)
+                    setOnClickListener { showCreateAccountDialog() }
+                },
+            )
+        }
+
+    // ---- Main trading content: balance, order entry, positions ----
+
+    private fun buildTradingContent(): View =
+        LinearLayout(context).apply {
+            orientation = VERTICAL
+            addView(buildBalanceRow())
+            addView(spacer(10))
+            addView(buildOrderEntryRow())
+            addView(spacer(10))
+            addView(buildDivider())
+            addView(spacer(8))
+            addView(buildPositionsHeader())
+
+            emptyStateText = TextView(context).apply {
+                text = "No open positions"
+                textSize = 12.5f
+                setTextColor(mutedColor)
+                setPadding(0, dp(6), 0, dp(2))
+            }
+            addView(emptyStateText)
+
+            positionsContainer = LinearLayout(context).apply { orientation = VERTICAL }
+            addView(positionsContainer)
+
+            addView(spacer(6))
+            pendingOrdersHeader = TextView(context).apply {
+                text = "Pending limit orders"
+                textSize = 12f
+                setTextColor(mutedColor)
+                visibility = View.GONE
+            }
+            addView(pendingOrdersHeader)
+
+            pendingOrdersContainer = LinearLayout(context).apply { orientation = VERTICAL }
+            addView(pendingOrdersContainer)
+        }
 
     private fun buildBalanceRow(): View {
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(6), 0, 0)
         }
-        val statusColumn = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        statusDot = View(context).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(7), dp(7)).apply { marginEnd = dp(6) }
-        }
-        statusText = TextView(context).apply {
+        val label = TextView(context).apply {
+            text = "Virtual balance"
             textSize = 12f
             setTextColor(mutedColor)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        progressBar = ProgressBar(context).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(14), dp(14)).apply { marginStart = dp(8) }
-            visibility = View.GONE
-        }
-        statusColumn.addView(statusDot)
-        statusColumn.addView(statusText)
-        statusColumn.addView(progressBar)
 
         val balanceColumn = LinearLayout(context).apply {
             orientation = VERTICAL
@@ -235,7 +377,7 @@ class PaperTradePanel @JvmOverloads constructor(
         balanceColumn.addView(balanceText)
         balanceColumn.addView(balancePnlText)
 
-        row.addView(statusColumn)
+        row.addView(label)
         row.addView(balanceColumn)
         return row
     }
@@ -304,39 +446,49 @@ class PaperTradePanel @JvmOverloads constructor(
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        titleRow.addView(TextView(context).apply {
-            text = "${position.symbol}  "
-            textSize = 13f
-            setTextColor(labelColor)
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-        })
-        titleRow.addView(TextView(context).apply {
-            text = if (isLong) "LONG ${position.leverage}x" else "SHORT ${position.leverage}x"
-            textSize = 11f
-            setTextColor(sideColor)
-        })
+        titleRow.addView(
+            TextView(context).apply {
+                text = "${position.symbol}  "
+                textSize = 13f
+                setTextColor(labelColor)
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+            },
+        )
+        titleRow.addView(
+            TextView(context).apply {
+                text = if (isLong) "LONG ${position.leverage}x" else "SHORT ${position.leverage}x"
+                textSize = 11f
+                setTextColor(sideColor)
+            },
+        )
         infoColumn.addView(titleRow)
-        infoColumn.addView(TextView(context).apply {
-            text = String.format(Locale.US, "%.4f @ %,.2f", position.total, position.entryPrice)
-            textSize = 11.5f
-            setTextColor(mutedColor)
-        })
+        infoColumn.addView(
+            TextView(context).apply {
+                text = String.format(Locale.US, "%.4f @ %,.2f", position.total, position.entryPrice)
+                textSize = 11.5f
+                setTextColor(mutedColor)
+            },
+        )
 
         val pnlColumn = LinearLayout(context).apply {
             orientation = VERTICAL
             gravity = Gravity.END
         }
-        pnlColumn.addView(TextView(context).apply {
-            val pnl = position.unrealizedPnl
-            text = String.format(Locale.US, "%s%,.2f", if (pnl >= 0) "+" else "", pnl)
-            textSize = 13f
-            setTextColor(if (pnl >= 0) bullColor else bearColor)
-        })
-        pnlColumn.addView(TextView(context).apply {
-            text = String.format(Locale.US, "%s%.1f%%", if (position.pnlPercentOfMargin >= 0) "+" else "", position.pnlPercentOfMargin)
-            textSize = 11f
-            setTextColor(mutedColor)
-        })
+        pnlColumn.addView(
+            TextView(context).apply {
+                val pnl = position.unrealizedPnl
+                text = String.format(Locale.US, "%s%,.2f", if (pnl >= 0) "+" else "", pnl)
+                textSize = 13f
+                setTextColor(if (pnl >= 0) bullColor else bearColor)
+            },
+        )
+        pnlColumn.addView(
+            TextView(context).apply {
+                text = String.format(Locale.US, "%s%.1f%%", if (position.pnlPercentOfMargin >= 0) "+" else "", position.pnlPercentOfMargin)
+                textSize = 11f
+                setTextColor(mutedColor)
+            },
+        )
 
         val closeButton = TextView(context).apply {
             text = "Close"
@@ -361,63 +513,116 @@ class PaperTradePanel @JvmOverloads constructor(
         return row
     }
 
-    private fun showCredentialsDialog() {
+    // ---- Account creation dialog ----
+
+    private fun showCreateAccountDialog() {
         val container = LinearLayout(context).apply {
             orientation = VERTICAL
             setPadding(dp(20), dp(12), dp(20), dp(0))
         }
-        val apiKeyField = dialogEditText("API Key").apply { setText(savedCredentials?.apiKey.orEmpty()) }
-        val secretField = dialogEditText("Secret Key", isPassword = true).apply { setText(savedCredentials?.secretKey.orEmpty()) }
-        val passphraseField = dialogEditText("Passphrase", isPassword = true).apply { setText(savedCredentials?.passphrase.orEmpty()) }
-        val helpText = TextView(context).apply {
-            text = "Create this under Bitget app → switch to Demo mode → " +
-                "Personal Center → API Key Management → Create Demo API Key."
+        val explainer = TextView(context).apply {
+            text = "Pick a starting virtual balance. This is a local account only - " +
+                "nothing here touches a real or exchange demo account."
             textSize = 11.5f
             setTextColor(mutedColor)
-            setPadding(0, dp(4), 0, dp(4))
+            setPadding(0, 0, 0, dp(10))
         }
-
-        container.addView(apiKeyField)
-        container.addView(secretField)
-        container.addView(passphraseField)
-        container.addView(helpText)
+        val amountField = dialogEditText("Starting balance (USDT)").apply {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText("10000")
+        }
+        container.addView(explainer)
+        container.addView(amountField)
 
         val dialog = AlertDialog.Builder(context)
-            .setTitle("Bitget Demo API Key")
+            .setTitle("Create Paper Trading Account")
             .setView(container)
-            .setPositiveButton("Save", null)
+            .setPositiveButton("Create", null)
             .setNegativeButton("Cancel", null)
-            .setNeutralButton("Remove", null)
             .create()
 
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val credentials = BitgetCredentials(
-                    apiKey = apiKeyField.text?.toString()?.trim().orEmpty(),
-                    secretKey = secretField.text?.toString()?.trim().orEmpty(),
-                    passphrase = passphraseField.text?.toString()?.trim().orEmpty(),
-                )
-                if (!credentials.isComplete) {
-                    apiKeyField.error = if (credentials.apiKey.isBlank()) "Required" else null
-                    secretField.error = if (credentials.secretKey.isBlank()) "Required" else null
-                    passphraseField.error = if (credentials.passphrase.isBlank()) "Required" else null
+                val amount = amountField.text?.toString()?.trim()?.toDoubleOrNull()
+                if (amount == null || amount <= 0.0) {
+                    amountField.error = "Enter an amount greater than zero"
                     return@setOnClickListener
                 }
-                callbacks?.onCredentialsSubmitted?.invoke(credentials)
-                dialog.dismiss()
-            }
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-                callbacks?.onCredentialsCleared?.invoke()
+                callbacks?.onCreateAccount?.invoke(amount)
                 dialog.dismiss()
             }
         }
         dialog.show()
     }
 
-    private fun dialogEditText(hint: String, isPassword: Boolean = false): EditText =
+    // ---- Deposit dialog (once per calendar month) ----
+
+    private fun showDepositDialog() {
+        val nextAvailable = nextDepositAvailableAt
+        if (nextAvailable != null) {
+            AlertDialog.Builder(context)
+                .setTitle("Deposit unavailable")
+                .setMessage(
+                    "You've already made a deposit this month. Your next deposit " +
+                        "unlocks on ${dateFormat.format(Date(nextAvailable))}.",
+                )
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+
+        val container = LinearLayout(context).apply {
+            orientation = VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(0))
+        }
+        val explainer = TextView(context).apply {
+            text = "Add virtual funds to this account. Only one deposit is allowed per calendar month."
+            textSize = 11.5f
+            setTextColor(mutedColor)
+            setPadding(0, 0, 0, dp(10))
+        }
+        val amountField = dialogEditText("Deposit amount (USDT)").apply {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText("1000")
+        }
+        container.addView(explainer)
+        container.addView(amountField)
+
+        val dialog = AlertDialog.Builder(context)
+            .setTitle("Deposit")
+            .setView(container)
+            .setPositiveButton("Deposit", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val amount = amountField.text?.toString()?.trim()?.toDoubleOrNull()
+                if (amount == null || amount <= 0.0) {
+                    amountField.error = "Enter an amount greater than zero"
+                    return@setOnClickListener
+                }
+                callbacks?.onDeposit?.invoke(amount)
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    // ---- Reset (long-press the account line) ----
+
+    private fun showResetAccountConfirmation() {
+        AlertDialog.Builder(context)
+            .setTitle("Reset paper trading account?")
+            .setMessage("This permanently deletes this local account, its balance, and any open positions so you can start over. This can't be undone.")
+            .setPositiveButton("Reset") { _, _ -> callbacks?.onResetAccount?.invoke() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun dialogEditText(hint: String): EditText =
         EditText(context).apply {
             this.hint = hint
-            if (isPassword) inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
 
     private fun fieldEditText(hint: String, inputType: Int): EditText =
