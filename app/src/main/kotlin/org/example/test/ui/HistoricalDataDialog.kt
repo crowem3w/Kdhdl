@@ -16,7 +16,6 @@ import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.GridLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -29,9 +28,10 @@ import org.example.test.R
  *
  * Mirrors [TradingModeDialog]'s glass-card shell (same blurred backdrop,
  * translucent bordered card, header row with back/close controls) but opens
- * straight onto a 2x2 grid of data categories - Order Book, OHLCV, Open
- * Interest, Funding Rates. Each tile drills into its own bare screen; the
- * content for those screens is intentionally left empty for now.
+ * straight onto a vertical list of data categories - Order Book, OHLCV, Open
+ * Interest, Funding Rates - each row showing a small leading icon plus a
+ * title/description text block. Each row drills into its own bare screen;
+ * the content for those screens is intentionally left empty for now.
  */
 class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingModalTheme) {
 
@@ -40,14 +40,35 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
     private data class Category(
         val screen: Screen,
         val title: String,
+        val description: String,
         val iconRes: Int,
     )
 
     private val categories = listOf(
-        Category(Screen.ORDER_BOOK, "Order Book", R.drawable.ic_data_orderbook),
-        Category(Screen.OHLCV, "OHLCV", R.drawable.ic_data_ohlcv),
-        Category(Screen.OPEN_INTEREST, "Open Interest", R.drawable.ic_data_open_interest),
-        Category(Screen.FUNDING_RATES, "Funding Rates", R.drawable.ic_data_funding_rates),
+        Category(
+            Screen.ORDER_BOOK,
+            "Order Book",
+            "Live bid and ask depth by price level.",
+            R.drawable.ic_data_orderbook,
+        ),
+        Category(
+            Screen.OHLCV,
+            "OHCLV Data",
+            "Open, high, low, close, and volume candles.",
+            R.drawable.ic_data_ohlcv,
+        ),
+        Category(
+            Screen.OPEN_INTEREST,
+            "Open Interest",
+            "Total outstanding derivative contracts.",
+            R.drawable.ic_data_open_interest,
+        ),
+        Category(
+            Screen.FUNDING_RATES,
+            "Funding Rates",
+            "Perpetual futures funding rate history.",
+            R.drawable.ic_data_funding_rates,
+        ),
     )
 
     private companion object {
@@ -248,59 +269,80 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
         }
     }
 
-    // ---- Screen 1: 2x2 icon grid ----
+    // ---- Screen 1: vertical list of icon + title/description rows ----
 
     private fun buildOptionsScreen(): View {
-        val grid = GridLayout(context).apply {
-            columnCount = 2
-            rowCount = 2
+        val list = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             )
         }
-        categories.forEach { category ->
-            grid.addView(buildTile(category))
+        categories.forEachIndexed { index, category ->
+            list.addView(buildTile(category))
+            if (index != categories.lastIndex) {
+                list.addView(View(context).apply {
+                    setBackgroundColor(dividerColor)
+                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                        topMargin = dp(4); bottomMargin = dp(4)
+                    }
+                })
+            }
         }
-        return grid
+        return list
     }
 
     private fun buildTile(category: Category): View {
         val rippleValue = TypedValue()
         context.theme.resolveAttribute(android.R.attr.selectableItemBackground, rippleValue, true)
 
-        val tile = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             isClickable = true
             isFocusable = true
             setBackgroundResource(rippleValue.resourceId)
-            setPadding(dp(10), dp(16), dp(10), dp(16))
+            setPadding(dp(10), dp(12), dp(10), dp(12))
             setOnClickListener { showScreen(category.screen) }
-            layoutParams = GridLayout.LayoutParams(
-                GridLayout.spec(GridLayout.UNDEFINED, 1f),
-                GridLayout.spec(GridLayout.UNDEFINED, 1f),
-            ).apply {
-                width = 0
-                height = ViewGroup.LayoutParams.WRAP_CONTENT
-            }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
         }
 
-        tile.addView(ImageView(context).apply {
+        row.addView(ImageView(context).apply {
             setImageResource(category.iconRes)
-            layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
+            layoutParams = LinearLayout.LayoutParams(dp(28), dp(28)).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                marginEnd = dp(12)
+            }
         })
 
-        tile.addView(TextView(context).apply {
+        val textContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        textContainer.addView(TextView(context).apply {
             text = category.title
-            textSize = 12.5f
-            typeface = thinFont ?: Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
             setTextColor(labelColor)
-            gravity = Gravity.CENTER
-            setPadding(0, dp(10), 0, 0)
         })
 
-        return tile
+        textContainer.addView(TextView(context).apply {
+            text = category.description
+            textSize = 11.5f
+            typeface = thinFont ?: Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            setTextColor(mutedColor)
+            setPadding(0, dp(2), 0, 0)
+        })
+
+        row.addView(textContainer)
+
+        return row
     }
 
     // ---- Screens 2-5: bare placeholders, content intentionally left empty ----
