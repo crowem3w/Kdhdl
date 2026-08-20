@@ -42,6 +42,8 @@ class PaperTradingRepository(
         // could look profitable in paper trading purely because trades were
         // free, then lose money live purely to fee drag - especially at
         // scalping frequency, where the number of opens/closes is high.
+        // Simulating it here means the reward signal RlAgentController
+        // learns from already reflects this real cost.
         const val TAKER_FEE_RATE = 0.0006
 
         private const val MARK_TO_MARKET_INTERVAL_MS = 2_000L

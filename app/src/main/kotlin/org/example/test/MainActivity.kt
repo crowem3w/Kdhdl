@@ -23,6 +23,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import org.example.test.agent.InferenceAgentController
 import org.example.test.bitget.ClosedPaperTrade
 import org.example.test.bitget.DepthLevel
 import org.example.test.bitget.Kline
@@ -69,12 +70,12 @@ class MainActivity : AppCompatActivity() {
     private val liveCredentialsStore by lazy { app.liveCredentialsStore }
     private val liveTradingRepository by lazy { app.liveTradingRepository }
 
-    // Agent decision loop (risk gating, trade execution, config) has been
-    // removed. The runtime engine that loads
-    // and runs the offline-trained ONNX policy is still present and usable
-    // - see org.example.test.agent.OnnxRecurrentPolicyRunner.loadFromAssets
-    // - it's just not wired into any on-device decision/execution loop
-    // anymore. Nothing here calls it.
+    // Agent tab's actual online-learning loop - paper trading only for now.
+    // `by lazy` is safe here because every access below happens after
+    // quickTradePanel has been assigned via findViewById in onCreate.
+    private val rlAgentController by lazy {
+        InferenceAgentController(paperTradingRepository, quickTradePanel)
+    }
 
     // Latest top-of-book, cached here so the kline-tick loop (which drives
     // the agent's own tick cadence) can hand the agent a matching order
@@ -104,7 +105,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var priceSkeleton: SkeletonLoadingView
     private lateinit var changeSkeleton: SkeletonLoadingView
     private lateinit var drawingToolsButton: ImageView
-    private lateinit var databaseButton: ImageView
+    private lateinit var timeframeExpandButton: ImageView
     private lateinit var drawingContextToolbar: DrawingContextToolbar
     private val paperTradePanel by lazy { PaperTradePanel(this) }
     private val paperTradingAccountPanel by lazy { PaperTradingAccountPanel(this) }
@@ -180,10 +181,7 @@ class MainActivity : AppCompatActivity() {
         priceSkeleton = findViewById(R.id.priceSkeleton)
         changeSkeleton = findViewById(R.id.changeSkeleton)
         drawingToolsButton = findViewById(R.id.drawingToolsButton)
-        databaseButton = findViewById(R.id.databaseButton)
-        databaseButton.setOnClickListener {
-            Toast.makeText(this, R.string.database_button_content_description, Toast.LENGTH_SHORT).show()
-        }
+        timeframeExpandButton = findViewById(R.id.timeframeExpandButton)
         drawingContextToolbar = findViewById(R.id.drawingContextToolbar)
         paragraphButton = findViewById(R.id.paragraphButton)
         paragraphButton.setOnClickListener {
@@ -250,6 +248,8 @@ class MainActivity : AppCompatActivity() {
             updateDrawingToolsButtonState()
         }
 
+        updateTimeframeExpandButtonState()
+
         buildTimeframeButtons()
         renderConnectionState()
 
@@ -288,8 +288,17 @@ class MainActivity : AppCompatActivity() {
                         depthHeatmap.syncToCandles(visible, pipeline.barDurationMillis.value)
                         quickTradePanel.renderMarkPrice(candles.lastOrNull()?.close)
 
-                        // Agent decision loop removed - no per-tick inference
-                        // call here anymore.
+                        // Same cadence the chart itself updates on - this is
+                        // the agent's "tick" for QuickTradePanel.UpdateFrequency.PER_TICK;
+                        // PER_CANDLE/PER_N_STEPS are throttled internally by
+                        // RlAgentController from this same stream.
+                        rlAgentController.onMarketTick(
+                            candles,
+                            latestBids,
+                            latestAsks,
+                            paperTradingRepository.balance.value,
+                            paperTradingRepository.positions.value,
+                        )
                     }
                 }
 
@@ -607,14 +616,23 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this, "Order canceled", Toast.LENGTH_SHORT).show()
                     }
                 },
-                // Agent decision loop removed - these callbacks are no-ops
-                // until/unless a new controller is wired in.
-                onToggleAgent = { _ ->
-                    Toast.makeText(this, "Agent implementation removed", Toast.LENGTH_SHORT).show()
+                onToggleAgent = { running ->
+                    rlAgentController.setRunning(running)
+                    Toast.makeText(
+                        this,
+                        if (running) "Agent started - trading the paper account" else "Agent stopped",
+                        Toast.LENGTH_SHORT,
+                    ).show()
                 },
-                onAgentConfigChanged = { },
-                onAgentKillSwitch = { },
-                onResetAgent = { },
+                onAgentConfigChanged = { config -> rlAgentController.updateConfig(config) },
+                onAgentKillSwitch = {
+                    rlAgentController.killSwitch()
+                    Toast.makeText(this, "Agent kill switch - stopped and flattened", Toast.LENGTH_SHORT).show()
+                },
+                onResetAgent = {
+                    rlAgentController.reset()
+                    Toast.makeText(this, "Agent reset - weights and stats cleared", Toast.LENGTH_SHORT).show()
+                },
             ),
         )
     }
@@ -801,6 +819,14 @@ class MainActivity : AppCompatActivity() {
         drawingToolsButton.setColorFilter(pillTextColor(isActive))
     }
 
+    private fun updateTimeframeExpandButtonState() {
+        NeumorphicInsetFrameDrawable.applyTo(
+            timeframeExpandButton,
+            NeumorphicInsetFrameDrawable(resources.displayMetrics.density, selected = false),
+        )
+        timeframeExpandButton.setColorFilter(pillTextColor(false))
+    }
+
     private companion object {
         const val CONNECTIVITY_TIMEOUT_MS = 15_000L
     }
@@ -922,5 +948,10 @@ class MainActivity : AppCompatActivity() {
         app.stopMarketData()
         paperTradingRepository.stop()
         liveTradingRepository.stop()
+        // Backgrounding the app doesn't stop the agent (it may still be
+        // "running" and trading against cached state) - flush learned
+        // weights now so an app kill while backgrounded loses at most the
+        // last few throttled-persist ticks, not the whole session.
+        rlAgentController.saveNow()
     }
 }

@@ -151,15 +151,15 @@ class QuickTradePanel @JvmOverloads constructor(
         val maxLeverage: Int,
         val maxDailyLossUsdt: Double,
         // % of account equity the agent is willing to put at risk on a
-        // single fully-confident trade. Actual notional is this, scaled
-        // down further by the continuous position target's own magnitude -
-        // so sizing answers "is $2 risky?" in terms of % of equity, not a
-        // flat dollar amount, which is what actually determines risk.
+        // single fully-confident trade. Actual size is this, scaled down
+        // further by how confident the policy actually is (see
+        // RlAgentController.riskAdjustedPositionSizeUsdt) - so sizing
+        // answers "is $2 risky?" in terms of % of equity, not a flat
+        // dollar amount, which is what actually determines risk.
         val riskPerTradePct: Double = 2.0,
-        // CVaR(5%) threshold (see PolicyDecision.cvar5) below which the
-        // agent won't commit capital at all - a wide/negative worst-case
-        // quantile band means the distributional critic isn't confident
-        // enough in the downside to trade on.
+        // Softmax confidence (see MlpQLearningPolicy.Decision) below
+        // which the agent won't commit capital at all - it still learns
+        // from the tick, it just doesn't trade on a low-conviction call.
         val minConfidenceToTrade: Double = 0.40,
     )
 
@@ -1205,8 +1205,10 @@ class QuickTradePanel @JvmOverloads constructor(
 
     // ---------------------------------------------------------------------
     // Agent tab: transparency terminal. Collapsed by default (it's a debug
-    // surface, not the primary control flow). Its data source (the agent
-    // decision loop's log bus) has been removed - see AgentTerminalView.
+    // surface, not the primary control flow) - expanding it attaches
+    // [AgentTerminalView] to the window, which is when it starts collecting
+    // from AgentLogBus; collapsing tears it back down via
+    // View.onDetachedFromWindow so it's not spending anything while hidden.
     // ---------------------------------------------------------------------
 
     private fun buildAgentTerminalSection(): View {

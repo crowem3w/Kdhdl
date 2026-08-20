@@ -1,6 +1,7 @@
 package org.example.test
 
 import android.app.Application
+import org.example.test.agent.AgentPolicyStore
 import org.example.test.bitget.BitgetLiveCredentialsStore
 import org.example.test.bitget.DepthPipeline
 import org.example.test.bitget.FileKlineCacheStore
@@ -19,12 +20,6 @@ import org.example.test.bitget.TradingChartPipeline
  * of whether the pipelines are already running.
  */
 class SyncoraApplication : Application() {
-
-    // Agent decision loop and its concept-map viewer server have been
-    // removed. The ONNX runtime engine (org.example.test.agent.
-    // OnnxRecurrentPolicyRunner) that loads and runs the offline-trained
-    // policy is still present and usable - it's just not wired up or
-    // held at application scope anymore.
 
     val pipeline: TradingChartPipeline by lazy {
         TradingChartPipeline(
@@ -57,6 +52,13 @@ class SyncoraApplication : Application() {
             symbol = "BTCUSDT",
             markPriceProvider = { pipeline.klines.value.lastOrNull()?.close },
         )
+    }
+
+    // Persists the RL agent's learned Q-function weights locally (see
+    // RlAgentController) so the agent's "knowledge" survives the app being
+    // closed, same spirit as paperTradingStore for the account itself.
+    val agentPolicyStore: AgentPolicyStore by lazy {
+        AgentPolicyStore(applicationContext)
     }
 
     val liveCredentialsStore: BitgetLiveCredentialsStore by lazy {
