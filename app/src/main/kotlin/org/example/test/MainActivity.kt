@@ -103,6 +103,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var symbolSkeleton: SkeletonLoadingView
     private lateinit var priceSkeleton: SkeletonLoadingView
     private lateinit var changeSkeleton: SkeletonLoadingView
+    private lateinit var historicalDataButton: ImageView
     private lateinit var drawingToolsButton: ImageView
     private lateinit var drawingContextToolbar: DrawingContextToolbar
     private val paperTradePanel by lazy { PaperTradePanel(this) }
@@ -178,6 +179,7 @@ class MainActivity : AppCompatActivity() {
         symbolSkeleton = findViewById(R.id.symbolSkeleton)
         priceSkeleton = findViewById(R.id.priceSkeleton)
         changeSkeleton = findViewById(R.id.changeSkeleton)
+        historicalDataButton = findViewById(R.id.historicalDataButton)
         drawingToolsButton = findViewById(R.id.drawingToolsButton)
         drawingContextToolbar = findViewById(R.id.drawingContextToolbar)
         paragraphButton = findViewById(R.id.paragraphButton)
@@ -234,6 +236,11 @@ class MainActivity : AppCompatActivity() {
                 candleChart.setActiveDrawingTool(tool)
                 updateDrawingToolsButtonState()
             }
+        }
+
+        historicalDataButton.setOnClickListener {
+            // TODO: wire up the actual historical data view/panel.
+            Toast.makeText(this, "Historical data", Toast.LENGTH_SHORT).show()
         }
 
         drawingToolsButton.setOnLongClickListener {
