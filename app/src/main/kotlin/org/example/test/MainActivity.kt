@@ -782,7 +782,7 @@ class MainActivity : AppCompatActivity() {
             timeframeExpandButton,
             NeumorphicInsetFrameDrawable(resources.displayMetrics.density, selected = false),
         )
-        timeframeExpandButton.setColorFilter(pillTextColor(false))
+        timeframeExpandButton.clearColorFilter()
     }
 
     private companion object {
