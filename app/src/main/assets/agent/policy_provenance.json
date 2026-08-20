@@ -1,6 +1,0 @@
-{
-  "version": "gru-quantile-v1-bc",
-  "trainedAtMs": 1786692528429,
-  "validationWindow": "walk-forward, 3 rounds, synthetic data, pretrain=behavior cloning",
-  "validationResult": "val action_mse=0.0000 val pinball=0.0009"
-}
