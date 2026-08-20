@@ -36,4 +36,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.security.crypto)
+    // Inference-only runtime for the offline-trained (PyTorch -> ONNX) recurrent
+    // policy - see agent/OnnxRecurrentPolicyRunner.kt and rl-trading-agent-design.md section 7.
+    implementation(libs.onnxruntime.android)
 }
