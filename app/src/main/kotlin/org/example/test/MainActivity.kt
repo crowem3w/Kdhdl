@@ -104,7 +104,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var priceSkeleton: SkeletonLoadingView
     private lateinit var changeSkeleton: SkeletonLoadingView
     private lateinit var drawingToolsButton: ImageView
-    private lateinit var timeframeExpandButton: ImageView
     private lateinit var drawingContextToolbar: DrawingContextToolbar
     private val paperTradePanel by lazy { PaperTradePanel(this) }
     private val paperTradingAccountPanel by lazy { PaperTradingAccountPanel(this) }
@@ -180,7 +179,6 @@ class MainActivity : AppCompatActivity() {
         priceSkeleton = findViewById(R.id.priceSkeleton)
         changeSkeleton = findViewById(R.id.changeSkeleton)
         drawingToolsButton = findViewById(R.id.drawingToolsButton)
-        timeframeExpandButton = findViewById(R.id.timeframeExpandButton)
         drawingContextToolbar = findViewById(R.id.drawingContextToolbar)
         paragraphButton = findViewById(R.id.paragraphButton)
         paragraphButton.setOnClickListener {
@@ -246,8 +244,6 @@ class MainActivity : AppCompatActivity() {
             activeDrawingTool = DrawingTool.NONE
             updateDrawingToolsButtonState()
         }
-
-        updateTimeframeExpandButtonState()
 
         buildTimeframeButtons()
         renderConnectionState()
@@ -798,14 +794,6 @@ class MainActivity : AppCompatActivity() {
             NeumorphicInsetFrameDrawable(resources.displayMetrics.density, selected = isActive),
         )
         drawingToolsButton.setColorFilter(pillTextColor(isActive))
-    }
-
-    private fun updateTimeframeExpandButtonState() {
-        NeumorphicInsetFrameDrawable.applyTo(
-            timeframeExpandButton,
-            NeumorphicInsetFrameDrawable(resources.displayMetrics.density, selected = false),
-        )
-        timeframeExpandButton.setColorFilter(pillTextColor(false))
     }
 
     private companion object {

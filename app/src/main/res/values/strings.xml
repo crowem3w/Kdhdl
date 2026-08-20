@@ -12,7 +12,6 @@
     <string name="price_axis_label">Price (USDT)</string>
     <string name="legend_low">Low</string>
     <string name="legend_high">High</string>
-    <string name="timeframe_expand_content_description">More timeframes</string>
     <string name="drawing_tools_content_description">Drawing tools</string>
     <string name="paragraph_button_content_description">Paragraph</string>
     <string name="chart_long_button_label">Long</string>
