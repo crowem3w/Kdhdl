@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!--  Single centered column: app icon, then SYNCORA wordmark, then the orb (the
+         focal point of the screen), then the two-line headline below it. The whole
+         block iis centered both horizontally and vertically on screen. -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:gravity="center_horizontal">
+
+        <ImageView
+            android:layout_width="50dp"
+            android:layout_height="60dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_syncora_logo"
+            android:contentDescription="@string/splash_logo_content_description" />
+
+        <Space
+            android:layout_width="1dp"
+            android:layout_height="12dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="@font/inter_medium"
+            android:textFontWeight="500"
+            android:text="@string/splash_wordmark"
+            android:textAllCaps="true"
+            android:textColor="#E6FFFFFF"
+            android:textSize="25sp"
+            android:letterSpacing="0.2"
+            android:includeFontPadding="false" />
+
+        <!-- Focal point: the same morphing orb used on the onboarding screen, white
+             core with a subtle teal outer glow. -->
+        <org.example.test.orb.OrbView
+            android:id="@+id/orbView"
+            android:layout_width="320dp"
+            android:layout_height="320dp"
+            android:layout_marginTop="24dp" />
+
+        <!-- Loading pulse: 5 dots that sweep left-to-right while the first chart
+             snapshot is still loading, communicating ongoing progress rather than a
+             percentage. All 5 share one base size (8dp) — SplashActivity animates each
+             dot's scale + tint between the active/inactive look at runtime, so the
+             "active" dot flows smoothly from one position to the next instead of
+             popping between fixed active/inactive drawables. -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="70dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <View
+                android:id="@+id/pageIndicatorDot1"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:background="@drawable/bg_page_indicator_dot"
+                android:importantForAccessibility="no" />
+
+            <View
+                android:id="@+id/pageIndicatorDot2"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_page_indicator_dot"
+                android:importantForAccessibility="no" />
+
+            <View
+                android:id="@+id/pageIndicatorDot3"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_page_indicator_dot"
+                android:importantForAccessibility="no" />
+
+            <View
+                android:id="@+id/pageIndicatorDot4"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_page_indicator_dot"
+                android:importantForAccessibility="no" />
+
+            <View
+                android:id="@+id/pageIndicatorDot5"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_page_indicator_dot"
+                android:importantForAccessibility="no" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</FrameLayout>

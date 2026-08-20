@@ -19,8 +19,16 @@
     <string name="chart_short_button_label">Short</string>
     <string name="chart_long_button_content_description">Long</string>
     <string name="chart_short_button_content_description">Short</string>
-    <string name="connectivity_banner_retry">Retry</string>
-    <string name="connectivity_banner_dismiss">✕</string>
-    <string name="connectivity_banner_market_data">Can\'t reach Bitget\'s market data. If this persists, your network may be blocking it rather than a connection issue — try a VPN or a different network.</string>
-    <string name="connectivity_banner_order_book">Can\'t reach Bitget\'s order book feed. If this persists, your network may be blocking it — try a VPN or a different network.</string>
+
+    <string name="onboarding_wordmark">SYNCORA</string>
+    <string name="splash_wordmark">SYNCORA</string>
+    <string name="splash_headline">Trade clearly.\nTogether</string>
+    <string name="splash_headline_line1">Trade clearly.</string>
+    <string name="splash_headline_line2">Together.</string>
+    <string name="splash_logo_content_description">Syncora logo</string>
+    <string name="onboarding_headline">Buy low.\nSell high.\nBrag responsibly.</string>
+    <string name="onboarding_subtext">The simplest way to trade\nsmarter, together.</string>
+    <string name="onboarding_caption">Join thousands who trade with <font color="#26C7C3">clarity.</font></string>
+    <string name="onboarding_continue_content_description">Continue</string>
+    <string name="onboarding_logo_content_description">Syncora logo</string>
 </resources>

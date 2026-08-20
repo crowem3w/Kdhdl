@@ -253,20 +253,6 @@ class CandlestickChartView @JvmOverloads constructor(
         if (hadSelection) notifySelectedDrawingChanged()
     }
 
-    /**
-     * A horizontal marker for an open position's price level. [pnl] drives
-     * both the line/box color (green when >= 0, red when negative) and the
-     * signed value shown in the label box - see [drawOpenPositionLines].
-     */
-    data class OpenPositionLine(val price: Double, val pnl: Double)
-
-    private var openPositions: List<OpenPositionLine> = emptyList()
-
-    fun setOpenPositions(positions: List<OpenPositionLine>) {
-        openPositions = positions
-        invalidate()
-    }
-
     private val bullColor = Color.parseColor("#22D3C5")
     private val bearColor = Color.parseColor("#FF5A6E")
     private val bgColor = Color.parseColor("#050608")
@@ -403,28 +389,6 @@ class CandlestickChartView @JvmOverloads constructor(
         color = lastPriceColor
         style = Paint.Style.FILL
     }
-    private val positionProfitColor = Color.parseColor("#008000")
-    private val positionLossColor = Color.parseColor("#FF0000")
-    private val positionLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = dp(1.2f)
-    }
-    private val positionBoxFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = Color.BLACK
-    }
-    private val positionBoxStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = dp(1.2f)
-    }
-    private val positionBoxTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = dp(11f)
-        textAlign = Paint.Align.CENTER
-    }
-    private val positionBoxLeftMarginPx = dp(24f)
-    private val positionBoxHorizontalPaddingPx = dp(8f)
-    private val positionBoxHalfHeightPx = dp(10f)
-    private val positionBoxCornerRadiusPx = dp(4f)
     private val emptyStatePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = axisTextColor
         textSize = dp(14f)
@@ -468,26 +432,9 @@ class CandlestickChartView @JvmOverloads constructor(
             invalidate()
         }
 
-    /**
-     * The long-press crosshair now has three states instead of just
-     * on/off: [isCrosshairDragging] while a finger is actively positioning
-     * it (either right after the long-press that created it, or after
-     * re-grabbing it - see [handleCrosshairDragTouch]); [isCrosshairLocked]
-     * once that finger lifts, when it stays drawn at its last position
-     * instead of disappearing; and visible (see [isCrosshairVisible])
-     * whenever either of those is true. [crosshairIntersectionX]/[Y] track
-     * where it was actually drawn last (the vertical line snaps to the
-     * nearest candle, so this can differ slightly from the raw touch
-     * point) - that's what a re-grab tap is measured against, not the raw
-     * coordinates.
-     */
-    private var isCrosshairDragging = false
-    private var isCrosshairLocked = false
-    private val isCrosshairVisible: Boolean get() = isCrosshairDragging || isCrosshairLocked
+    private var isCrosshairActive = false
     private var crosshairRawX = 0f
     private var crosshairRawY = 0f
-    private var crosshairIntersectionX = 0f
-    private var crosshairIntersectionY = 0f
 
     private var isDrawingCrosshairActive = false
     private var hasSeededDrawingCrosshair = false
@@ -895,7 +842,7 @@ class CandlestickChartView @JvmOverloads constructor(
                 distanceY: Float,
             ): Boolean {
 
-                if (!isPinching && !isCrosshairDragging) {
+                if (!isPinching && !isCrosshairActive) {
                     applyPan(distanceY)
                     applyTimePan(distanceX)
                 }
@@ -910,18 +857,6 @@ class CandlestickChartView @JvmOverloads constructor(
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
 
                 if (isPinching) return false
-
-                // A locked crosshair's own grab point is handled earlier, in
-                // handleCrosshairDragTouch's ACTION_DOWN check, which
-                // consumes the whole gesture before it ever reaches here -
-                // so any tap that does reach this point while locked is, by
-                // definition, a tap elsewhere, and closes it.
-                if (isCrosshairLocked) {
-                    isCrosshairLocked = false
-                    invalidate()
-                    return true
-                }
-
                 val hitIndex = findDrawingHit(e.x, e.y)
                 if (hitIndex != selectedDrawingIndex) {
                     selectedDrawingIndex = hitIndex
@@ -933,8 +868,7 @@ class CandlestickChartView @JvmOverloads constructor(
 
             override fun onLongPress(e: MotionEvent) {
                 if (isPinching || candles.isEmpty()) return
-                isCrosshairDragging = true
-                isCrosshairLocked = false
+                isCrosshairActive = true
                 crosshairRawX = e.x
                 crosshairRawY = e.y
                 performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
@@ -943,61 +877,7 @@ class CandlestickChartView @JvmOverloads constructor(
         },
     )
 
-    /**
-     * Handles re-grabbing and re-dragging an already-[isCrosshairLocked]
-     * crosshair, entirely separately from [panGestureDetector]: a DOWN
-     * landing within [handleGrabRadiusPx] of where the crosshair was last
-     * drawn (see [crosshairIntersectionX]/[Y]) starts a drag and consumes
-     * the whole gesture (so the chart doesn't also try to pan underneath
-     * it); everything else about that DOWN is left alone so a miss falls
-     * through to the normal tap/long-press/scroll handling in
-     * [panGestureDetector] - a plain tap there closes the crosshair (see
-     * `onSingleTapConfirmed`), a hold starts a fresh one (see
-     * `onLongPress`), and a drag pans the chart as usual.
-     */
-    private fun handleCrosshairDragTouch(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            if (!isCrosshairLocked || isCrosshairDragging) return false
-            val distance = hypot(
-                (event.x - crosshairIntersectionX).toDouble(),
-                (event.y - crosshairIntersectionY).toDouble(),
-            )
-            if (distance > handleGrabRadiusPx) return false
-            isCrosshairDragging = true
-            isCrosshairLocked = false
-            crosshairRawX = event.x
-            crosshairRawY = event.y
-            invalidate()
-            return true
-        }
-
-        if (!isCrosshairDragging) return false
-
-        when (event.actionMasked) {
-            MotionEvent.ACTION_MOVE -> {
-                crosshairRawX = event.getX(0)
-                crosshairRawY = event.getY(0)
-                invalidate()
-            }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
-                isCrosshairDragging = false
-                isCrosshairLocked = true
-                invalidate()
-            }
-            else -> return false
-        }
-        return true
-    }
-
-    /** Notified on every touch delivered to this view, for the performance HUD's latency readout. */
-    var touchListener: (() -> Unit)? = null
-
-    /** Notified after every completed draw pass with its wall-clock duration in nanoseconds. */
-    var drawDurationListener: ((Long) -> Unit)? = null
-
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        touchListener?.invoke()
-
         if (activeDrawingTool != DrawingTool.NONE) {
             return handleDrawingTouch(event)
         }
@@ -1007,18 +887,12 @@ class CandlestickChartView @JvmOverloads constructor(
             return true
         }
 
-        if (handleCrosshairDragTouch(event)) {
-            parent?.requestDisallowInterceptTouchEvent(true)
-            return true
-        }
-
         when (event.actionMasked) {
             MotionEvent.ACTION_POINTER_DOWN -> {
                 if (event.pointerCount == 2) {
                     startPinch(event)
-                    if (isCrosshairVisible) {
-                        isCrosshairDragging = false
-                        isCrosshairLocked = false
+                    if (isCrosshairActive) {
+                        isCrosshairActive = false
                         invalidate()
                     }
                 }
@@ -1026,10 +900,18 @@ class CandlestickChartView @JvmOverloads constructor(
             MotionEvent.ACTION_MOVE -> {
                 if (isPinching) {
                     updatePinch(event)
+                } else if (isCrosshairActive) {
+                    crosshairRawX = event.getX(0)
+                    crosshairRawY = event.getY(0)
+                    invalidate()
                 }
             }
             MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (isPinching) endPinch()
+                if (isCrosshairActive) {
+                    isCrosshairActive = false
+                    invalidate()
+                }
             }
         }
 
@@ -1415,12 +1297,7 @@ class CandlestickChartView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val drawStartNanos = System.nanoTime()
-        drawChartInternal(canvas)
-        drawDurationListener?.invoke(System.nanoTime() - drawStartNanos)
-    }
 
-    private fun drawChartInternal(canvas: Canvas) {
         val chartRight = width - priceAxisWidth
         val chartBottom = height - timeAxisHeight
 
@@ -1561,8 +1438,6 @@ class CandlestickChartView @JvmOverloads constructor(
 
         drawBarCloseCountdown(canvas, liveCandle, lastPriceLabelY, chartRight)
 
-        drawOpenPositionLines(canvas, chartRight, minPrice, maxPrice, ::priceToY)
-
         drawUserDrawings(canvas, chartRight, chartBottom)
 
         drawCrosshair(canvas, timeRange, chartRight, chartBottom, priceAreaHeight, minPrice, maxPrice)
@@ -1642,7 +1517,7 @@ class CandlestickChartView @JvmOverloads constructor(
         maxPrice: Double,
     ) {
         val slotWidth = timeRange.barSpacingPx
-        if (!isCrosshairVisible || candles.isEmpty() || slotWidth <= 0f) return
+        if (!isCrosshairActive || candles.isEmpty() || slotWidth <= 0f) return
 
         val y = crosshairRawY.coerceIn(0f, priceAreaHeight)
         canvas.drawLine(0f, y, chartRight, y, crosshairLinePaint)
@@ -1651,12 +1526,6 @@ class CandlestickChartView @JvmOverloads constructor(
         val index = round(crosshairRawX / slotWidth + leftIndex).toInt().coerceIn(0, candles.size - 1)
         val x = ((index - leftIndex) * slotWidth).toFloat()
         canvas.drawLine(x, 0f, x, chartBottom, crosshairLinePaint)
-
-        // Remembered so a later re-grab tap (see handleCrosshairDragTouch)
-        // is measured against where the lines were actually drawn, not the
-        // raw touch point that positioned them.
-        crosshairIntersectionX = x
-        crosshairIntersectionY = y
 
         val price = maxPrice - (y / priceAreaHeight) * (maxPrice - minPrice)
         val priceLabel = formatPrice(price)
@@ -1736,15 +1605,14 @@ class CandlestickChartView @JvmOverloads constructor(
         if (!mapValid) return
         var selectedBounds: RectF? = null
         drawings.forEachIndexed { index, drawing ->
-            val isSelected = index == selectedDrawingIndex
-            renderDrawing(canvas, drawing, chartRight, chartBottom, isPending = false, showEndpoints = isSelected)
-            if (isSelected) {
+            renderDrawing(canvas, drawing, chartRight, chartBottom, isPending = false)
+            if (index == selectedDrawingIndex) {
                 drawSelectionOverlay(canvas, drawing)
                 selectedBounds = selectionScreenBounds(drawing)
             }
         }
         pendingDrawing?.let { pending ->
-            renderDrawing(canvas, pending, chartRight, chartBottom, isPending = true, showEndpoints = true)
+            renderDrawing(canvas, pending, chartRight, chartBottom, isPending = true)
 
             when (placementPhase) {
                 AnchorPlacementPhase.AWAITING_CONFIRM_ANCHOR_1 -> {
@@ -1807,14 +1675,7 @@ class CandlestickChartView @JvmOverloads constructor(
         canvas.drawCircle(x, y, handleRadiusPx, selectionHandleStrokePaint)
     }
 
-    private fun renderDrawing(
-        canvas: Canvas,
-        drawing: Drawing,
-        chartRight: Float,
-        chartBottom: Float,
-        isPending: Boolean,
-        showEndpoints: Boolean,
-    ) {
+    private fun renderDrawing(canvas: Canvas, drawing: Drawing, chartRight: Float, chartBottom: Float, isPending: Boolean) {
         val p2 = drawing.p2 ?: drawing.p1
         val x1 = timeToScreenX(drawing.p1.time)
         val y1 = priceToScreenY(drawing.p1.price)
@@ -1837,15 +1698,13 @@ class CandlestickChartView @JvmOverloads constructor(
         when (drawing.tool) {
             DrawingTool.TREND_LINE -> {
                 canvas.drawLine(x1, y1, x2, y2, linePaint)
-                if (showEndpoints) {
-                    drawDrawingDot(canvas, x1, y1, dotPaint)
-                    drawDrawingDot(canvas, x2, y2, dotPaint)
-                }
+                drawDrawingDot(canvas, x1, y1, dotPaint)
+                drawDrawingDot(canvas, x2, y2, dotPaint)
             }
             DrawingTool.RAY -> {
                 val (ex, ey) = extendToBoundary(x1, y1, x2, y2, chartRight, chartBottom)
                 canvas.drawLine(x1, y1, ex, ey, linePaint)
-                if (showEndpoints) drawDrawingDot(canvas, x1, y1, dotPaint)
+                drawDrawingDot(canvas, x1, y1, dotPaint)
             }
             DrawingTool.EXTENDED_LINE -> {
                 val (fx, fy) = extendToBoundary(x1, y1, x2, y2, chartRight, chartBottom)
@@ -1854,18 +1713,14 @@ class CandlestickChartView @JvmOverloads constructor(
             }
             DrawingTool.INFO_LINE -> {
                 canvas.drawLine(x1, y1, x2, y2, linePaint)
-                if (showEndpoints) {
-                    drawDrawingDot(canvas, x1, y1, dotPaint)
-                    drawDrawingDot(canvas, x2, y2, dotPaint)
-                }
+                drawDrawingDot(canvas, x1, y1, dotPaint)
+                drawDrawingDot(canvas, x2, y2, dotPaint)
                 if (!isPending || drawing.p2 != null) drawInfoLineLabel(canvas, drawing.p1, p2, x1, y1, x2, y2)
             }
             DrawingTool.TREND_ANGLE -> {
                 canvas.drawLine(x1, y1, x2, y2, linePaint)
-                if (showEndpoints) {
-                    drawDrawingDot(canvas, x1, y1, dotPaint)
-                    drawDrawingDot(canvas, x2, y2, dotPaint)
-                }
+                drawDrawingDot(canvas, x1, y1, dotPaint)
+                drawDrawingDot(canvas, x2, y2, dotPaint)
                 if (!isPending || drawing.p2 != null) drawAngleLabel(canvas, x1, y1, x2, y2)
             }
             DrawingTool.HORIZONTAL_LINE -> {
@@ -1874,7 +1729,7 @@ class CandlestickChartView @JvmOverloads constructor(
             }
             DrawingTool.HORIZONTAL_RAY -> {
                 canvas.drawLine(x1, y1, chartRight, y1, linePaint)
-                if (showEndpoints) drawDrawingDot(canvas, x1, y1, dotPaint)
+                drawDrawingDot(canvas, x1, y1, dotPaint)
                 drawDrawingPriceTag(canvas, y1, drawing.p1.price, chartRight)
             }
             DrawingTool.VERTICAL_LINE -> {
@@ -1883,7 +1738,7 @@ class CandlestickChartView @JvmOverloads constructor(
             DrawingTool.CROSS_LINE -> {
                 canvas.drawLine(0f, y1, chartRight, y1, linePaint)
                 canvas.drawLine(x1, 0f, x1, chartBottom, linePaint)
-                if (showEndpoints) drawDrawingDot(canvas, x1, y1, dotPaint)
+                drawDrawingDot(canvas, x1, y1, dotPaint)
                 drawDrawingPriceTag(canvas, y1, drawing.p1.price, chartRight)
             }
             DrawingTool.NONE -> Unit
@@ -2097,55 +1952,6 @@ class CandlestickChartView @JvmOverloads constructor(
         canvas.drawRect(reusableRect, lastPriceBgPaint)
         canvas.drawText(label, labelLeft + dp(6f), y + lastPriceTextPaint.textSize / 3f, lastPriceTextPaint)
         return y
-    }
-
-    /**
-     * Draws one solid horizontal marker per open position at its price
-     * level, colored green when it's profiting and red when it's losing
-     * (see [OpenPositionLine.pnl]). An opaque black label box with a
-     * colored border sits centered on the line a short distance in from
-     * the left edge - far enough that it never crowds the chart's edge -
-     * showing the signed P/L. It's drawn on top of the line, candles, and
-     * (being part of this view, which sits above the heatmap in z-order)
-     * the depth heatmap nodes as well.
-     */
-    private fun drawOpenPositionLines(
-        canvas: Canvas,
-        chartRight: Float,
-        minPrice: Double,
-        maxPrice: Double,
-        priceToY: (Double) -> Float,
-    ) {
-        if (openPositions.isEmpty()) return
-        openPositions.forEach { position ->
-            if (position.price < minPrice || position.price > maxPrice) return@forEach
-            val isProfit = position.pnl >= 0.0
-            val color = if (isProfit) positionProfitColor else positionLossColor
-            val y = priceToY(position.price)
-
-            positionLinePaint.color = color
-            canvas.drawLine(0f, y, chartRight, y, positionLinePaint)
-
-            val label = formatPnl(position.pnl)
-            positionBoxTextPaint.color = color
-            positionBoxStrokePaint.color = color
-            val boxHalfWidth = positionBoxTextPaint.measureText(label) / 2f + positionBoxHorizontalPaddingPx
-            val boxCenterX = positionBoxLeftMarginPx + boxHalfWidth
-            reusableRect.set(
-                boxCenterX - boxHalfWidth,
-                y - positionBoxHalfHeightPx,
-                boxCenterX + boxHalfWidth,
-                y + positionBoxHalfHeightPx,
-            )
-            canvas.drawRoundRect(reusableRect, positionBoxCornerRadiusPx, positionBoxCornerRadiusPx, positionBoxFillPaint)
-            canvas.drawRoundRect(reusableRect, positionBoxCornerRadiusPx, positionBoxCornerRadiusPx, positionBoxStrokePaint)
-            canvas.drawText(label, boxCenterX, y + positionBoxTextPaint.textSize / 3f, positionBoxTextPaint)
-        }
-    }
-
-    private fun formatPnl(pnl: Double): String {
-        val sign = if (pnl >= 0.0) "+" else "-"
-        return "$sign${String.format("%,.2f", abs(pnl))}"
     }
 
     private fun drawBarCloseCountdown(

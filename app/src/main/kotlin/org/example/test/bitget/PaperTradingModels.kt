@@ -44,50 +44,6 @@ data class PaperAccountBalance(
     val unrealizedPnl: Double,
 )
 
-/**
- * A local, on-device paper trading account. Nothing here is backed by an
- * exchange: [id] is generated on-device, and [lastDepositAt] is the only
- * thing that gates future deposits (see [PaperTradingRepository.deposit]).
- */
-data class PaperAccount(
-    val id: String,
-    val createdAt: Long,
-    val lastDepositAt: Long?,
-)
-
-/**
- * A resting limit order that hasn't filled yet. Its margin is reserved
- * against the wallet balance (see [PaperTradingRepository.availableBalance])
- * the moment it's placed, exactly as if the position were already open, so
- * the account can't over-commit funds across several pending orders.
- */
-data class PendingLimitOrder(
-    val id: String,
-    val side: PositionSide,
-    val sizeInBaseCoin: Double,
-    val leverage: Int,
-    val limitPrice: Double,
-    val marginReserved: Double,
-    val createdAt: Long,
-)
-
-/**
- * A single closed trade, recorded the moment a position is fully closed
- * (see [PaperTradingRepository.closePosition]). This is the only durable
- * trading history this app keeps - it powers the "Account History" list and
- * the "Profitable Ratio" stat shown on the Paper Trading account screen.
- */
-data class ClosedPaperTrade(
-    val symbol: String,
-    val side: PositionSide,
-    val size: Double,
-    val entryPrice: Double,
-    val exitPrice: Double,
-    val leverage: Int,
-    val realizedPnl: Double,
-    val closedAt: Long,
-)
-
 data class OrderTicket(
     val symbol: String,
     val side: PositionSide,
