@@ -74,7 +74,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginStart="10dp"
-            android:fontFamily="outfit"
+            android:fontFamily="@font/zaslia"
             android:textFontWeight="700"
             android:text="@string/onboarding_headline"
             android:textColor="#FFFFFFFF"
