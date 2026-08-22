@@ -24,11 +24,14 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import org.example.test.bitget.ClosedPaperTrade
+import org.example.test.bitget.FeeRates
 import org.example.test.bitget.Kline
+import org.example.test.bitget.LatencyConfig
 import org.example.test.bitget.PaperAccount
 import org.example.test.bitget.PaperAccountBalance
 import org.example.test.bitget.PaperPosition
 import org.example.test.bitget.PaperTradingResult
+import org.example.test.bitget.PlacedOrder
 import org.example.test.bitget.PendingLimitOrder
 import org.example.test.bitget.PipelineState
 import org.example.test.bitget.SocketState
@@ -366,16 +369,24 @@ class MainActivity : AppCompatActivity() {
                 onOpenPosition = { side, size, leverage ->
                     lifecycleScope.launch {
                         val result = paperTradingRepository.openPosition(side, size, leverage)
-                        if (result is PaperTradingResult.Failure) {
-                            Toast.makeText(this@MainActivity, result.message, Toast.LENGTH_LONG).show()
+                        when (result) {
+                            is PaperTradingResult.Failure ->
+                                Toast.makeText(this@MainActivity, result.message, Toast.LENGTH_LONG).show()
+                            is PaperTradingResult.Success -> {
+                                val sideLabel = side.name.lowercase().replaceFirstChar { it.uppercase() }
+                                Toast.makeText(this@MainActivity, "$sideLabel order filled${fillSummarySuffix(result.data)}", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                 },
                 onClosePosition = { position ->
                     lifecycleScope.launch {
                         val result = paperTradingRepository.closePosition(position)
-                        if (result is PaperTradingResult.Failure) {
-                            Toast.makeText(this@MainActivity, result.message, Toast.LENGTH_LONG).show()
+                        when (result) {
+                            is PaperTradingResult.Failure ->
+                                Toast.makeText(this@MainActivity, result.message, Toast.LENGTH_LONG).show()
+                            is PaperTradingResult.Success ->
+                                Toast.makeText(this@MainActivity, "Position closed${fillSummarySuffix(result.data)}", Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
@@ -387,6 +398,7 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this, "Limit order canceled", Toast.LENGTH_SHORT).show()
                     }
                 },
+                onSetLatencyConfig = { config -> paperTradingRepository.setLatencyConfig(config) },
             ),
         )
 
@@ -403,7 +415,11 @@ class MainActivity : AppCompatActivity() {
                         PaperTradeRenderState(account, balance, positions, pendingOrders, error)
                     }.combine(paperTradingRepository.closedTrades) { renderState, closedTrades ->
                         renderState to closedTrades
-                    }.collect { (renderState, closedTrades) ->
+                    }.combine(paperTradingRepository.feeRates) { (renderState, closedTrades), feeRates ->
+                        Triple(renderState, closedTrades, feeRates)
+                    }.combine(paperTradingRepository.latencyConfig) { (renderState, closedTrades, feeRates), latencyConfig ->
+                        PaperTradeRenderBundle(renderState, closedTrades, feeRates, latencyConfig)
+                    }.collect { (renderState, closedTrades, feeRates, latencyConfig) ->
                         paperTradePanel.render(
                             account = renderState.account,
                             balance = renderState.balance,
@@ -411,6 +427,8 @@ class MainActivity : AppCompatActivity() {
                             pendingOrders = renderState.pendingOrders,
                             lastError = renderState.error,
                             nextDepositAvailableAt = paperTradingRepository.nextDepositAvailableAt(),
+                            feeRates = feeRates,
+                            latencyConfig = latencyConfig,
                         )
                         paperTradingAccountPanel.render(
                             account = renderState.account,
@@ -434,6 +452,32 @@ class MainActivity : AppCompatActivity() {
         val pendingOrders: List<PendingLimitOrder>,
         val error: String?,
     )
+
+    private data class PaperTradeRenderBundle(
+        val renderState: PaperTradeRenderState,
+        val closedTrades: List<ClosedPaperTrade>,
+        val feeRates: FeeRates,
+        val latencyConfig: LatencyConfig,
+    )
+
+    /**
+     * Short " (137ms latency, 0.042% slippage)"-style suffix for a fill
+     * toast, built from whatever [PlacedOrder] a simulated order actually
+     * came back with - see [org.example.test.bitget.LatencySimulator] and
+     * [org.example.test.bitget.OrderBookWalker]. Empty when neither applies
+     * (e.g. latency simulation is off and the fill was a flat mark-price
+     * fallback), so it never leaves a dangling empty "()" in the toast.
+     */
+    private fun fillSummarySuffix(order: PlacedOrder): String {
+        val parts = mutableListOf<String>()
+        if (order.appliedLatencyMs > 0L) {
+            parts.add("${order.appliedLatencyMs}ms latency")
+        }
+        order.fillInfo?.let { info ->
+            parts.add(String.format(Locale.US, "%.3f%% slippage", info.slippagePercent))
+        }
+        return if (parts.isEmpty()) "" else " (${parts.joinToString(", ")})"
+    }
 
     /**
      * Builds a plain-text performance summary of the local paper trading
@@ -556,23 +600,25 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             paperTradingRepository.openPositionByNotional(side, sizeUsdt, leverage)
                         }
-                        if (result is PaperTradingResult.Failure) {
-                            Toast.makeText(this@MainActivity, result.message, Toast.LENGTH_LONG).show()
-                        } else {
-                            val message = if (orderType == QuickTradePanel.OrderType.LIMIT) {
-                                "$sideLabel limit order placed - will fill when price is reached"
-                            } else {
-                                "$sideLabel order placed"
-                            }
-                            Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
-                            // TP/SL aren't enforced by the paper-trading engine yet - only
-                            // captured here so the UI doesn't silently drop what the user typed.
-                            if (!takeProfitPrice.isNullOrBlank() || !stopLossPrice.isNullOrBlank()) {
-                                Toast.makeText(
-                                    this@MainActivity,
-                                    "Note: TP/SL isn't auto-executed in paper trading yet - watch the position manually",
-                                    Toast.LENGTH_LONG,
-                                ).show()
+                        when (result) {
+                            is PaperTradingResult.Failure ->
+                                Toast.makeText(this@MainActivity, result.message, Toast.LENGTH_LONG).show()
+                            is PaperTradingResult.Success -> {
+                                val message = if (orderType == QuickTradePanel.OrderType.LIMIT) {
+                                    "$sideLabel limit order placed - will fill when price is reached"
+                                } else {
+                                    "$sideLabel order placed${fillSummarySuffix(result.data)}"
+                                }
+                                Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+                                // TP/SL aren't enforced by the paper-trading engine yet - only
+                                // captured here so the UI doesn't silently drop what the user typed.
+                                if (!takeProfitPrice.isNullOrBlank() || !stopLossPrice.isNullOrBlank()) {
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        "Note: TP/SL isn't auto-executed in paper trading yet - watch the position manually",
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                }
                             }
                         }
                     }
@@ -580,10 +626,11 @@ class MainActivity : AppCompatActivity() {
                 onClosePosition = { position ->
                     lifecycleScope.launch {
                         val result = paperTradingRepository.closePosition(position)
-                        if (result is PaperTradingResult.Failure) {
-                            Toast.makeText(this@MainActivity, result.message, Toast.LENGTH_LONG).show()
-                        } else {
-                            Toast.makeText(this@MainActivity, "Position closed", Toast.LENGTH_SHORT).show()
+                        when (result) {
+                            is PaperTradingResult.Failure ->
+                                Toast.makeText(this@MainActivity, result.message, Toast.LENGTH_LONG).show()
+                            is PaperTradingResult.Success ->
+                                Toast.makeText(this@MainActivity, "Position closed${fillSummarySuffix(result.data)}", Toast.LENGTH_SHORT).show()
                         }
                     }
                 },

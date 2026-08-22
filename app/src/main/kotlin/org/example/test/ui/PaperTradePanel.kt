@@ -8,11 +8,14 @@ import android.util.AttributeSet
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
+import org.example.test.bitget.FeeRates
+import org.example.test.bitget.LatencyConfig
 import org.example.test.bitget.PaperAccount
 import org.example.test.bitget.PaperAccountBalance
 import org.example.test.bitget.PaperPosition
@@ -46,6 +49,10 @@ class PaperTradePanel @JvmOverloads constructor(
         val onOpenPosition: (side: PositionSide, size: String, leverage: Int) -> Unit,
         val onClosePosition: (PaperPosition) -> Unit,
         val onCancelPendingOrder: (PendingLimitOrder) -> Unit = {},
+        // Latency simulation settings (design doc §6) - see
+        // org.example.test.bitget.LatencySimulator. Fired from the tappable
+        // "Latency: ..." row's settings dialog.
+        val onSetLatencyConfig: (LatencyConfig) -> Unit = {},
     )
 
     private val surfaceColor = Color.parseColor("#1E222D")
@@ -76,7 +83,10 @@ class PaperTradePanel @JvmOverloads constructor(
     private lateinit var sizeInput: EditText
     private lateinit var leverageInput: EditText
     private lateinit var submitOrderButton: Button
+    private lateinit var feeRateText: TextView
+    private lateinit var latencyText: TextView
     private var currentSide: PositionSide = PositionSide.LONG
+    private var currentLatencyConfig: LatencyConfig = LatencyConfig.DEFAULT
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
@@ -126,9 +136,14 @@ class PaperTradePanel @JvmOverloads constructor(
         pendingOrders: List<PendingLimitOrder> = emptyList(),
         lastError: String?,
         nextDepositAvailableAt: Long?,
+        feeRates: FeeRates? = null,
+        latencyConfig: LatencyConfig? = null,
     ) {
         currentAccount = account
         this.nextDepositAvailableAt = nextDepositAvailableAt
+
+        if (feeRates != null) renderFeeRates(feeRates)
+        if (latencyConfig != null) renderLatency(latencyConfig)
 
         if (account == null) {
             accountText.text = "No local account yet"
@@ -164,6 +179,49 @@ class PaperTradePanel @JvmOverloads constructor(
         if (contentSwitcher.childCount == 1 && contentSwitcher.getChildAt(0) === view) return
         contentSwitcher.removeAllViews()
         contentSwitcher.addView(view)
+    }
+
+    /**
+     * Shows the maker/taker rates currently applied to fills - real rates
+     * pulled from Bitget (see [org.example.test.bitget.BitgetFeeRateClient]),
+     * not an assumed flat fee - so the trader can see up front what a
+     * market order (taker) versus a resting limit order (maker) will cost.
+     */
+    private fun renderFeeRates(feeRates: FeeRates) {
+        val makerPct = feeRates.makerRate * 100.0
+        val takerPct = feeRates.takerRate * 100.0
+        val suffix = if (feeRates.isAccountSpecific) "your rate" else "standard rate"
+        feeRateText.text = String.format(
+            Locale.US,
+            "Fees: %.3f%% maker / %.3f%% taker (%s)",
+            makerPct,
+            takerPct,
+            suffix,
+        )
+    }
+
+    /**
+     * Shows the delay currently being injected before a simulated
+     * market/marketable-limit order's fill is priced (see
+     * [org.example.test.bitget.LatencySimulator], design doc §6) - tap to
+     * change it. "Off" when latency simulation is disabled, in which case
+     * fills price against the book/mark price at decision time, same as if
+     * this feature didn't exist.
+     */
+    private fun renderLatency(config: LatencyConfig) {
+        currentLatencyConfig = config
+        latencyText.text = if (!config.enabled) {
+            "Latency: off (tap to configure)"
+        } else if (config.jitterMs > 0L) {
+            String.format(
+                Locale.US,
+                "Latency: %d\u2013%dms simulated (tap to configure)",
+                config.baseDelayMs,
+                config.baseDelayMs + config.jitterMs,
+            )
+        } else {
+            String.format(Locale.US, "Latency: %dms simulated (tap to configure)", config.baseDelayMs)
+        }
     }
 
     private fun renderPositions(positions: List<PaperPosition>) {
@@ -383,6 +441,8 @@ class PaperTradePanel @JvmOverloads constructor(
     }
 
     private fun buildOrderEntryRow(): View {
+        val container = LinearLayout(context).apply { orientation = VERTICAL }
+
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -408,7 +468,30 @@ class PaperTradePanel @JvmOverloads constructor(
         row.addView(sizeInput)
         row.addView(leverageInput)
         row.addView(submitOrderButton)
-        return row
+
+        // Shows the maker/taker rates a fill will actually be charged (see
+        // PaperTradingRepository's fee simulation) - updated by
+        // [renderFeeRates] whenever the repository's live rate changes.
+        feeRateText = TextView(context).apply {
+            textSize = 10.5f
+            setTextColor(mutedColor)
+            setPadding(dp(2), dp(6), dp(2), dp(0))
+        }
+
+        // Shows the currently-simulated order latency (see
+        // [renderLatency]/[org.example.test.bitget.LatencySimulator]) -
+        // tappable to open the settings dialog.
+        latencyText = TextView(context).apply {
+            textSize = 10.5f
+            setTextColor(mutedColor)
+            setPadding(dp(2), dp(2), dp(2), dp(0))
+            setOnClickListener { showLatencySettingsDialog() }
+        }
+
+        container.addView(row)
+        container.addView(feeRateText)
+        container.addView(latencyText)
+        return container
     }
 
     private fun submitOrder(side: PositionSide) {
@@ -469,6 +552,20 @@ class PaperTradePanel @JvmOverloads constructor(
                 setTextColor(mutedColor)
             },
         )
+        if (position.fundingPaidSoFar != 0.0) {
+            val funding = position.fundingPaidSoFar
+            infoColumn.addView(
+                TextView(context).apply {
+                    text = String.format(
+                        Locale.US,
+                        if (funding >= 0) "Funding paid: %,.2f" else "Funding received: %,.2f",
+                        kotlin.math.abs(funding),
+                    )
+                    textSize = 10.5f
+                    setTextColor(mutedColor)
+                },
+            )
+        }
 
         val pnlColumn = LinearLayout(context).apply {
             orientation = VERTICAL
@@ -603,6 +700,93 @@ class PaperTradePanel @JvmOverloads constructor(
                     return@setOnClickListener
                 }
                 callbacks?.onDeposit?.invoke(amount)
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    // ---- Latency simulation settings (design doc §6) ----
+
+    /**
+     * Lets the trader see and tune what [org.example.test.bitget.LatencySimulator]
+     * is doing to every simulated market/marketable-limit fill: a fixed
+     * delay plus an optional random jitter on top, applied before the
+     * fill's price is looked up, so results reflect market state a beat
+     * after the decision instead of at the exact instant of it - the same
+     * gap a real order's network/engine latency would introduce.
+     */
+    private fun showLatencySettingsDialog() {
+        val config = currentLatencyConfig
+        val container = LinearLayout(context).apply {
+            orientation = VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(0))
+        }
+        val explainer = TextView(context).apply {
+            text = "Simulates the network + engine delay a real order would face before " +
+                "reaching the exchange - fills are priced against the order book after " +
+                "this delay, not at the instant you tap Long/Short."
+            textSize = 11.5f
+            setTextColor(mutedColor)
+            setPadding(0, 0, 0, dp(10))
+        }
+        val enabledToggle = CheckBox(context).apply {
+            text = "Simulate latency"
+            setTextColor(labelColor)
+            isChecked = config.enabled
+        }
+        val delayField = dialogEditText("Base delay (ms)").apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(config.baseDelayMs.toString())
+        }
+        val jitterField = dialogEditText("Extra random jitter, up to (ms)").apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(config.jitterMs.toString())
+        }
+        val rangeHint = TextView(context).apply {
+            text = String.format(
+                Locale.US,
+                "Delay: %d\u2013%dms \u00B7 Jitter: %d\u2013%dms",
+                LatencyConfig.MIN_DELAY_MS,
+                LatencyConfig.MAX_DELAY_MS,
+                LatencyConfig.MIN_JITTER_MS,
+                LatencyConfig.MAX_JITTER_MS,
+            )
+            textSize = 10.5f
+            setTextColor(mutedColor)
+            setPadding(0, dp(6), 0, 0)
+        }
+        container.addView(explainer)
+        container.addView(enabledToggle)
+        container.addView(delayField)
+        container.addView(jitterField)
+        container.addView(rangeHint)
+
+        val dialog = AlertDialog.Builder(context)
+            .setTitle("Latency Simulation")
+            .setView(container)
+            .setPositiveButton("Save", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val baseDelay = delayField.text?.toString()?.trim()?.toLongOrNull()
+                val jitter = jitterField.text?.toString()?.trim()?.toLongOrNull()
+                if (baseDelay == null || baseDelay < 0L) {
+                    delayField.error = "Enter a delay in milliseconds"
+                    return@setOnClickListener
+                }
+                if (jitter == null || jitter < 0L) {
+                    jitterField.error = "Enter a jitter amount in milliseconds"
+                    return@setOnClickListener
+                }
+                val updated = LatencyConfig(
+                    enabled = enabledToggle.isChecked,
+                    baseDelayMs = baseDelay,
+                    jitterMs = jitter,
+                ).coerced()
+                callbacks?.onSetLatencyConfig?.invoke(updated)
                 dialog.dismiss()
             }
         }

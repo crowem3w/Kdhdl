@@ -119,6 +119,31 @@ class PaperTradingHistoryPanel @JvmOverloads constructor(
                 setPadding(0, dp(2), 0, 0)
             },
         )
+        if (trade.totalFeesPaid > 0.0) {
+            infoColumn.addView(
+                TextView(context).apply {
+                    text = String.format(Locale.US, "Fees: %,.2f USDT", trade.totalFeesPaid)
+                    textSize = 10.5f
+                    setTextColor(mutedColor)
+                    setPadding(0, dp(2), 0, 0)
+                },
+            )
+        }
+        if (trade.totalFundingPaid != 0.0) {
+            val funding = trade.totalFundingPaid
+            infoColumn.addView(
+                TextView(context).apply {
+                    text = String.format(
+                        Locale.US,
+                        if (funding >= 0) "Funding: -%,.2f USDT" else "Funding: +%,.2f USDT",
+                        kotlin.math.abs(funding),
+                    )
+                    textSize = 10.5f
+                    setTextColor(mutedColor)
+                    setPadding(0, dp(2), 0, 0)
+                },
+            )
+        }
 
         val pnlText = TextView(context).apply {
             text = String.format(Locale.US, "%s%,.2f USDT", if (pnl >= 0) "+" else "", pnl)
