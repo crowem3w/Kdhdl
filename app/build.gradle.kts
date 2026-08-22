@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "org.example.test"
+    namespace = "org.example.syncora"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "org.example.test"
+        applicationId = "org.example.syncora"
         minSdk = 30
         targetSdk = 37
         versionCode = 1

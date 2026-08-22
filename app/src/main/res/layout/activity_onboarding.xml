@@ -8,7 +8,7 @@
     <!-- Focal point: a ~420x420dp morphing orb, centered, white core with a subtle teal
          outer glow. It sits behind all text/UI, well below the top-left lockup and above
          the bottom caption/button, so it reads as the visual anchor of the screen. -->
-    <org.example.test.orb.OrbView
+    <org.example.syncora.orb.OrbView
         android:id="@+id/orbView"
         android:layout_width="320dp"
         android:layout_height="320dp"

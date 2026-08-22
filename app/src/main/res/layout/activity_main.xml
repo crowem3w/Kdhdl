@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<org.example.test.ui.ScrollRevealContainer xmlns:android="http://schemas.android.com/apk/res/android"
+<org.example.syncora.ui.ScrollRevealContainer xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/chartSectionContainer"
@@ -43,7 +43,7 @@
                         android:textColor="#EAECEF"
                         android:text="@string/symbol_label" />
 
-                    <org.example.test.ui.SkeletonLoadingView
+                    <org.example.syncora.ui.SkeletonLoadingView
                         android:id="@+id/symbolSkeleton"
                         android:layout_width="104dp"
                         android:layout_height="24dp"
@@ -58,7 +58,7 @@
                     android:src="@drawable/ic_chevron_down"
                     android:contentDescription="@null" />
 
-                <org.example.test.ui.RoundedIconButton
+                <org.example.syncora.ui.RoundedIconButton
                     android:id="@+id/paragraphButton"
                     android:layout_width="26dp"
                     android:layout_height="26dp"
@@ -101,7 +101,7 @@
                     android:text="@string/live_label" />
             </LinearLayout>
 
-            <org.example.test.ui.PerformanceHudView
+            <org.example.syncora.ui.PerformanceHudView
                 android:id="@+id/performanceHud"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -128,7 +128,7 @@
                     android:gravity="end"
                     tools:text="66,842.5" />
 
-                <org.example.test.ui.SkeletonLoadingView
+                <org.example.syncora.ui.SkeletonLoadingView
                     android:id="@+id/priceSkeleton"
                     android:layout_width="116dp"
                     android:layout_height="24dp"
@@ -151,7 +151,7 @@
                     android:gravity="end"
                     tools:text="+1.23%" />
 
-                <org.example.test.ui.SkeletonLoadingView
+                <org.example.syncora.ui.SkeletonLoadingView
                     android:id="@+id/changeSkeleton"
                     android:layout_width="64dp"
                     android:layout_height="16dp"
@@ -231,18 +231,18 @@
             android:layout_weight="1"
             android:layout_marginTop="14dp">
 
-            <org.example.test.chart.DepthHeatmapView
+            <org.example.syncora.chart.DepthHeatmapView
                 android:id="@+id/depthHeatmap"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 tools:background="#131722" />
 
-            <org.example.test.chart.CandlestickChartView
+            <org.example.syncora.chart.CandlestickChartView
                 android:id="@+id/candleChart"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
 
-            <org.example.test.ui.DrawingContextToolbar
+            <org.example.syncora.ui.DrawingContextToolbar
                 android:id="@+id/drawingContextToolbar"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -278,7 +278,7 @@
 
         </FrameLayout>
 
-        <org.example.test.ui.QuickTradePanel
+        <org.example.syncora.ui.QuickTradePanel
             android:id="@+id/quickTradePanel"
             android:layout_width="match_parent"
             android:layout_height="0dp"
@@ -332,4 +332,4 @@
             android:contentDescription="@string/drawing_tools_content_description" />
     </LinearLayout>
 
-</org.example.test.ui.ScrollRevealContainer>
+</org.example.syncora.ui.ScrollRevealContainer>
