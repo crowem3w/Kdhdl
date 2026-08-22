@@ -1,6 +1,8 @@
 package org.example.test
 
 import android.app.Application
+import org.example.test.agent.AgentDataIngestionService
+import org.example.test.agent.FileAgentFeatureCacheStore
 import org.example.test.bitget.BitgetFeeRateClient
 import org.example.test.bitget.BitgetFundingRateClient
 import org.example.test.bitget.BitgetLiveCredentialsStore
@@ -89,6 +91,25 @@ class SyncoraApplication : Application() {
         LiveTradingRepository(credentialsStore = liveCredentialsStore, symbol = "BTCUSDT")
     }
 
+    // Design doc §7.4's "Data ingestion service" - feeds the same kline/
+    // depth/trade streams the chart already maintains (plus its own new
+    // ticker socket for mark/index price, funding rate, and open interest)
+    // into a shared feature store for the future agent/regime-detector
+    // services to consume. No trading permissions, no new order-book or
+    // kline sockets - reuses `pipeline`/`depthPipeline`/`tradeSocket`
+    // above rather than opening duplicate connections for the same public
+    // data.
+    val agentDataIngestionService: AgentDataIngestionService by lazy {
+        AgentDataIngestionService(
+            instId = "BTCUSDT",
+            instType = "USDT-FUTURES",
+            klines = pipeline.klines,
+            depth = depthPipeline.depth,
+            trades = tradeSocket.trades,
+            cacheStore = FileAgentFeatureCacheStore(applicationContext, cacheKey = "BTCUSDT_USDT-FUTURES"),
+        )
+    }
+
     private var marketDataStarted = false
 
     /** Idempotent: safe to call repeatedly from MainActivity.onStart(). */
@@ -98,6 +119,7 @@ class SyncoraApplication : Application() {
         pipeline.start()
         depthPipeline.start()
         tradeSocket.connect()
+        agentDataIngestionService.start()
     }
 
     /** Call when the chart is no longer visible to anything (MainActivity.onStop()). */
@@ -106,5 +128,6 @@ class SyncoraApplication : Application() {
         pipeline.stop()
         depthPipeline.stop()
         tradeSocket.disconnect()
+        agentDataIngestionService.stop()
     }
 }
