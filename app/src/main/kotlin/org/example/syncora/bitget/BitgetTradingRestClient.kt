@@ -189,6 +189,93 @@ class BitgetTradingRestClient(
         )
     }
 
+    /**
+     * Places (or replaces) a resting **position** stop-loss trigger order
+     * directly on Bitget's book - `/api/v2/mix/order/place-pos-tpsl`.
+     *
+     * This is a position-level TP/SL, not a normal limit order: Bitget's own
+     * matching engine watches [triggerPrice] against the live mark price and
+     * fires a reduce-only market close the instant it's crossed. That's what
+     * makes it safe to use as a dead-man's switch (design doc §2.2/§5) - the
+     * order lives on the exchange, so it still protects the position even if
+     * this app's process (and its foreground service) gets killed.
+     *
+     * `executePrice = "0"` tells Bitget to close at market once triggered,
+     * rather than resting a limit order that could fail to fill in a fast
+     * move - for a safety stop, guaranteed execution matters more than
+     * avoiding slippage. `triggerType = "mark_price"` avoids false triggers
+     * from a brief wick in the last-traded price.
+     */
+    suspend fun placeStopLoss(
+        symbol: String,
+        holdSide: PositionSide,
+        triggerPrice: String,
+        sizeInBaseCoin: String,
+    ): String {
+        val body = JSONObject().apply {
+            put("marginCoin", "USDT")
+            put("productType", productType)
+            put("symbol", symbol)
+            put("planType", "loss_plan")
+            put("triggerPrice", triggerPrice)
+            put("triggerType", "mark_price")
+            put("executePrice", "0") // 0 = execute at market once triggered
+            put("holdSide", holdSide.bitgetHoldSide)
+            put("size", sizeInBaseCoin)
+        }
+        val json = post("/api/v2/mix/order/place-pos-tpsl", body)
+        val data = json.getJSONObject("data")
+        return data.optString("orderId")
+    }
+
+    /**
+     * Lists resting stop-loss trigger orders for [symbol] -
+     * `/api/v2/mix/order/orders-plan-pending` filtered to `planType=loss_plan`.
+     * Used by [StopLossGuard] to check whether a position already has a live
+     * exchange-side stop before placing another one (Bitget doesn't dedupe
+     * these for you - placing twice results in two resting stops).
+     */
+    suspend fun fetchPendingStopLossOrders(symbol: String): List<StopLossOrder> {
+        val path = "/api/v2/mix/order/orders-plan-pending"
+        val query = "symbol=$symbol&productType=$productType&planType=loss_plan"
+        val json = get(path, query)
+        val data = json.optJSONObject("data")
+        val rows = data?.optJSONArray("entrustedList") ?: JSONArray()
+        return buildList(rows.length()) {
+            for (i in 0 until rows.length()) {
+                val row = rows.getJSONObject(i)
+                val orderId = row.optString("orderId")
+                val triggerPrice = row.optString("triggerPrice", "0").toDoubleOrNull()
+                val size = row.optString("size", "0").toDoubleOrNull()
+                if (orderId.isBlank() || triggerPrice == null || size == null) continue
+                add(
+                    StopLossOrder(
+                        orderId = orderId,
+                        symbol = row.optString("symbol", symbol),
+                        holdSide = PositionSide.fromHoldSide(row.optString("holdSide")),
+                        triggerPrice = triggerPrice,
+                        sizeInBaseCoin = size,
+                    ),
+                )
+            }
+        }
+    }
+
+    /** Cancels a resting stop-loss trigger order - `/api/v2/mix/order/cancel-plan-order`. */
+    suspend fun cancelStopLoss(symbol: String, orderId: String) {
+        val body = JSONObject().apply {
+            put("marginCoin", "USDT")
+            put("productType", productType)
+            put("symbol", symbol)
+            put("orderId", orderId)
+            put("planType", "loss_plan")
+        }
+        // Best-effort: if it already triggered or was manually cancelled on the
+        // exchange side, cancelling again just errors - either way there's
+        // nothing left to protect against, so it's safe to ignore.
+        runCatching { post("/api/v2/mix/order/cancel-plan-order", body) }
+    }
+
     private fun orderIdPrefix(): String = if (environment() == BitgetEnvironment.DEMO) "paper" else "live"
 
     private fun parsePosition(row: JSONObject): PaperPosition? {

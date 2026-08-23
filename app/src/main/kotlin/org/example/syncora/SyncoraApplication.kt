@@ -10,6 +10,8 @@ import org.example.syncora.bitget.FileKlineCacheStore
 import org.example.syncora.bitget.LiveTradingRepository
 import org.example.syncora.bitget.LocalPaperTradingStore
 import org.example.syncora.bitget.PaperTradingRepository
+import org.example.syncora.bitget.RiskSettingsStore
+import org.example.syncora.bitget.StopLossGuard
 import org.example.syncora.bitget.Timeframe
 import org.example.syncora.bitget.TradingChartPipeline
 
@@ -18,8 +20,14 @@ import org.example.syncora.bitget.TradingChartPipeline
  *
  * Keeping the pipelines here instead of inside MainActivity means they survive
  * configuration changes and brief activity recreation without dropping the live stream.
- * [ensureMarketDataStarted] is idempotent so it's safe to call from onStart() regardless
- * of whether the pipelines are already running.
+ *
+ * Start/stop control of these pipelines now belongs to
+ * [org.example.syncora.service.MarketDataForegroundService], not to any
+ * Activity - [ensureMarketDataStarted]/[stopMarketData] are called from the
+ * service's onCreate()/onDestroy() so the pipelines run for as long as the
+ * service does, independent of whether an Activity is on screen. Both
+ * methods stay idempotent so a service restart (e.g. after the OS recreates
+ * a killed START_STICKY service) is always safe to call into.
  */
 class SyncoraApplication : Application() {
 
@@ -89,22 +97,46 @@ class SyncoraApplication : Application() {
         LiveTradingRepository(credentialsStore = liveCredentialsStore, symbol = "BTCUSDT")
     }
 
+    val riskSettingsStore: RiskSettingsStore by lazy {
+        RiskSettingsStore(applicationContext)
+    }
+
+    // The exchange-side dead-man's-switch (design doc §2.2/§5): keeps a
+    // resting stop-loss on Bitget's own book for any open live position, so
+    // the position stays protected even if this process (and the foreground
+    // service) gets killed. Wired up in [ensureMarketDataStarted] alongside
+    // liveTradingRepository, since it has nothing useful to watch until that
+    // repository is polling positions.
+    val stopLossGuard: StopLossGuard by lazy {
+        StopLossGuard(credentialsStore = liveCredentialsStore, riskSettingsStore = riskSettingsStore)
+    }
+
     private var marketDataStarted = false
 
-    /** Idempotent: safe to call repeatedly from MainActivity.onStart(). */
+    /**
+     * Idempotent: safe to call repeatedly. Called from
+     * [org.example.syncora.service.MarketDataForegroundService]'s onCreate()
+     * rather than from any Activity lifecycle callback, so backgrounding the
+     * app no longer stops market data, live-position polling, or the
+     * stop-loss guard.
+     */
     fun ensureMarketDataStarted() {
         if (marketDataStarted) return
         marketDataStarted = true
         pipeline.start()
         depthPipeline.start()
         tradeSocket.connect()
+        liveTradingRepository.start()
+        stopLossGuard.start(liveTradingRepository.positions)
     }
 
-    /** Call when the chart is no longer visible to anything (MainActivity.onStop()). */
+    /** Call only when the foreground service itself is being torn down, not on activity backgrounding. */
     fun stopMarketData() {
         marketDataStarted = false
         pipeline.stop()
         depthPipeline.stop()
         tradeSocket.disconnect()
+        liveTradingRepository.stop()
+        stopLossGuard.stop()
     }
 }

@@ -1,9 +1,12 @@
 package org.example.syncora
 
+import android.Manifest
 import android.animation.ValueAnimator
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.MotionEvent
@@ -15,7 +18,9 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -56,6 +61,7 @@ import org.example.syncora.ui.PerformanceHudView
 import org.example.syncora.ui.QuickTradePanel
 import org.example.syncora.ui.RoundedIconButton
 import org.example.syncora.ui.ScrollRevealContainer
+import org.example.syncora.service.MarketDataForegroundService
 import org.example.syncora.ui.SkeletonLoadingView
 import org.example.syncora.ui.TradingModeDialog
 import java.text.SimpleDateFormat
@@ -65,14 +71,24 @@ import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
 
-    // Held at application scope so the pipeline survives activity recreation — see
-    // SyncoraApplication.ensureMarketDataStarted().
+    // Held at application scope so the pipeline survives activity recreation. The
+    // pipeline/live-poll/stop-loss-guard lifecycle itself is owned by
+    // MarketDataForegroundService now, not by this activity - see that class's kdoc
+    // and SyncoraApplication.ensureMarketDataStarted().
     private val app by lazy { application as SyncoraApplication }
     private val pipeline by lazy { app.pipeline }
     private val depthPipeline by lazy { app.depthPipeline }
     private val paperTradingRepository by lazy { app.paperTradingRepository }
     private val liveCredentialsStore by lazy { app.liveCredentialsStore }
     private val liveTradingRepository by lazy { app.liveTradingRepository }
+
+    // Android 13+ requires this permission for the foreground service's persistent
+    // status notification to actually be visible - the service still runs and
+    // still protects positions without it, the notification just won't show. Must
+    // be registered before the activity reaches STARTED, hence the property here
+    // rather than an inline call from onCreate().
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op either way */ }
 
     private lateinit var candleChart: CandlestickChartView
     private lateinit var depthHeatmap: DepthHeatmapView
@@ -157,6 +173,12 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, OnboardingActivity::class.java))
             finish()
             return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
         setContentView(R.layout.activity_main)
@@ -943,19 +965,23 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        // Idempotent: no-op if already running, starts fresh if the app was fully
-        // backgrounded and stopped in between.
-        app.ensureMarketDataStarted()
+        // Idempotent: MarketDataForegroundService.start() is a no-op if the service
+        // is already running. Market data, live-position polling, and the
+        // stop-loss guard are now owned by that service (see its kdoc), not by
+        // this activity - they keep running after onStop() instead of dying the
+        // moment the app is backgrounded.
+        MarketDataForegroundService.start(this)
         paperTradingRepository.start()
-        liveTradingRepository.start()
         performanceMonitor.start()
     }
 
     override fun onStop() {
         super.onStop()
         performanceMonitor.stop()
-        app.stopMarketData()
+        // Deliberately NOT stopping MarketDataForegroundService here - that's the
+        // whole point of moving this to a foreground service. Only paper trading
+        // (a pure on-device simulation with no real position to protect) and the
+        // performance HUD are UI-only concerns that should stop with the activity.
         paperTradingRepository.stop()
-        liveTradingRepository.stop()
     }
 }
