@@ -1,10 +1,13 @@
 package org.example.syncora
 
 import android.app.Application
+import org.example.syncora.agent.DecisionLoopScheduler
+import org.example.syncora.bitget.BitgetEnvironment
 import org.example.syncora.bitget.BitgetFeeRateClient
 import org.example.syncora.bitget.BitgetFundingRateClient
 import org.example.syncora.bitget.BitgetLiveCredentialsStore
 import org.example.syncora.bitget.BitgetTradeSocket
+import org.example.syncora.bitget.BitgetTradingRestClient
 import org.example.syncora.bitget.DepthPipeline
 import org.example.syncora.bitget.FileKlineCacheStore
 import org.example.syncora.bitget.LiveTradingRepository
@@ -148,6 +151,35 @@ class SyncoraApplication : Application() {
         PolicyInferenceEngine(context = applicationContext, modelStore = policyModelStore)
     }
 
+    // Independent client/credentials read from the same encrypted store as
+    // liveTradingRepository, same pattern StopLossGuard already uses - the
+    // decision loop's order dispatch doesn't need liveTradingRepository's
+    // polling loop to be the thing driving it, only read access to the
+    // account state it already exposes via stateVectorBuilder.
+    private val liveTradingClient: BitgetTradingRestClient by lazy {
+        BitgetTradingRestClient(
+            environment = { BitgetEnvironment.LIVE },
+            credentialsProvider = { liveCredentialsStore.load() },
+        )
+    }
+
+    // Design doc §3.6's live decision loop: fires once per kline close,
+    // runs stateVectorBuilder's snapshot through policyInferenceEngine,
+    // applies bounded exploration noise, and dispatches the resulting
+    // target-position delta through liveTradingClient. Gated behind
+    // riskSettingsStore.autoTradingEnabled - see DecisionLoopScheduler's
+    // kdoc for why that check doesn't block inference/telemetry, only
+    // the order-placement step.
+    val decisionLoopScheduler: DecisionLoopScheduler by lazy {
+        DecisionLoopScheduler(
+            chartPipeline = pipeline,
+            stateVectorBuilder = stateVectorBuilder,
+            policyInferenceEngine = policyInferenceEngine,
+            tradingClient = liveTradingClient,
+            riskSettingsStore = riskSettingsStore,
+        )
+    }
+
     private var marketDataStarted = false
 
     /**
@@ -165,6 +197,8 @@ class SyncoraApplication : Application() {
         tradeSocket.connect()
         liveTradingRepository.start()
         stopLossGuard.start(liveTradingRepository.positions)
+        policyInferenceEngine.ensureLoaded()
+        decisionLoopScheduler.start()
     }
 
     /** Call only when the foreground service itself is being torn down, not on activity backgrounding. */
@@ -175,5 +209,6 @@ class SyncoraApplication : Application() {
         tradeSocket.disconnect()
         liveTradingRepository.stop()
         stopLossGuard.stop()
+        decisionLoopScheduler.stop()
     }
 }
