@@ -23,6 +23,10 @@ import org.example.syncora.bitget.Timeframe
 import org.example.syncora.bitget.TradingChartPipeline
 import org.example.syncora.ml.PolicyInferenceEngine
 import org.example.syncora.ml.PolicyModelStore
+import org.example.syncora.risk.PreTradeSafetyGate
+import org.example.syncora.risk.RiskLimitsStore
+import org.example.syncora.risk.VolatilityCircuitBreaker
+import org.example.syncora.risk.VolatilityIndexClient
 import org.example.syncora.work.TrainingScheduler
 
 /**
@@ -109,12 +113,53 @@ class SyncoraApplication : Application() {
         )
     }
 
-    val liveTradingRepository: LiveTradingRepository by lazy {
-        LiveTradingRepository(credentialsStore = liveCredentialsStore, symbol = "BTCUSDT")
-    }
-
     val riskSettingsStore: RiskSettingsStore by lazy {
         RiskSettingsStore(applicationContext)
+    }
+
+    // Design doc §5's hard limits - a separate store from riskSettingsStore
+    // because these are a ceiling the policy can never move past, not a
+    // toggle it (or the user, from the auto-trading kill switch) controls.
+    val riskLimitsStore: RiskLimitsStore by lazy {
+        RiskLimitsStore(applicationContext)
+    }
+
+    // Deribit's DVOL (BTC volatility index) - the specific, chosen
+    // provider for the design doc §5 volatility circuit breaker. A
+    // different venue than Bitget entirely, on purpose - see
+    // VolatilityIndexClient's kdoc.
+    val volatilityIndexClient: VolatilityIndexClient by lazy { VolatilityIndexClient() }
+
+    // Runs its own independent poll loop (started/stopped alongside market
+    // data, see ensureMarketDataStarted/stopMarketData below) - not driven
+    // by, and not able to be bypassed by, decisionLoopScheduler's decision
+    // cadence or the policy's own output.
+    val volatilityCircuitBreaker: VolatilityCircuitBreaker by lazy {
+        VolatilityCircuitBreaker(
+            client = volatilityIndexClient,
+            thresholdProvider = { riskLimitsStore.volatilityHaltThreshold },
+        )
+    }
+
+    // The independent, policy-output-agnostic checks from design doc §5,
+    // run before every order any live order-placing path transmits - see
+    // PreTradeSafetyGate's kdoc. Shared by decisionLoopScheduler (automated)
+    // and liveTradingRepository (manual) so both are held to the same bar.
+    val preTradeSafetyGate: PreTradeSafetyGate by lazy {
+        PreTradeSafetyGate(
+            tradingClient = liveTradingClient,
+            volatilityCircuitBreaker = volatilityCircuitBreaker,
+            riskLimitsStore = riskLimitsStore,
+        )
+    }
+
+    val liveTradingRepository: LiveTradingRepository by lazy {
+        LiveTradingRepository(
+            credentialsStore = liveCredentialsStore,
+            symbol = "BTCUSDT",
+            safetyGate = preTradeSafetyGate,
+            markPriceProvider = { pipeline.klines.value.lastOrNull()?.close },
+        )
     }
 
     // The exchange-side dead-man's-switch (design doc §2.2/§5): keeps a
@@ -208,6 +253,8 @@ class SyncoraApplication : Application() {
             policyInferenceEngine = policyInferenceEngine,
             tradingClient = liveTradingClient,
             riskSettingsStore = riskSettingsStore,
+            safetyGate = preTradeSafetyGate,
+            volatilityCircuitBreaker = volatilityCircuitBreaker,
         )
     }
 
@@ -241,6 +288,7 @@ class SyncoraApplication : Application() {
         tradeSocket.connect()
         liveTradingRepository.start()
         stopLossGuard.start(liveTradingRepository.positions)
+        volatilityCircuitBreaker.start()
         policyInferenceEngine.ensureLoaded()
         decisionLoopScheduler.start()
     }
@@ -253,6 +301,7 @@ class SyncoraApplication : Application() {
         tradeSocket.disconnect()
         liveTradingRepository.stop()
         stopLossGuard.stop()
+        volatilityCircuitBreaker.stop()
         decisionLoopScheduler.stop()
     }
 }

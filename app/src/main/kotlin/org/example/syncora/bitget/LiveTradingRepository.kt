@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.example.syncora.risk.EntrySafetyResult
+import org.example.syncora.risk.ExitSafetyResult
+import org.example.syncora.risk.PreTradeSafetyGate
 
 /**
  * Owns the polling loop against [BitgetTradingRestClient] and exposes
@@ -25,10 +28,27 @@ import kotlinx.coroutines.launch
  * (see [PaperTradingRepository]).
  * Reuses [PaperTradingConnectionState]/[PaperTradingResult] since those are
  * just generic "connection status" / "result" wrappers, not paper-specific.
+ *
+ * **Pre-trade safety.** [openPosition] and [closePosition] are the manual
+ * (human-initiated) live order-placing path, as distinct from
+ * [org.example.syncora.agent.DecisionLoopScheduler]'s automated one - but
+ * design doc §5's guardrails don't only apply to the policy loop. When
+ * [safetyGate] is supplied, every [openPosition] call goes through the same
+ * [org.example.syncora.risk.PreTradeSafetyGate.evaluateEntry] the decision
+ * loop uses (volatility circuit breaker + live balance + hard leverage
+ * cap, possibly clamping the dispatched size down from what was requested),
+ * and every [closePosition] call goes through
+ * [org.example.syncora.risk.PreTradeSafetyGate.evaluateExit]. `null` is
+ * only accepted for callers (e.g. tests) that intentionally don't want the
+ * gate wired up; production wiring (see `SyncoraApplication`) always
+ * supplies one.
  */
 class LiveTradingRepository(
     private val credentialsStore: BitgetLiveCredentialsStore,
     private val symbol: String = "BTCUSDT",
+    private val safetyGate: PreTradeSafetyGate? = null,
+    /** Fallback mark price when there's no open position to read one off of (e.g. opening from flat) - see class kdoc. */
+    private val markPriceProvider: () -> Double? = { null },
 ) {
     private companion object {
         const val TAG = "LiveTradingRepo"
@@ -113,12 +133,40 @@ class LiveTradingRepository(
         }
     }
 
-    /** Places a real, funded market order. Callers are expected to have already confirmed with the user. */
+    /**
+     * Places a real, funded market order that *increases* exposure. Callers
+     * are expected to have already confirmed with the user. Goes through
+     * [safetyGate] first when one is configured (see class kdoc) - the
+     * dispatched size may end up smaller than [sizeInBaseCoin] if the
+     * hard leverage cap clamps it, and the call is refused outright (no
+     * order sent) if the volatility circuit breaker is tripped/unknown or
+     * the live Bitget balance can't be confirmed non-negative.
+     */
     suspend fun openPosition(side: PositionSide, sizeInBaseCoin: String, leverage: Int): PaperTradingResult<PlacedOrder> {
         return try {
+            val requestedSize = sizeInBaseCoin.toDoubleOrNull()
+                ?: return PaperTradingResult.Failure("Invalid order size: $sizeInBaseCoin")
+
+            val approvedSize = if (safetyGate != null) {
+                val existing = _positions.value.firstOrNull { it.symbol == symbol }
+                val markPrice = existing?.markPrice?.takeIf { it > 0.0 } ?: markPriceProvider()
+                if (markPrice == null || markPrice <= 0.0) {
+                    return PaperTradingResult.Failure("No live mark price available to evaluate pre-trade safety checks")
+                }
+                when (val result = safetyGate.evaluateEntry(existing?.total ?: 0.0, requestedSize, markPrice)) {
+                    is EntrySafetyResult.Rejected -> {
+                        Log.w(TAG, "Pre-trade safety gate rejected manual open: ${result.reason}")
+                        return PaperTradingResult.Failure(result.reason)
+                    }
+                    is EntrySafetyResult.Approved -> result.approvedAddSizeInBaseCoin
+                }
+            } else {
+                requestedSize
+            }
+
             client.setLeverage(symbol, leverage)
             val order = client.openPosition(
-                OrderTicket(symbol = symbol, side = side, sizeInBaseCoin = sizeInBaseCoin, leverage = leverage),
+                OrderTicket(symbol = symbol, side = side, sizeInBaseCoin = formatSize(approvedSize), leverage = leverage),
             )
             refreshOnce()
             PaperTradingResult.Success(order)
@@ -128,8 +176,23 @@ class LiveTradingRepository(
         }
     }
 
+    /**
+     * Places a real, funded market order that *reduces* exposure. Goes
+     * through [safetyGate]'s exit check (a minimal reachability check, not
+     * the volatility/leverage checks - see [PreTradeSafetyGate] kdoc for
+     * why closes must never be blocked by those) when one is configured.
+     */
     suspend fun closePosition(position: PaperPosition): PaperTradingResult<PlacedOrder> {
         return try {
+            if (safetyGate != null) {
+                when (val result = safetyGate.evaluateExit()) {
+                    is ExitSafetyResult.Rejected -> {
+                        Log.w(TAG, "Pre-trade safety gate rejected manual close: ${result.reason}")
+                        return PaperTradingResult.Failure(result.reason)
+                    }
+                    ExitSafetyResult.Approved -> Unit
+                }
+            }
             val order = client.closePosition(
                 symbol = position.symbol,
                 side = position.side,
@@ -142,6 +205,12 @@ class LiveTradingRepository(
             PaperTradingResult.Failure(friendlyErrorMessage(e), e)
         }
     }
+
+    // NOTE: fixed three-decimal base-coin precision, same simplification
+    // DecisionLoopScheduler/StopLossGuard make - a production build should
+    // size this off BTCUSDT's actual contract precision rather than
+    // hardcoding it.
+    private fun formatSize(size: Double): String = String.format(java.util.Locale.US, "%.3f", size)
 
     private fun friendlyErrorMessage(e: Exception): String = when (e) {
         is BitgetApiException -> e.message ?: "Bitget error ${e.code}"

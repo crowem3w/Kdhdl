@@ -21,6 +21,10 @@ import org.example.syncora.bitget.StateVectorBuilder
 import org.example.syncora.bitget.StateVectorUnavailableException
 import org.example.syncora.bitget.TradingChartPipeline
 import org.example.syncora.ml.PolicyInferenceEngine
+import org.example.syncora.risk.EntrySafetyResult
+import org.example.syncora.risk.ExitSafetyResult
+import org.example.syncora.risk.PreTradeSafetyGate
+import org.example.syncora.risk.VolatilityCircuitBreaker
 import java.util.Locale
 import java.util.Random
 import kotlin.math.abs
@@ -85,10 +89,31 @@ data class DecisionRecord(
  * **Kill switch.** [riskSettingsStore.autoTradingEnabled] gates step 4
  * only - state is still pulled and the policy still runs (and the result
  * still lands in [lastDecision]) with dispatch disabled, so the loop can be
- * observed/tuned before it's trusted with live orders. Every guardrail in
- * design doc §5 that this class is responsible for (leverage cap, balance
- * check) is enforced independently of the policy's own output, not by
- * trusting the model to stay in bounds.
+ * observed/tuned before it's trusted with live orders.
+ *
+ * **Independent safety checks (design doc §5).** Before *any* order this
+ * class dispatches is actually transmitted, it goes through
+ * [safetyGate] ([org.example.syncora.risk.PreTradeSafetyGate]) and
+ * [volatilityCircuitBreaker] - both run their own checks against fresh,
+ * non-cached exchange/market data and are not derived from, or trusted to
+ * defer to, this class's own `meanAction`/`noisyAction`/`targetSize`
+ * computation:
+ *
+ * - The volatility circuit breaker ([VolatilityCircuitBreaker], sourced
+ *   from Deribit's DVOL) is consulted first, before sizing is even
+ *   computed against the policy's action - if it's tripped, the target
+ *   position is forced to flat regardless of what the policy said, on
+ *   every subsequent tick until the breaker clears.
+ * - Every entry (exposure-increasing) order goes through
+ *   [PreTradeSafetyGate.evaluateEntry], which independently re-checks the
+ *   volatility breaker, fetches a live (not cached) Bitget balance and
+ *   confirms it's non-negative, and clamps the order to a hard
+ *   leverage/margin cap - regardless of what target leverage the policy
+ *   computed.
+ * - Every exit (exposure-reducing) order goes through
+ *   [PreTradeSafetyGate.evaluateExit] instead, since a close/flatten must
+ *   never be blocked by the same checks that gate entries (see that
+ *   method's kdoc).
  *
  * **Not this class's job.** The exchange-side dead-man's-switch stop-loss
  * (§2.2/§5) is [org.example.syncora.bitget.StopLossGuard]'s responsibility,
@@ -104,6 +129,10 @@ class DecisionLoopScheduler(
     private val policyInferenceEngine: PolicyInferenceEngine,
     private val tradingClient: BitgetTradingRestClient,
     private val riskSettingsStore: RiskSettingsStore,
+    /** Independent, policy-output-agnostic checks run before every order this loop transmits - see class kdoc. */
+    private val safetyGate: PreTradeSafetyGate,
+    /** Consulted before sizing, to force the target position to flat when tripped - see class kdoc. */
+    private val volatilityCircuitBreaker: VolatilityCircuitBreaker,
     private val symbol: String = "BTCUSDT",
     /** Must match (or be tighter than) [PolicyInferenceEngine]'s own `actionLeverageCap` - see kdoc above. */
     private val actionLeverageCap: Double = 3.0,
@@ -203,10 +232,23 @@ class DecisionLoopScheduler(
 
         val currentSize = snapshot.positionSize
         val targetNotional = noisyAction * snapshot.balance
-        val targetSize = targetNotional / snapshot.markPrice
+        var targetSize = targetNotional / snapshot.markPrice
 
-        val orderIds = dispatchTargetPosition(currentSize = currentSize, targetSize = targetSize, availableBalance = snapshot.balance)
-            ?: return DecisionOutcome.Skipped("auto-trading disabled in risk settings")
+        // Volatility circuit breaker (design doc §5): consulted before
+        // sizing is dispatched, independent of the policy's own output.
+        // When tripped, the target is forced to flat on every tick until
+        // the breaker clears - this overrides whatever the policy computed
+        // above, it does not merely block a would-be add.
+        if (volatilityCircuitBreaker.shouldFlattenToCash()) {
+            Log.w(TAG, "Volatility circuit breaker tripped (${volatilityCircuitBreaker.status.value}); forcing target position to flat")
+            targetSize = 0.0
+        }
+
+        val orderIds = dispatchTargetPosition(
+            currentSize = currentSize,
+            targetSize = targetSize,
+            markPrice = snapshot.markPrice,
+        ) ?: return DecisionOutcome.Skipped("auto-trading disabled in risk settings")
 
         return if (orderIds.isEmpty()) {
             DecisionOutcome.Skipped("delta below minimum order size")
@@ -235,12 +277,17 @@ class DecisionLoopScheduler(
      *
      * Returns `null` (nothing evaluated, nothing dispatched) if
      * [RiskSettingsStore.autoTradingEnabled] is off; an empty list if the
-     * delta rounds to nothing; otherwise the placed order IDs.
+     * delta rounds to nothing (or every leg [safetyGate] would have sized
+     * is rejected outright); otherwise the placed order IDs. Every add goes
+     * through [safetyGate]'s entry check (volatility breaker + live balance
+     * + hard leverage cap) and may be dispatched **smaller** than requested
+     * if the leverage cap clamps it; every close goes through its exit
+     * check instead - see [PreTradeSafetyGate] kdoc.
      */
     private suspend fun dispatchTargetPosition(
         currentSize: Double,
         targetSize: Double,
-        availableBalance: Double,
+        markPrice: Double,
     ): List<String>? {
         if (!riskSettingsStore.autoTradingEnabled) return null
 
@@ -252,38 +299,63 @@ class DecisionLoopScheduler(
             if (abs(targetSize) >= abs(currentSize)) {
                 val addSize = abs(targetSize) - abs(currentSize)
                 if (addSize < minOrderSizeInBaseCoin) return orderIds
-                // Non-negative-balance guardrail (design doc §5): never send
-                // an exposure-increasing order against a real balance we
-                // haven't just confirmed from Bitget's own account endpoint.
-                if (availableBalance <= 0.0) {
-                    Log.w(TAG, "Skipping add: no available balance per last-confirmed account snapshot")
-                    return orderIds
-                }
                 val side = if (targetSign >= 0) PositionSide.LONG else PositionSide.SHORT
-                orderIds += placeOpen(side, addSize)
+                placeApprovedOpen(side, addSize, abs(currentSize), markPrice)?.let { orderIds += it }
             } else {
                 val reduceSize = abs(currentSize) - abs(targetSize)
                 if (reduceSize < minOrderSizeInBaseCoin) return orderIds
                 val currentSide = if (currentSign >= 0) PositionSide.LONG else PositionSide.SHORT
-                orderIds += placeClose(currentSide, reduceSize)
+                placeApprovedClose(currentSide, reduceSize)?.let { orderIds += it }
             }
         } else {
             // Opposite signs: flatten the existing side first, then open
             // the new side if the target isn't itself flat.
             if (abs(currentSize) >= minOrderSizeInBaseCoin) {
                 val currentSide = if (currentSign >= 0) PositionSide.LONG else PositionSide.SHORT
-                orderIds += placeClose(currentSide, abs(currentSize))
+                placeApprovedClose(currentSide, abs(currentSize))?.let { orderIds += it }
             }
             if (abs(targetSize) >= minOrderSizeInBaseCoin) {
-                if (availableBalance <= 0.0) {
-                    Log.w(TAG, "Skipping flip-open: no available balance per last-confirmed account snapshot")
-                    return orderIds
-                }
                 val targetSide = if (targetSign >= 0) PositionSide.LONG else PositionSide.SHORT
-                orderIds += placeOpen(targetSide, abs(targetSize))
+                // The flip's close leg (if any) above already reduced
+                // exposure toward flat; the open leg below starts from flat.
+                placeApprovedOpen(targetSide, abs(targetSize), currentPositionSizeAbs = 0.0, markPrice = markPrice)?.let { orderIds += it }
             }
         }
         return orderIds
+    }
+
+    /** Runs [safetyGate]'s entry check and, if approved, dispatches the (possibly clamped) open. Returns `null` if rejected. */
+    private suspend fun placeApprovedOpen(
+        side: PositionSide,
+        requestedAddSize: Double,
+        currentPositionSizeAbs: Double,
+        markPrice: Double,
+    ): String? {
+        return when (val result = safetyGate.evaluateEntry(currentPositionSizeAbs, requestedAddSize, markPrice)) {
+            is EntrySafetyResult.Rejected -> {
+                Log.w(TAG, "Pre-trade safety gate rejected entry ($side, requested=$requestedAddSize): ${result.reason}")
+                null
+            }
+            is EntrySafetyResult.Approved -> {
+                if (result.approvedAddSizeInBaseCoin < minOrderSizeInBaseCoin) {
+                    Log.w(TAG, "Pre-trade safety gate approved only a dust-sized entry (${result.approvedAddSizeInBaseCoin}); skipping")
+                    null
+                } else {
+                    placeOpen(side, result.approvedAddSizeInBaseCoin)
+                }
+            }
+        }
+    }
+
+    /** Runs [safetyGate]'s exit check and, if approved, dispatches the close. Returns `null` if rejected. */
+    private suspend fun placeApprovedClose(side: PositionSide, sizeInBaseCoin: Double): String? {
+        return when (val result = safetyGate.evaluateExit()) {
+            is ExitSafetyResult.Rejected -> {
+                Log.w(TAG, "Pre-trade safety gate rejected exit ($side, size=$sizeInBaseCoin): ${result.reason}")
+                null
+            }
+            ExitSafetyResult.Approved -> placeClose(side, sizeInBaseCoin)
+        }
     }
 
     private suspend fun placeOpen(side: PositionSide, sizeInBaseCoin: Double): String {
