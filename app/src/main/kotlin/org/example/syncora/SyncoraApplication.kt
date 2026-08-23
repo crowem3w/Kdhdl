@@ -1,6 +1,7 @@
 package org.example.syncora
 
 import android.app.Application
+import org.example.syncora.agent.AgentKillSwitchController
 import org.example.syncora.agent.DecisionLoopScheduler
 import org.example.syncora.agent.ExperienceLogStore
 import org.example.syncora.agent.ModelRollbackController
@@ -255,6 +256,17 @@ class SyncoraApplication : Application() {
             riskSettingsStore = riskSettingsStore,
             safetyGate = preTradeSafetyGate,
             volatilityCircuitBreaker = volatilityCircuitBreaker,
+        )
+    }
+
+    // The Agent tab's manual override: halts decisionLoopScheduler and flattens any open
+    // live position on demand, independent of (and in addition to) stopLossGuard's always-on
+    // exchange-side dead-man's-switch. See AgentKillSwitchController's kdoc.
+    val agentKillSwitchController: AgentKillSwitchController by lazy {
+        AgentKillSwitchController(
+            decisionLoopScheduler = decisionLoopScheduler,
+            riskSettingsStore = riskSettingsStore,
+            liveTradingRepository = liveTradingRepository,
         )
     }
 

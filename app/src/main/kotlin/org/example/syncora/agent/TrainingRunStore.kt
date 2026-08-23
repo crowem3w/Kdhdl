@@ -28,9 +28,39 @@ class TrainingRunStore(context: Context) {
         get() = prefs.getLong(KEY_LAST_MANUAL_ROLLBACK_AT_MS, 0L)
         set(value) = prefs.edit().putLong(KEY_LAST_MANUAL_ROLLBACK_AT_MS, value).apply()
 
+    /**
+     * Epoch millis of the most recent [CpcvPboValidationGate.decide] call, pass **or**
+     * reject - deliberately distinct from [lastPromotionAtMs], which only ever advances on a
+     * *pass*. Without this, a UI showing "last promotion" would look silently stale through an
+     * arbitrarily long run of rejected candidates, even though the batch job is running and
+     * checking on schedule; this is what lets the Agent tab show "gate last ran 4h ago,
+     * rejected" instead of just going quiet.
+     */
+    var lastGateDecisionAtMs: Long
+        get() = prefs.getLong(KEY_LAST_GATE_DECISION_AT_MS, 0L)
+        set(value) = prefs.edit().putLong(KEY_LAST_GATE_DECISION_AT_MS, value).apply()
+
+    /** `true` if the decision at [lastGateDecisionAtMs] was a [GateDecision.Pass]. */
+    var lastGateDecisionPassed: Boolean
+        get() = prefs.getBoolean(KEY_LAST_GATE_DECISION_PASSED, false)
+        set(value) = prefs.edit().putBoolean(KEY_LAST_GATE_DECISION_PASSED, value).apply()
+
+    /**
+     * Human-readable one-liner for [lastGateDecisionAtMs]'s outcome - either
+     * [GateDecision.Reject.reason] verbatim, or a short summary of the winning hyperparameters
+     * and PBO probability on a pass - so a UI can display *something* without reconstructing a
+     * sentence from raw numbers itself.
+     */
+    var lastGateDecisionSummary: String
+        get() = prefs.getString(KEY_LAST_GATE_DECISION_SUMMARY, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_LAST_GATE_DECISION_SUMMARY, value).apply()
+
     private companion object {
         const val PREFS_NAME = "training_run_state"
         const val KEY_LAST_PROMOTION_AT_MS = "last_promotion_at_ms"
         const val KEY_LAST_MANUAL_ROLLBACK_AT_MS = "last_manual_rollback_at_ms"
+        const val KEY_LAST_GATE_DECISION_AT_MS = "last_gate_decision_at_ms"
+        const val KEY_LAST_GATE_DECISION_PASSED = "last_gate_decision_passed"
+        const val KEY_LAST_GATE_DECISION_SUMMARY = "last_gate_decision_summary"
     }
 }

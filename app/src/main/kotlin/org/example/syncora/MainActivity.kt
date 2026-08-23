@@ -24,10 +24,14 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.example.syncora.agent.DecisionOutcome
+import org.example.syncora.agent.DecisionRecord
 import org.example.syncora.bitget.ClosedPaperTrade
 import org.example.syncora.bitget.FeeRates
 import org.example.syncora.bitget.Kline
@@ -237,6 +241,7 @@ class MainActivity : AppCompatActivity() {
         setupLiveTrading()
         setupQuickTradePanel()
         setupQuickTradeScrollGesture()
+        observeAgentTab()
 
         drawingContextToolbar.bind(
             candleChart,
@@ -664,8 +669,94 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this, "Order canceled", Toast.LENGTH_SHORT).show()
                     }
                 },
+                onEngageKillSwitch = {
+                    lifecycleScope.launch {
+                        val result = app.agentKillSwitchController.engage()
+                        quickTradePanel.showKillSwitchResult(result.positionsFlattenedCount, result.positionsFailedToFlatten)
+                        refreshAgentStatus()
+                    }
+                },
+                onResumeAgent = {
+                    app.agentKillSwitchController.resumeLoopOnly()
+                    refreshAgentStatus()
+                },
             ),
         )
+    }
+
+    /**
+     * Feeds the Agent tab. [DecisionLoopScheduler.lastDecision] and
+     * [LiveTradingRepository.positions] are [StateFlow]s, so those two update reactively the
+     * instant a decision tick or a position poll lands. [TrainingRunStore] (SharedPreferences)
+     * and [ExperienceLogStore] (SQLite) aren't reactive sources, so their section is refreshed
+     * on a light poll instead - same tradeoff [performanceMonitor] already makes elsewhere in
+     * this activity for non-Flow telemetry.
+     */
+    private fun observeAgentTab() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    app.decisionLoopScheduler.lastDecision
+                        .combine(liveTradingRepository.positions) { decision, positions -> decision to positions }
+                        .collectLatest { (decision, positions) ->
+                            quickTradePanel.renderAgentStatus(buildAgentStatusUiState(decision, positions))
+                        }
+                }
+                launch {
+                    while (true) {
+                        refreshAgentHistory()
+                        delay(15_000L)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun buildAgentStatusUiState(
+        decision: DecisionRecord?,
+        positions: List<PaperPosition>,
+    ): QuickTradePanel.AgentStatusUiState {
+        val store = app.trainingRunStore
+        return QuickTradePanel.AgentStatusUiState(
+            position = positions.firstOrNull { it.symbol == "BTCUSDT" },
+            lastDecisionAtMs = decision?.timestampMs,
+            lastDecisionSummary = decision?.outcome.describeForAgentTab(),
+            lastPromotionAtMs = store.lastPromotionAtMs,
+            lastGateDecisionAtMs = store.lastGateDecisionAtMs,
+            lastGateDecisionPassed = store.lastGateDecisionPassed,
+            lastGateDecisionSummary = store.lastGateDecisionSummary,
+            autoTradingEnabled = app.riskSettingsStore.autoTradingEnabled,
+        )
+    }
+
+    private fun DecisionOutcome?.describeForAgentTab(): String = when (this) {
+        null -> "No decisions logged yet"
+        is DecisionOutcome.Dispatched -> String.format(
+            Locale.US,
+            "Dispatched — target %.4f → %.4f BTC (%d order(s))",
+            currentPositionSize,
+            targetPositionSize,
+            orderIds.size,
+        )
+        is DecisionOutcome.Skipped -> "Skipped — $reason"
+        is DecisionOutcome.Failed -> "Failed — $message"
+    }
+
+    /** Re-reads [org.example.syncora.agent.TrainingRunStore] and the live position/decision state immediately (e.g. right after a kill-switch action) instead of waiting for [observeAgentTab]'s next poll tick. */
+    private fun refreshAgentStatus() {
+        quickTradePanel.renderAgentStatus(
+            buildAgentStatusUiState(app.decisionLoopScheduler.lastDecision.value, liveTradingRepository.positions.value),
+        )
+    }
+
+    private suspend fun refreshAgentHistory() {
+        val entries = withContext(Dispatchers.IO) {
+            app.experienceLogStore.resolvedRowsSince(0L)
+                .sortedByDescending { it.timestampMs }
+                .take(30)
+                .map { QuickTradePanel.AgentHistoryEntryUiState(it.timestampMs, it.action, it.reward) }
+        }
+        quickTradePanel.renderAgentHistory(entries)
     }
 
     /**

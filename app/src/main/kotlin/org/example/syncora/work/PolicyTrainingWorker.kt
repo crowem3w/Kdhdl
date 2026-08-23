@@ -18,6 +18,7 @@ import org.example.syncora.agent.RolloutWindowBuilder
 import org.example.syncora.ml.PpoHyperparameters
 import org.example.syncora.ml.PpoTrainer
 import java.io.File
+import java.util.Locale
 
 /**
  * The design doc §3.3/§3.6/§4 batch job, wired into `WorkManager` (§2.2
@@ -110,6 +111,9 @@ class PolicyTrainingWorker(
         return when (val decision = CpcvPboValidationGate().decide(performances)) {
             is GateDecision.Reject -> {
                 Log.i(TAG, "Candidate rejected by CPCV/PBO gate: ${decision.reason}")
+                app.trainingRunStore.lastGateDecisionAtMs = System.currentTimeMillis()
+                app.trainingRunStore.lastGateDecisionPassed = false
+                app.trainingRunStore.lastGateDecisionSummary = decision.reason
                 Result.success()
             }
             is GateDecision.Pass -> {
@@ -162,8 +166,19 @@ class PolicyTrainingWorker(
                 "PBO=${decision.pboProbability} over ${decision.splitsEvaluated} splits",
         )
 
+        val gateSummary = String.format(
+            Locale.US,
+            "%s, PBO=%.3f over %d splits",
+            decision.winningHyperparameters,
+            decision.pboProbability,
+            decision.splitsEvaluated,
+        )
+
         if (!app.policyModelStore.promoteCandidateToLive()) {
             Log.e(TAG, "Gate passed but staging the candidate model failed; nothing was promoted")
+            app.trainingRunStore.lastGateDecisionAtMs = trainedAt
+            app.trainingRunStore.lastGateDecisionPassed = false
+            app.trainingRunStore.lastGateDecisionSummary = "Gate passed ($gateSummary) but staging the candidate failed"
             return
         }
 
@@ -171,10 +186,16 @@ class PolicyTrainingWorker(
             Log.e(TAG, "Newly promoted candidate failed to load; rolling back to the previous live model")
             app.policyModelStore.rollbackToPreviousLive()
             app.policyInferenceEngine.reload()
+            app.trainingRunStore.lastGateDecisionAtMs = trainedAt
+            app.trainingRunStore.lastGateDecisionPassed = false
+            app.trainingRunStore.lastGateDecisionSummary = "Gate passed ($gateSummary) but the promoted file failed to load; rolled back"
             return
         }
 
         app.trainingRunStore.lastPromotionAtMs = trainedAt
+        app.trainingRunStore.lastGateDecisionAtMs = trainedAt
+        app.trainingRunStore.lastGateDecisionPassed = true
+        app.trainingRunStore.lastGateDecisionSummary = "Promoted — $gateSummary"
         // Everything this run pulled (and anything older that was somehow
         // still unpruned) is now baked into the promoted model and will
         // never be re-pulled, since the next run's sinceMs is trainedAt.

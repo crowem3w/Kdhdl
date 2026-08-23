@@ -28,6 +28,8 @@ import org.example.syncora.bitget.PaperPosition
 import org.example.syncora.bitget.PaperTradingRepository
 import org.example.syncora.bitget.PendingLimitOrder
 import org.example.syncora.bitget.PositionSide
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 /**
@@ -98,6 +100,10 @@ class QuickTradePanel @JvmOverloads constructor(
         ) -> Unit,
         val onClosePosition: (PaperPosition) -> Unit = {},
         val onCancelPendingOrder: (PendingLimitOrder) -> Unit = {},
+        /** Fired after the user confirms the kill-switch dialog - [MainActivity] is expected to call [org.example.syncora.agent.AgentKillSwitchController.engage] and report back via [showKillSwitchResult] / [renderAgentStatus]. */
+        val onEngageKillSwitch: () -> Unit = {},
+        /** Fired from the "Resume agent" state - [MainActivity] is expected to call [org.example.syncora.agent.AgentKillSwitchController.resumeLoopOnly]. */
+        val onResumeAgent: () -> Unit = {},
     )
 
     private val surfaceColor = Color.parseColor("#0A1015")
@@ -803,21 +809,336 @@ class QuickTradePanel @JvmOverloads constructor(
     /** The existing order-book + order-form + positions/pending-orders UI, unchanged. */
     private lateinit var manualContentView: View
 
-    /**
-     * Intentionally empty for now - agent-driven trading has no UI yet.
-     * Reserves a little breathing room so the tab switch doesn't collapse
-     * the drawer to zero height.
-     */
+    /** Live agent status, decision history, and the manual kill switch - see the "Agent tab" section near the bottom of this class. */
     private lateinit var agentContentView: View
 
     private fun buildModeContent(): View {
         manualContentView = buildSplitRow()
-        agentContentView = FrameLayout(context).apply {
-            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dp(80))
-        }
+        agentContentView = buildAgentContent()
         modeContentContainer = FrameLayout(context)
         modeContentContainer.addView(manualContentView)
         return modeContentContainer
+    }
+
+    // ---------------------------------------------------------------------
+    // Agent tab: live status, decision history, kill switch
+    // ---------------------------------------------------------------------
+
+    /**
+     * Everything the Agent tab's status card needs for one render pass - assembled by
+     * [MainActivity] from [org.example.syncora.agent.DecisionLoopScheduler.lastDecision],
+     * [org.example.syncora.bitget.LiveTradingRepository.positions], and
+     * [org.example.syncora.agent.TrainingRunStore], so this panel stays a dumb render target,
+     * the same contract [render]/[renderOpenPositions]/[renderOrderBook] already follow.
+     */
+    data class AgentStatusUiState(
+        val position: PaperPosition?,
+        val lastDecisionAtMs: Long?,
+        val lastDecisionSummary: String,
+        val lastPromotionAtMs: Long,
+        val lastGateDecisionAtMs: Long,
+        val lastGateDecisionPassed: Boolean,
+        val lastGateDecisionSummary: String,
+        val autoTradingEnabled: Boolean,
+    )
+
+    /** One row of [renderAgentHistory] - a resolved (reward-known) transition off [org.example.syncora.agent.ExperienceLogStore.resolvedRowsSince]. */
+    data class AgentHistoryEntryUiState(
+        val timestampMs: Long,
+        val action: Double,
+        val reward: Double,
+    )
+
+    private val agentTimeFormatter = SimpleDateFormat("MMM d, HH:mm:ss", Locale.US)
+    private var lastAgentAutoTradingEnabled = false
+
+    private lateinit var agentPositionText: TextView
+    private lateinit var agentPositionSubtext: TextView
+    private lateinit var agentLastDecisionText: TextView
+    private lateinit var agentLastDecisionTimeText: TextView
+    private lateinit var agentPromotionText: TextView
+    private lateinit var agentPromotionSubtext: TextView
+    private lateinit var agentKillSwitchButton: TextView
+    private lateinit var agentKillSwitchSubtext: TextView
+    private lateinit var agentHistoryContainer: LinearLayout
+    private lateinit var agentHistoryEmptyText: TextView
+
+    private fun buildAgentContent(): View {
+        val col = LinearLayout(context).apply { orientation = VERTICAL }
+        col.addView(buildAgentStatusCard())
+        col.addView(spacer(12))
+        col.addView(buildAgentKillSwitchCard())
+        col.addView(spacer(12))
+        col.addView(buildAgentHistoryCard())
+        return col
+    }
+
+    private fun agentSectionCard(builder: LinearLayout.() -> Unit): View =
+        LinearLayout(context).apply {
+            orientation = VERTICAL
+            background = GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat()
+                setColor(fieldBackground)
+                setStroke(dp(1), borderColor)
+            }
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            builder()
+        }
+
+    private fun agentSectionLabel(text: String): TextView =
+        TextView(context).apply {
+            this.text = text.uppercase(Locale.US)
+            textSize = 10.5f
+            letterSpacing = 0.05f
+            setTextColor(mutedColor)
+            typeface = Typeface.DEFAULT_BOLD
+        }
+
+    private fun agentDivider(): View =
+        View(context).apply {
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dp(1))
+            setBackgroundColor(borderColor)
+        }
+
+    private fun buildAgentStatusCard(): View = agentSectionCard {
+        addView(agentSectionLabel("Position"))
+        addView(spacer(4))
+        agentPositionText = TextView(context).apply {
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(labelColor)
+        }
+        addView(agentPositionText)
+        agentPositionSubtext = TextView(context).apply {
+            textSize = 11.5f
+            setTextColor(mutedColor)
+        }
+        addView(agentPositionSubtext)
+
+        addView(spacer(12))
+        addView(agentDivider())
+        addView(spacer(12))
+
+        addView(agentSectionLabel("Last decision"))
+        addView(spacer(4))
+        agentLastDecisionText = TextView(context).apply {
+            textSize = 13f
+            setTextColor(labelColor)
+        }
+        addView(agentLastDecisionText)
+        agentLastDecisionTimeText = TextView(context).apply {
+            textSize = 11f
+            setTextColor(mutedColor)
+        }
+        addView(agentLastDecisionTimeText)
+
+        addView(spacer(12))
+        addView(agentDivider())
+        addView(spacer(12))
+
+        addView(agentSectionLabel("Last model promotion"))
+        addView(spacer(4))
+        agentPromotionText = TextView(context).apply {
+            textSize = 13f
+            setTextColor(labelColor)
+        }
+        addView(agentPromotionText)
+        agentPromotionSubtext = TextView(context).apply {
+            textSize = 11f
+            setTextColor(mutedColor)
+        }
+        addView(agentPromotionSubtext)
+    }
+
+    private fun buildAgentKillSwitchCard(): View = agentSectionCard {
+        addView(agentSectionLabel("Manual override"))
+        addView(spacer(6))
+        agentKillSwitchSubtext = TextView(context).apply {
+            textSize = 11.5f
+            setTextColor(mutedColor)
+        }
+        addView(agentKillSwitchSubtext)
+        addView(spacer(10))
+        agentKillSwitchButton = tradeButton("Kill switch — halt & flatten", bearColor) { confirmKillSwitch() }
+        addView(agentKillSwitchButton)
+    }
+
+    private fun buildAgentHistoryCard(): View = agentSectionCard {
+        addView(agentSectionLabel("Decision history"))
+        addView(spacer(6))
+        agentHistoryEmptyText = TextView(context).apply {
+            text = "No resolved decisions logged yet."
+            textSize = 12f
+            setTextColor(mutedColor)
+        }
+        addView(agentHistoryEmptyText)
+        agentHistoryContainer = LinearLayout(context).apply { orientation = VERTICAL }
+        addView(agentHistoryContainer)
+    }
+
+    /**
+     * Guards the destructive action behind an explicit confirmation - this stops live trading
+     * and force-closes a real position, so it should never fire off a single accidental tap.
+     */
+    private fun confirmKillSwitch() {
+        AlertDialog.Builder(context)
+            .setTitle("Engage kill switch?")
+            .setMessage(
+                "This immediately stops the agent's decision loop and closes any open " +
+                    "BTCUSDT position at market. Auto-trading stays off until you resume it.",
+            )
+            .setPositiveButton("Halt & flatten") { dialog, _ ->
+                dialog.dismiss()
+                renderAgentKillSwitchState(engaged = true, busy = true)
+                callbacks?.onEngageKillSwitch?.invoke()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /**
+     * Status feed for the Agent tab - current position, last decision-loop outcome, and last
+     * model promotion/gate result. Separate entry point from [renderOpenPositions] since that
+     * one drives the manual tab's multi-symbol list, while this is a single-symbol summary
+     * plus loop/training telemetry that has nothing to do with the manual order ticket.
+     */
+    fun renderAgentStatus(status: AgentStatusUiState) {
+        lastAgentAutoTradingEnabled = status.autoTradingEnabled
+
+        val position = status.position
+        if (position == null) {
+            agentPositionText.text = "Flat"
+            agentPositionText.setTextColor(mutedColor)
+            agentPositionSubtext.text = "No open BTCUSDT position"
+        } else {
+            val sideLabel = if (position.side == PositionSide.LONG) "Long" else "Short"
+            agentPositionText.text = String.format(Locale.US, "%s %.4f BTC", sideLabel, position.total)
+            agentPositionText.setTextColor(if (position.side == PositionSide.LONG) bullColor else bearColor)
+            val pnlSign = if (position.unrealizedPnl >= 0.0) "+" else ""
+            agentPositionSubtext.text = String.format(
+                Locale.US,
+                "Entry %,.1f · Mark %,.1f · uPnL %s%,.2f USDT",
+                position.entryPrice,
+                position.markPrice,
+                pnlSign,
+                position.unrealizedPnl,
+            )
+        }
+
+        agentLastDecisionText.text = status.lastDecisionSummary
+        agentLastDecisionTimeText.text = status.lastDecisionAtMs
+            ?.let { agentTimeFormatter.format(Date(it)) }
+            ?: "No decisions logged yet"
+
+        if (status.lastPromotionAtMs > 0L) {
+            agentPromotionText.text = "Promoted " + agentTimeFormatter.format(Date(status.lastPromotionAtMs))
+            agentPromotionText.setTextColor(bullColor)
+        } else {
+            agentPromotionText.text = "No model has been promoted yet"
+            agentPromotionText.setTextColor(mutedColor)
+        }
+        agentPromotionSubtext.text = if (status.lastGateDecisionAtMs > 0L) {
+            val outcome = if (status.lastGateDecisionPassed) "pass" else "reject"
+            "Last gate check ($outcome) ${agentTimeFormatter.format(Date(status.lastGateDecisionAtMs))} — ${status.lastGateDecisionSummary}"
+        } else {
+            "No training run has completed a gate check yet"
+        }
+
+        renderAgentKillSwitchState(engaged = !status.autoTradingEnabled, busy = false)
+    }
+
+    /**
+     * Reflects the master [org.example.syncora.bitget.RiskSettingsStore.autoTradingEnabled]
+     * switch plus in-flight state. [busy] disables the button while
+     * [org.example.syncora.agent.AgentKillSwitchController.engage] is running so a slow
+     * network round-trip can't be double-tapped into two concurrent flatten attempts.
+     */
+    fun renderAgentKillSwitchState(engaged: Boolean, busy: Boolean) {
+        agentKillSwitchButton.isEnabled = !busy
+        agentKillSwitchButton.alpha = if (busy) 0.6f else 1f
+        when {
+            busy -> {
+                agentKillSwitchButton.text = "Halting…"
+                agentKillSwitchSubtext.text = "Stopping the decision loop and closing open positions."
+            }
+            engaged -> {
+                agentKillSwitchButton.text = "Resume agent"
+                (agentKillSwitchButton.background as? GradientDrawable)?.setColor(bullColor)
+                agentKillSwitchButton.setOnClickListener { callbacks?.onResumeAgent?.invoke() }
+                agentKillSwitchSubtext.text = "Auto-trading is OFF. The decision loop is halted."
+            }
+            else -> {
+                agentKillSwitchButton.text = "Kill switch — halt & flatten"
+                (agentKillSwitchButton.background as? GradientDrawable)?.setColor(bearColor)
+                agentKillSwitchButton.setOnClickListener { confirmKillSwitch() }
+                agentKillSwitchSubtext.text =
+                    "Auto-trading is ON. This stops the loop immediately and closes any open position at market."
+            }
+        }
+    }
+
+    /**
+     * One-shot result toast after [org.example.syncora.agent.AgentKillSwitchController.engage]
+     * completes - kept separate from [renderAgentStatus] so [MainActivity] doesn't have to
+     * re-derive the whole status card just to report this.
+     */
+    fun showKillSwitchResult(flattenedCount: Int, failedSymbols: List<String>) {
+        val message = when {
+            failedSymbols.isNotEmpty() ->
+                "Loop halted. Flattened $flattenedCount position(s); failed to close: ${failedSymbols.joinToString()}"
+            flattenedCount > 0 -> "Loop halted and $flattenedCount position(s) flattened."
+            else -> "Loop halted. No open positions to flatten."
+        }
+        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+    }
+
+    /**
+     * Decision-history feed for the Agent tab - resolved (reward-known) transitions off
+     * [org.example.syncora.agent.ExperienceLogStore.resolvedRowsSince], newest first. Rebuilds
+     * the row list on each call since this is a bounded, infrequently-refreshed list (see
+     * [MainActivity]'s polling interval), not a hot per-tick update - the same simplicity
+     * tradeoff [renderOpenPositions] already makes for its own list.
+     */
+    fun renderAgentHistory(entries: List<AgentHistoryEntryUiState>) {
+        agentHistoryContainer.removeAllViews()
+        agentHistoryEmptyText.visibility = if (entries.isEmpty()) View.VISIBLE else View.GONE
+        entries.forEach { entry -> agentHistoryContainer.addView(agentHistoryRow(entry)) }
+    }
+
+    private fun agentHistoryRow(entry: AgentHistoryEntryUiState): View {
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            setPadding(0, dp(6), 0, dp(6))
+        }
+        row.addView(
+            TextView(context).apply {
+                text = agentTimeFormatter.format(Date(entry.timestampMs))
+                textSize = 11.5f
+                setTextColor(mutedColor)
+                layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.1f)
+            },
+        )
+        row.addView(
+            TextView(context).apply {
+                text = String.format(Locale.US, "a=%.3f", entry.action)
+                textSize = 11.5f
+                setTextColor(labelColor)
+                gravity = Gravity.CENTER
+                layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+            },
+        )
+        row.addView(
+            TextView(context).apply {
+                val sign = if (entry.reward >= 0.0) "+" else ""
+                text = String.format(Locale.US, "%s%.4f", sign, entry.reward)
+                textSize = 12f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(if (entry.reward >= 0.0) bullColor else bearColor)
+                gravity = Gravity.END
+                layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+            },
+        )
+        return row
     }
 
     // ---------------------------------------------------------------------
