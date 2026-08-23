@@ -6,6 +6,8 @@ import org.example.syncora.agent.RolloutWindow
 import org.tensorflow.lite.Interpreter
 import java.io.File
 import java.io.FileInputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
 import kotlin.math.sqrt
@@ -65,8 +67,7 @@ data class PpoEvaluationResult(
  * This mirrors TensorFlow's own documented on-device-training pattern for
  * Android: a model exported with named `train`/`evaluate`/`export`/`infer`
  * `tf.function` signatures (kept through `TFLiteConverter`), invoked
- * purely by name via [Interpreter.runSignature] /
- * [Interpreter.getSignatureRunner]
+ * purely by name via [Interpreter.runSignature]
  * (https://www.tensorflow.org/lite/examples/on_device_training/overview).
  * This class is the Kotlin-side half of that contract: it doesn't know or
  * care *how* the loss/gradients are computed inside the graph, only that
@@ -258,9 +259,15 @@ class PpoTrainer(private val random: Random = Random.Default) {
         steps.shuffled(random).chunked(minibatchSize)
 
     private fun exportModel(interpreter: Interpreter, outputModelFile: File) {
-        val runner = interpreter.getSignatureRunner(SIGNATURE_EXPORT)
-        runner.run()
-        val buffer = runner.getOutputTensor(OUTPUT_MODEL_BYTES).buffer()
+        // NOTE: `Interpreter.getSignatureRunner()` returning a `SignatureRunner` is
+        // a C++-only TFLite API (`GetSignatureRunner`); the Java/Kotlin bindings
+        // don't expose it. The Java-side equivalent is `runSignature(...)` plus
+        // `getOutputTensorFromSignature(...)` to size the output buffer up front,
+        // since the exported model's byte size isn't known at compile time.
+        val outputTensor = interpreter.getOutputTensorFromSignature(OUTPUT_MODEL_BYTES, SIGNATURE_EXPORT)
+        val buffer: ByteBuffer = ByteBuffer.allocateDirect(outputTensor.numBytes()).order(ByteOrder.nativeOrder())
+        val outputs = mutableMapOf<String, Any>(OUTPUT_MODEL_BYTES to buffer)
+        interpreter.runSignature(emptyMap(), outputs, SIGNATURE_EXPORT)
         buffer.rewind()
         val bytes = ByteArray(buffer.remaining())
         buffer.get(bytes)
