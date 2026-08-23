@@ -23,8 +23,14 @@ class TrainingRunStore(context: Context) {
         get() = prefs.getLong(KEY_LAST_PROMOTION_AT_MS, 0L)
         set(value) = prefs.edit().putLong(KEY_LAST_PROMOTION_AT_MS, value).apply()
 
+    /** Epoch millis of the last successful *manual* [org.example.syncora.agent.ModelRollbackController] call, or `0L` if a manual rollback has never happened. Purely an audit trail - nothing reads this to make a decision - so an incident review can tell when a human last intervened to revert the live model. */
+    var lastManualRollbackAtMs: Long
+        get() = prefs.getLong(KEY_LAST_MANUAL_ROLLBACK_AT_MS, 0L)
+        set(value) = prefs.edit().putLong(KEY_LAST_MANUAL_ROLLBACK_AT_MS, value).apply()
+
     private companion object {
         const val PREFS_NAME = "training_run_state"
         const val KEY_LAST_PROMOTION_AT_MS = "last_promotion_at_ms"
+        const val KEY_LAST_MANUAL_ROLLBACK_AT_MS = "last_manual_rollback_at_ms"
     }
 }

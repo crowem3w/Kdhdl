@@ -3,6 +3,7 @@ package org.example.syncora
 import android.app.Application
 import org.example.syncora.agent.DecisionLoopScheduler
 import org.example.syncora.agent.ExperienceLogStore
+import org.example.syncora.agent.ModelRollbackController
 import org.example.syncora.agent.TrainingRunStore
 import org.example.syncora.bitget.BitgetEnvironment
 import org.example.syncora.bitget.BitgetFeeRateClient
@@ -166,6 +167,19 @@ class SyncoraApplication : Application() {
 
     val trainingRunStore: TrainingRunStore by lazy {
         TrainingRunStore(applicationContext)
+    }
+
+    // The manual counterpart to PolicyTrainingWorker's automatic
+    // rollback-on-load-failure: a human-triggered path to revert to the
+    // previous live model if a promoted candidate turns out to underperform
+    // once it's actually trading live, which isn't something any automatic
+    // check can detect at promotion time. See ModelRollbackController's kdoc.
+    val modelRollbackController: ModelRollbackController by lazy {
+        ModelRollbackController(
+            policyModelStore = policyModelStore,
+            policyInferenceEngine = policyInferenceEngine,
+            trainingRunStore = trainingRunStore,
+        )
     }
 
     // Independent client/credentials read from the same encrypted store as
