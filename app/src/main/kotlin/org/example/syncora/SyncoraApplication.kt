@@ -11,6 +11,7 @@ import org.example.syncora.bitget.LiveTradingRepository
 import org.example.syncora.bitget.LocalPaperTradingStore
 import org.example.syncora.bitget.PaperTradingRepository
 import org.example.syncora.bitget.RiskSettingsStore
+import org.example.syncora.bitget.StateVectorBuilder
 import org.example.syncora.bitget.StopLossGuard
 import org.example.syncora.bitget.Timeframe
 import org.example.syncora.bitget.TradingChartPipeline
@@ -63,6 +64,12 @@ class SyncoraApplication : Application() {
         BitgetLiveCredentialsStore(applicationContext)
     }
 
+    // Public, unauthenticated market data - shared by PaperTradingRepository's
+    // funding-accrual job and StateVectorBuilder's F_t reading (design doc
+    // §3.1) so both draw from the same client/cache instead of each opening
+    // their own connection.
+    val fundingRateClient: BitgetFundingRateClient by lazy { BitgetFundingRateClient() }
+
     // Fully local paper trading: no trading permissions, no exchange
     // matching engine, no Demo API Key - every position, fill, and balance
     // is simulated entirely on-device. It reads a few things off the
@@ -87,7 +94,7 @@ class SyncoraApplication : Application() {
             markPriceProvider = { pipeline.klines.value.lastOrNull()?.close },
             feeRateClient = BitgetFeeRateClient(),
             feeRateCredentialsProvider = { liveCredentialsStore.load() },
-            fundingRateClient = BitgetFundingRateClient(),
+            fundingRateClient = fundingRateClient,
             depthSnapshotProvider = { depthPipeline.depth.value },
             tradeFlow = tradeSocket.trades,
         )
@@ -109,6 +116,20 @@ class SyncoraApplication : Application() {
     // repository is polling positions.
     val stopLossGuard: StopLossGuard by lazy {
         StopLossGuard(credentialsStore = liveCredentialsStore, riskSettingsStore = riskSettingsStore)
+    }
+
+    // Assembles the design doc's §3.1 MDP state S_t = [b_t, h_t, p_t, f_t,
+    // q_t, F_t] for BTCUSDT on demand - see StateVectorBuilder.snapshot(),
+    // the function meant to be called at each decision boundary (§3.6).
+    // Reuses the already-running liveTradingRepository/pipeline/funding
+    // client rather than opening any new connections of its own.
+    val stateVectorBuilder: StateVectorBuilder by lazy {
+        StateVectorBuilder(
+            liveTradingRepository = liveTradingRepository,
+            chartPipeline = pipeline,
+            fundingRateClient = fundingRateClient,
+            symbol = "BTCUSDT",
+        )
     }
 
     private var marketDataStarted = false
