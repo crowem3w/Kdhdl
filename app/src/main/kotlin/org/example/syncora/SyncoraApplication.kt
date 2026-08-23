@@ -15,6 +15,8 @@ import org.example.syncora.bitget.StateVectorBuilder
 import org.example.syncora.bitget.StopLossGuard
 import org.example.syncora.bitget.Timeframe
 import org.example.syncora.bitget.TradingChartPipeline
+import org.example.syncora.ml.PolicyInferenceEngine
+import org.example.syncora.ml.PolicyModelStore
 
 /**
  * Holds the market-data pipelines at application scope instead of activity scope.
@@ -130,6 +132,20 @@ class SyncoraApplication : Application() {
             fundingRateClient = fundingRateClient,
             symbol = "BTCUSDT",
         )
+    }
+
+    // Design doc §3.3's "current frozen TFLite policy": file-management
+    // (policyModelStore) and inference (policyInferenceEngine) are kept as
+    // separate lazies so a future WorkManager training job can depend on
+    // just the former (to stage/promote a candidate) without pulling in
+    // TFLite's Interpreter, matching how liveTradingRepository/pipeline are
+    // already split from the things that consume them.
+    val policyModelStore: PolicyModelStore by lazy {
+        PolicyModelStore(applicationContext)
+    }
+
+    val policyInferenceEngine: PolicyInferenceEngine by lazy {
+        PolicyInferenceEngine(context = applicationContext, modelStore = policyModelStore)
     }
 
     private var marketDataStarted = false
