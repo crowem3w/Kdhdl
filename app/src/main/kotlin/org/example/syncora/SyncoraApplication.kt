@@ -2,6 +2,8 @@ package org.example.syncora
 
 import android.app.Application
 import org.example.syncora.agent.DecisionLoopScheduler
+import org.example.syncora.agent.ExperienceLogStore
+import org.example.syncora.agent.TrainingRunStore
 import org.example.syncora.bitget.BitgetEnvironment
 import org.example.syncora.bitget.BitgetFeeRateClient
 import org.example.syncora.bitget.BitgetFundingRateClient
@@ -20,6 +22,7 @@ import org.example.syncora.bitget.Timeframe
 import org.example.syncora.bitget.TradingChartPipeline
 import org.example.syncora.ml.PolicyInferenceEngine
 import org.example.syncora.ml.PolicyModelStore
+import org.example.syncora.work.TrainingScheduler
 
 /**
  * Holds the market-data pipelines at application scope instead of activity scope.
@@ -151,6 +154,20 @@ class SyncoraApplication : Application() {
         PolicyInferenceEngine(context = applicationContext, modelStore = policyModelStore)
     }
 
+    // Design doc §3.6's append-only two-phase-reward log and §3.3's
+    // cross-run promotion watermark - both consumed by
+    // [org.example.syncora.work.PolicyTrainingWorker], not by the live
+    // decision loop (see DecisionLoopScheduler's kdoc: logging decisions
+    // into this store is a separate, not-yet-wired-up concern from live
+    // inference/dispatch).
+    val experienceLogStore: ExperienceLogStore by lazy {
+        ExperienceLogStore(applicationContext)
+    }
+
+    val trainingRunStore: TrainingRunStore by lazy {
+        TrainingRunStore(applicationContext)
+    }
+
     // Independent client/credentials read from the same encrypted store as
     // liveTradingRepository, same pattern StopLossGuard already uses - the
     // decision loop's order dispatch doesn't need liveTradingRepository's
@@ -178,6 +195,19 @@ class SyncoraApplication : Application() {
             tradingClient = liveTradingClient,
             riskSettingsStore = riskSettingsStore,
         )
+    }
+
+    /**
+     * Schedules the §3.3/§3.6/§4 daily batch-training job (see
+     * [TrainingScheduler]) at process start, independent of whether the
+     * foreground service or any Activity is ever created - `WorkManager`
+     * itself survives process death, so this only needs to run once per
+     * install to take effect, but [TrainingScheduler.schedule]'s `KEEP`
+     * policy makes calling it on every app start harmless.
+     */
+    override fun onCreate() {
+        super.onCreate()
+        TrainingScheduler.schedule(this)
     }
 
     private var marketDataStarted = false

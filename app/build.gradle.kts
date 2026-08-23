@@ -37,4 +37,5 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.security.crypto)
     implementation(libs.tensorflow.lite)
+    implementation(libs.androidx.work.runtime.ktx)
 }

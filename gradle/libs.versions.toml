@@ -7,6 +7,7 @@ coroutines = "1.9.0"
 lifecycleRuntimeKtx = "2.8.7"
 securityCrypto = "1.1.0-alpha06"
 tensorflowLite = "2.16.1"
+workManager = "2.10.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -21,6 +22,10 @@ androidx-security-crypto = { module = "androidx.security:security-crypto", versi
 # group here since it's the long-stable, still-fully-supported artifact and a
 # straight package-name swap to the LiteRT group later needs no API changes.
 tensorflow-lite = { module = "org.tensorflow:tensorflow-lite", version.ref = "tensorflowLite" }
+# Backs TrainingScheduler/PolicyTrainingWorker (design doc §2.2 item 2): the
+# daily PPO batch-training job needs to survive process death/reboots
+# between scheduled runs, which is exactly what WorkManager is for.
+androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workManager" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
