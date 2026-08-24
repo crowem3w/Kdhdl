@@ -51,6 +51,12 @@ class ExperienceLogStoreKillRestartTest {
         store.backfillDeltaV(id1, nextState = doubleArrayOf(1.1), nextTimestampMs = 300_000L, marketRewardComponent = 0.05)
         assertEquals("sanity check: the committed row should be resolved before the kill", 1, store.resolvedRowsSince(0L).size)
 
+        // Release the store's own connection before simulating the kill. Leaving it open would
+        // mean three separate connections (store, rawDb, restarted) to the same file inside one
+        // JVM process at once - not representative of the real single-owner-per-process scenario
+        // this test is trying to approximate, and a needless source of same-process lock noise.
+        store.close()
+
         // Simulate a kill mid-transaction: open the SAME underlying file with a raw connection,
         // start a transaction, make an uncommitted insert, and abandon it (close without
         // committing) - see class doc for why this is the same-process approximation.

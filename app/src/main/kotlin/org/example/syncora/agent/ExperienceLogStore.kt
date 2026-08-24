@@ -138,6 +138,19 @@ class ExperienceLogStore(context: Context) {
     }
 
     private inner class DbHelper(ctx: Context) : SQLiteOpenHelper(ctx, DB_NAME, null, DB_VERSION) {
+        override fun onConfigure(db: SQLiteDatabase) {
+            super.onConfigure(db)
+            // A fresh connection opened right after an abrupt process death can transiently
+            // observe the previous connection's lock before the OS has fully released it (or,
+            // same-process, before SQLite's own close() path has released it - see
+            // ExperienceLogStoreKillRestartTest's doc comment on same-process kill simulation).
+            // Without this, that transient lock surfaces as an immediate SQLiteDatabaseLockedException
+            // instead of the recoverable condition it actually is. A busy timeout makes SQLite retry
+            // internally instead of failing fast, which is the standard fix for transient
+            // SQLITE_BUSY/SQLITE_LOCKED and costs nothing on the non-contended path.
+            db.execSQL("PRAGMA busy_timeout = 5000")
+        }
+
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL(
                 """
@@ -402,6 +415,17 @@ class ExperienceLogStore(context: Context) {
     /** Wipes the entire log. Intended for the same kind of "reset local account" flow [LocalPaperTradingStore.clear] serves - not for routine use. */
     fun clear() {
         dbHelper.writableDatabase.delete(TABLE, null, null)
+    }
+
+    /**
+     * Releases the underlying [SQLiteOpenHelper] connection. Not part of the normal app
+     * lifecycle - production code treats this store as living for the process's lifetime, same
+     * as [org.example.syncora.bitget.LocalPaperTradingStore] - but tests that open more than one
+     * [ExperienceLogStore] against the same file (e.g. simulating a restart) should call this on
+     * the old instance first so there's only ever one owner of the file at a time.
+     */
+    fun close() {
+        dbHelper.close()
     }
 
     private data class RowSnapshot(
