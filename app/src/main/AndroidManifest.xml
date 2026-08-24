@@ -48,6 +48,21 @@
             android:exported="false"
             android:theme="@style/Theme.Test.Onboarding" />
 
+        <!-- On-device verification screen for the CPCV/PBO gate and ExperienceLogStore
+             kill/restart durability (goals 2 and 3). Its own LAUNCHER entry so it's reachable
+             straight from the home screen/app drawer without needing a computer or touching
+             MainActivity's UI - see DiagnosticsActivity's kdoc. -->
+        <activity
+            android:name=".diagnostics.DiagnosticsActivity"
+            android:exported="true"
+            android:label="Syncora Verify"
+            android:theme="@style/Theme.Test">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <!-- Owns the market-data/live-trading pipeline lifecycle instead of
              MainActivity - see MarketDataForegroundService's kdoc. Not
              exported: only this app starts/stops it. -->

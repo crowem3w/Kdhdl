@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="#111318">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Syncora Verification"
+        android:textColor="#FFFFFF"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:paddingBottom="4dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Runs against the real ValidationGate / CombinatorialPurgedCrossValidator and ExperienceLogStore classes, on-device. No computer, emulator, or Gradle test task involved."
+        android:textColor="#9AA0AC"
+        android:textSize="12sp"
+        android:paddingBottom="12dp" />
+
+    <Button
+        android:id="@+id/runGateCheckButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Run gate check (goal 3)"
+        android:layout_marginBottom="8dp" />
+
+    <Button
+        android:id="@+id/runKillTestButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Run kill test (goal 2) — will close the app"
+        android:layout_marginBottom="12dp" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#000000">
+
+        <TextView
+            android:id="@+id/logTextView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="10dp"
+            android:fontFamily="monospace"
+            android:textColor="#B7F5B0"
+            android:textSize="11sp"
+            android:text="Ready." />
+    </ScrollView>
+
+</LinearLayout>

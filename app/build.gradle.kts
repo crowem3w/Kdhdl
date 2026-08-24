@@ -38,4 +38,12 @@ dependencies {
     implementation(libs.androidx.security.crypto)
     implementation(libs.tensorflow.lite)
     implementation(libs.androidx.work.runtime.ktx)
+
+    // Test-only: CpcvPboValidationGateTest is pure-JVM (ValidationGate.kt/
+    // CombinatorialPurgedCrossValidator.kt have no Android imports), runs via `./gradlew test`.
+    testImplementation(libs.junit)
+    // Test-only: ExperienceLogStoreKillRestartTest exercises the real ExperienceLogStore class
+    // against Robolectric's shadowed android.database.sqlite, without needing a device/emulator.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }
