@@ -480,11 +480,6 @@ class CandlestickChartView @JvmOverloads constructor(
     private val crosshairTimeFormat = java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.US)
 
     private val drawingAccentColor = Color.parseColor("#2962FF")
-    private val drawingLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = drawingAccentColor
-        strokeWidth = dp(1.6f)
-        style = Paint.Style.STROKE
-    }
     private val drawingPendingLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = drawingAccentColor
         strokeWidth = dp(1.6f)

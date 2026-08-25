@@ -164,8 +164,6 @@ class MainActivity : AppCompatActivity() {
     private val bearColor = Color.parseColor("#FF5A6E")
     private val mutedColor = Color.parseColor("#8A96A3")
     private val inactivePillTextColor = Color.parseColor("#8A96A3")
-    private val activePillBgColor = Color.parseColor("#102A2B")
-    private val timeframeContainerColor = Color.parseColor("#0A1015")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
