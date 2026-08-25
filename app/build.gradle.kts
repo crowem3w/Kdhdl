@@ -15,11 +15,32 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
+
+        // AndroidJUnitRunner drives the Task 12 resilience harness (and any
+        // other instrumented tests) via `./gradlew connectedDebugAndroidTest`.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    buildTypes {
+        debug {
+            // Gates org.example.syncora.resilience's androidTest harness -
+            // see that package's kdoc. Debug-only so it can never ship in a
+            // release build; the harness's own @Before also hard-asserts on
+            // this flag as a second line of defense.
+            buildConfigField("boolean", "ENABLE_RESILIENCE_TEST_HARNESS", "true")
+        }
+        release {
+            buildConfigField("boolean", "ENABLE_RESILIENCE_TEST_HARNESS", "false")
+        }
     }
 }
 
@@ -39,11 +60,10 @@ dependencies {
     implementation(libs.tensorflow.lite)
     implementation(libs.androidx.work.runtime.ktx)
 
-    // Test-only: CpcvPboValidationGateTest is pure-JVM (ValidationGate.kt/
-    // CombinatorialPurgedCrossValidator.kt have no Android imports), runs via `./gradlew test`.
-    testImplementation(libs.junit)
-    // Test-only: ExperienceLogStoreKillRestartTest exercises the real ExperienceLogStore class
-    // against Robolectric's shadowed android.database.sqlite, without needing a device/emulator.
-    testImplementation(libs.robolectric)
-    testImplementation(libs.androidx.test.core)
+    // Task 12 End-to-End Pipeline Resilience Test (Paper Mode) harness only
+    // - see app/src/androidTest/kotlin/org/example/syncora/resilience/.
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(libs.androidx.work.testing)
+    androidTestImplementation(libs.androidx.uiautomator) // for process kill simulation
 }

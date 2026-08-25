@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.onEach
 import org.example.syncora.bitget.BitgetTradingRestClient
+import org.example.syncora.bitget.MdpStateSnapshot
 import org.example.syncora.bitget.OrderTicket
 import org.example.syncora.bitget.PositionSide
 import org.example.syncora.bitget.RiskSettingsStore
@@ -21,13 +22,17 @@ import org.example.syncora.bitget.StateVectorBuilder
 import org.example.syncora.bitget.StateVectorUnavailableException
 import org.example.syncora.bitget.TradingChartPipeline
 import org.example.syncora.ml.PolicyInferenceEngine
+import org.example.syncora.ml.PolicyModelStore
+import org.example.syncora.ml.PpoTrainer
 import org.example.syncora.risk.EntrySafetyResult
 import org.example.syncora.risk.ExitSafetyResult
 import org.example.syncora.risk.PreTradeSafetyGate
 import org.example.syncora.risk.VolatilityCircuitBreaker
 import java.util.Locale
 import java.util.Random
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.ln
 import kotlin.math.sign
 
 /**
@@ -115,13 +120,35 @@ data class DecisionRecord(
  *   never be blocked by the same checks that gate entries (see that
  *   method's kdoc).
  *
+ * **Experience logging (§3.6 two-phase log).** Every tick, once a decision
+ * is made, logs `S_t`/`a_t`/`log π(a_t|s_t)`/`V(s_t)` to [experienceLogStore]
+ * via [ExperienceLogStore.logDecision] - regardless of whether
+ * [dispatchTargetPosition] actually placed an order, since a `Skipped`
+ * tick (auto-trading off, dust delta, etc.) is still a real `(s_t, a_t)`
+ * the policy took and the critic scored. The *previous* tick's row is then
+ * back-filled via [ExperienceLogStore.backfillDeltaV] now that this tick's
+ * `S_{t+1}` is known - see [logAndBackfill]. Funding-settlement backfill
+ * ([ExperienceLogStore.backfillFundingSettlement]) is a separate write
+ * path this class doesn't drive; see [PaperTradingRepository][org.example.syncora.bitget.PaperTradingRepository]'s
+ * funding job.
+ *
+ * The reward this class computes and hands to [ExperienceLogStore.backfillDeltaV]
+ * as `marketRewardComponent` is currently a **simplified placeholder** -
+ * the raw change in `balance + unrealizedPnl` between ticks - not yet the
+ * full design-doc §3.5 formula (`Δv_t - c_t - λ_var·σ_t² - λ_dd·DD_t`:
+ * transaction costs, a variance penalty, and a drawdown penalty are all
+ * still TODO). This is enough for the Task 12 resilience harness to
+ * exercise the real logging/backfill/resolution machinery end-to-end;
+ * getting the reward shaping itself right is separate follow-up work.
+ *
  * **Not this class's job.** The exchange-side dead-man's-switch stop-loss
  * (§2.2/§5) is [org.example.syncora.bitget.StopLossGuard]'s responsibility,
  * driven off the same position stream this loop trades against - it runs
  * independently and doesn't need this scheduler alive to keep protecting
- * an open position. The experience log / two-phase reward backfill (§3.6)
- * and the batch PPO retrain (§3.3/§4) are separate, not-yet-built
- * components; this class only owns live inference + dispatch.
+ * an open position. The batch PPO retrain itself (§3.3/§4) is a separate
+ * component ([org.example.syncora.work.PolicyTrainingWorker]); this class
+ * only owns live inference + dispatch + logging the transitions that job
+ * eventually consumes.
  */
 class DecisionLoopScheduler(
     private val chartPipeline: TradingChartPipeline,
@@ -133,6 +160,11 @@ class DecisionLoopScheduler(
     private val safetyGate: PreTradeSafetyGate,
     /** Consulted before sizing, to force the target position to flat when tripped - see class kdoc. */
     private val volatilityCircuitBreaker: VolatilityCircuitBreaker,
+    /** Design doc §3.6 two-phase log - see class kdoc's "Experience logging" section. */
+    private val experienceLogStore: ExperienceLogStore,
+    /** Source of `V(s_t)` at decision time via [PpoTrainer.estimateValue] against the current live model - see [criticValue]. */
+    private val policyModelStore: PolicyModelStore,
+    private val ppoTrainer: PpoTrainer = PpoTrainer(),
     private val symbol: String = "BTCUSDT",
     /** Must match (or be tighter than) [PolicyInferenceEngine]'s own `actionLeverageCap` - see kdoc above. */
     private val actionLeverageCap: Double = 3.0,
@@ -163,6 +195,20 @@ class DecisionLoopScheduler(
     val lastDecision: StateFlow<DecisionRecord?> = _lastDecision.asStateFlow()
 
     private var lastActedStartTimeMs: Long = -1L
+
+    /**
+     * The previous tick's [ExperienceLogStore.logDecision] row id, held in
+     * memory only (matching [ExperienceLogStore.logDecision]'s kdoc: "the
+     * caller must hold onto [the id] - in-memory is fine"). Backfilled by
+     * *this* tick once its own `S_t` is available, since that's the
+     * previous row's `S_{t+1}`. A process death between logging a row and
+     * this backfill loses only the in-memory id, not the row itself - the
+     * row sits `pending` in SQLite and [logAndBackfill] simply starts a
+     * fresh chain on relaunch rather than trying to resume the broken
+     * link; see the resilience harness's `assertNoOrphanedPendingRows`.
+     */
+    private var pendingRowId: Long? = null
+    private var pendingMarketValue: Double? = null
 
     /** Idempotent, like the other lifecycle-bound pieces ([org.example.syncora.bitget.StopLossGuard], `TradingChartPipeline`) - safe to call repeatedly. */
     fun start() {
@@ -225,6 +271,8 @@ class DecisionLoopScheduler(
         val rawNoise = random.nextGaussian() * explorationNoiseStdDev
         val clippedNoise = rawNoise.coerceIn(-explorationNoiseClip, explorationNoiseClip)
         val noisyAction = (meanAction + clippedNoise).coerceIn(-actionLeverageCap, actionLeverageCap)
+
+        logAndBackfill(snapshot, meanAction = meanAction, dispatchedAction = noisyAction)
 
         if (snapshot.markPrice <= 0.0) {
             return DecisionOutcome.Skipped("no valid mark price to size against")
@@ -386,4 +434,74 @@ class DecisionLoopScheduler(
     // StopLossGuard makes - a production build should size this off
     // BTCUSDT's actual contract precision rather than hardcoding it.
     private fun formatSize(size: Double): String = String.format(Locale.US, "%.3f", size)
+
+    /**
+     * Design doc §3.6 two-phase log, one tick's worth: back-fills the
+     * *previous* row (this tick's `S_t` is that row's `S_{t+1}`), then
+     * logs this tick's own `(S_t, a_t, log π, V(s_t))` as a fresh pending
+     * row - see [pendingRowId]'s kdoc for why these are two independent
+     * steps rather than one atomic "advance the chain" operation.
+     */
+    private fun logAndBackfill(snapshot: MdpStateSnapshot, meanAction: Double, dispatchedAction: Double) {
+        val currentMarketValue = snapshot.balance + snapshot.unrealizedPnl
+
+        val previousRowId = pendingRowId
+        val previousMarketValue = pendingMarketValue
+        if (previousRowId != null && previousMarketValue != null) {
+            experienceLogStore.backfillDeltaV(
+                rowId = previousRowId,
+                nextState = snapshot.toDoubleArray(),
+                nextTimestampMs = snapshot.timestampMs,
+                marketRewardComponent = currentMarketValue - previousMarketValue,
+            )
+        }
+
+        // Density of the actual dispatched (post-clip, post-clamp) action
+        // under the exploration distribution it was drawn from,
+        // Normal(meanAction, explorationNoiseStdDev) - an approximation
+        // where clipping/clamping bit, but exact whenever they didn't.
+        val logProb = gaussianLogProb(dispatchedAction, mean = meanAction, stdDev = explorationNoiseStdDev)
+        val valueEstimate = criticValue(snapshot)
+
+        val newRowId = experienceLogStore.logDecision(
+            PendingExperienceEntry(
+                timestampMs = snapshot.timestampMs,
+                symbol = symbol,
+                state = snapshot.toDoubleArray(),
+                action = dispatchedAction,
+                logProb = logProb,
+                valueEstimate = valueEstimate,
+            ),
+        )
+        pendingRowId = if (newRowId >= 0) newRowId else null
+        pendingMarketValue = if (newRowId >= 0) currentMarketValue else null
+    }
+
+    /**
+     * `V(s_t)` via [PpoTrainer.estimateValue] against the current live
+     * model. `0.0` (a neutral placeholder, not a real estimate) before any
+     * model has ever been promoted - matches [PolicyTrainingWorker][org.example.syncora.work.PolicyTrainingWorker]
+     * treating "no live model yet" as a legitimate not-ready state rather
+     * than an error.
+     *
+     * NOTE: this re-opens a TFLite `Interpreter` on every call (same cost
+     * [PolicyTrainingWorker.evaluateAcrossSplits] pays per split/config) -
+     * fine for the cadence a kline-close decision loop runs at, but a
+     * production pass should share one `Interpreter` with
+     * [PolicyInferenceEngine] instead of instantiating a fresh one per tick.
+     */
+    private fun criticValue(snapshot: MdpStateSnapshot): Double {
+        if (!policyModelStore.hasLiveModel()) return 0.0
+        return try {
+            ppoTrainer.estimateValue(policyModelStore.liveModelFile, snapshot.toDoubleArray())
+        } catch (e: Exception) {
+            Log.w(TAG, "Critic value estimate failed, logging 0.0: ${e.message}")
+            0.0
+        }
+    }
+
+    private fun gaussianLogProb(x: Double, mean: Double, stdDev: Double): Double {
+        val variance = stdDev * stdDev
+        return -0.5 * ln(2 * PI * variance) - ((x - mean) * (x - mean)) / (2 * variance)
+    }
 }

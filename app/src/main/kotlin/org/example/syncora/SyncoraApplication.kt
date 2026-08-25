@@ -202,11 +202,9 @@ class SyncoraApplication : Application() {
     }
 
     // Design doc §3.6's append-only two-phase-reward log and §3.3's
-    // cross-run promotion watermark - both consumed by
-    // [org.example.syncora.work.PolicyTrainingWorker], not by the live
-    // decision loop (see DecisionLoopScheduler's kdoc: logging decisions
-    // into this store is a separate, not-yet-wired-up concern from live
-    // inference/dispatch).
+    // cross-run promotion watermark. Written by decisionLoopScheduler every
+    // tick (see DecisionLoopScheduler's "Experience logging" kdoc section)
+    // and read by [org.example.syncora.work.PolicyTrainingWorker].
     val experienceLogStore: ExperienceLogStore by lazy {
         ExperienceLogStore(applicationContext)
     }
@@ -256,6 +254,8 @@ class SyncoraApplication : Application() {
             riskSettingsStore = riskSettingsStore,
             safetyGate = preTradeSafetyGate,
             volatilityCircuitBreaker = volatilityCircuitBreaker,
+            experienceLogStore = experienceLogStore,
+            policyModelStore = policyModelStore,
         )
     }
 

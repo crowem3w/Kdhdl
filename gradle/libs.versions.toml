@@ -8,14 +8,12 @@ lifecycleRuntimeKtx = "2.8.7"
 securityCrypto = "1.1.0-alpha06"
 tensorflowLite = "2.16.1"
 workManager = "2.10.0"
-junit = "4.13.2"
-robolectric = "4.14.1"
-androidxTestCore = "1.6.1"
+androidxTestJunit = "1.2.1"
+espressoCore = "3.6.1"
+workTesting = "2.10.0"
+uiautomator = "2.3.0"
 
 [libraries]
-junit = { module = "junit:junit", version.ref = "junit" }
-robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
-androidx-test-core = { module = "androidx.test:core", version.ref = "androidxTestCore" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
@@ -32,6 +30,14 @@ tensorflow-lite = { module = "org.tensorflow:tensorflow-lite", version.ref = "te
 # daily PPO batch-training job needs to survive process death/reboots
 # between scheduled runs, which is exactly what WorkManager is for.
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workManager" }
+# androidTest-only: backs the Task 12 End-to-End Pipeline Resilience Test
+# harness (org.example.syncora.resilience) - instrumented-test scaffolding,
+# process-kill simulation, and WorkManager's TestDriver. Never pulled into
+# the shipped app; see app/build.gradle.kts androidTestImplementation block.
+androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestJunit" }
+androidx-espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "espressoCore" }
+androidx-work-testing = { module = "androidx.work:work-testing", version.ref = "workTesting" }
+androidx-uiautomator = { module = "androidx.test.uiautomator:uiautomator", version.ref = "uiautomator" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

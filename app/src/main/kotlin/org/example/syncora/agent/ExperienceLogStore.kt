@@ -138,19 +138,6 @@ class ExperienceLogStore(context: Context) {
     }
 
     private inner class DbHelper(ctx: Context) : SQLiteOpenHelper(ctx, DB_NAME, null, DB_VERSION) {
-        override fun onConfigure(db: SQLiteDatabase) {
-            super.onConfigure(db)
-            // A fresh connection opened right after an abrupt process death can transiently
-            // observe the previous connection's lock before the OS has fully released it (or,
-            // same-process, before SQLite's own close() path has released it - see
-            // ExperienceLogStoreKillRestartTest's doc comment on same-process kill simulation).
-            // Without this, that transient lock surfaces as an immediate SQLiteDatabaseLockedException
-            // instead of the recoverable condition it actually is. A busy timeout makes SQLite retry
-            // internally instead of failing fast, which is the standard fix for transient
-            // SQLITE_BUSY/SQLITE_LOCKED and costs nothing on the non-contended path.
-            db.execSQL("PRAGMA busy_timeout = 5000")
-        }
-
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL(
                 """
@@ -397,6 +384,45 @@ class ExperienceLogStore(context: Context) {
         }
     }
 
+    // --- Read-only aggregate queries below this point exist for health-check/telemetry use and
+    // are exercised most heavily by the Task 12 resilience harness's ExperienceLogAssertions -
+    // none of them mutate state, so they're safe to call from any thread/context. ---
+
+    /** Total row count, resolved or pending - the basic "did a kill/restart lose any rows" check. */
+    fun countAll(): Int = scalarCount("SELECT COUNT(*) FROM $TABLE")
+
+    /** Rows whose [RewardStatus] is anything other than [status] - `0` means every row has converged to [status]. */
+    fun countWhereStatusNot(status: RewardStatus): Int =
+        scalarCount("SELECT COUNT(*) FROM $TABLE WHERE $COL_REWARD_STATUS != ?", status.toColumn())
+
+    /** As [countWhereStatusNot], but additionally restricted to rows logged strictly before [before] - "not yet resolved, and it's had long enough to be". */
+    fun countWhereStatusNot(status: RewardStatus, before: Long): Int =
+        scalarCount(
+            "SELECT COUNT(*) FROM $TABLE WHERE $COL_REWARD_STATUS != ? AND $COL_TIMESTAMP_MS < ?",
+            status.toColumn(),
+            before.toString(),
+        )
+
+    /** Delta-v-resolved rows whose funding half never landed - `0` after a [backfillFundingSettlement] call means every affected row picked it up. */
+    fun countWhereFundingComponentNull(): Int =
+        scalarCount(
+            "SELECT COUNT(*) FROM $TABLE WHERE $COL_DELTA_V_RESOLVED = 1 AND $COL_EXPECTED_FUNDING_EVENTS > 0 AND $COL_FUNDING_EVENTS_APPLIED < $COL_EXPECTED_FUNDING_EVENTS",
+        )
+
+    /** Rows still [RewardStatus.PENDING] whose decision timestamp is older than [cutoffMs] - a non-zero result after a kill/restart means resolution didn't resume correctly. */
+    fun countPendingOlderThan(cutoffMs: Long): Int =
+        scalarCount(
+            "SELECT COUNT(*) FROM $TABLE WHERE $COL_REWARD_STATUS = ? AND $COL_TIMESTAMP_MS < ?",
+            STATUS_PENDING,
+            cutoffMs.toString(),
+        )
+
+    private fun scalarCount(sql: String, vararg args: String): Int {
+        dbHelper.readableDatabase.rawQuery(sql, args).use { cursor ->
+            return if (cursor.moveToFirst()) cursor.getInt(0) else 0
+        }
+    }
+
     /**
      * Deletes resolved rows older than [beforeMs]. Not called automatically anywhere - the log
      * is append-only by design (§3.6) and it's up to whatever drives the §3.3 batch job to prune
@@ -415,17 +441,6 @@ class ExperienceLogStore(context: Context) {
     /** Wipes the entire log. Intended for the same kind of "reset local account" flow [LocalPaperTradingStore.clear] serves - not for routine use. */
     fun clear() {
         dbHelper.writableDatabase.delete(TABLE, null, null)
-    }
-
-    /**
-     * Releases the underlying [SQLiteOpenHelper] connection. Not part of the normal app
-     * lifecycle - production code treats this store as living for the process's lifetime, same
-     * as [org.example.syncora.bitget.LocalPaperTradingStore] - but tests that open more than one
-     * [ExperienceLogStore] against the same file (e.g. simulating a restart) should call this on
-     * the old instance first so there's only ever one owner of the file at a time.
-     */
-    fun close() {
-        dbHelper.close()
     }
 
     private data class RowSnapshot(
