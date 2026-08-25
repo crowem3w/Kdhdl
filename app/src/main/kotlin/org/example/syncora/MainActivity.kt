@@ -722,6 +722,7 @@ class MainActivity : AppCompatActivity() {
                     while (true) {
                         refreshAgentHistory()
                         refreshAgentOverview()
+                        refreshAgentIndicators()
                         delay(15_000L)
                     }
                 }
@@ -827,6 +828,20 @@ class MainActivity : AppCompatActivity() {
             "The decision loop will skip ticks until a model is loaded"
         }
 
+        // Only meaningful once a config has actually cleared the CPCV/PBO gate at least once -
+        // lastWinningClipEpsilon is NaN before that, matching TrainingRunStore's own contract
+        // for these fields (see its kdoc).
+        val policyHyperparametersText = store.lastWinningClipEpsilon.takeIf { !it.isNaN() }?.let { clipEpsilon ->
+            String.format(
+                Locale.US,
+                "PPO — clip ε=%.2f, lr=%.1e · PBO %.3f over %d split(s)",
+                clipEpsilon,
+                store.lastWinningLearningRate,
+                store.lastPboProbability,
+                store.lastSplitsEvaluated,
+            )
+        }
+
         quickTradePanel.renderAgentOverview(
             QuickTradePanel.AgentOverviewUiState(
                 agentState = agentState,
@@ -838,8 +853,52 @@ class MainActivity : AppCompatActivity() {
                 policyModelLabel = policyModelLabel,
                 policyModelSubtext = policyModelSubtext,
                 lastPromotionAtMs = store.lastPromotionAtMs,
+                policyHyperparametersText = policyHyperparametersText,
             ),
         )
+    }
+
+    /**
+     * Feeds [QuickTradePanel.renderAgentIndicators] straight off
+     * [org.example.syncora.bitget.StateVectorBuilder.snapshot] - the same call
+     * [org.example.syncora.agent.DecisionLoopScheduler] makes at each decision boundary, so
+     * this shows exactly what the policy is currently seeing rather than a separately-derived
+     * approximation of it. Cheap to call on every poll tick: per [StateVectorBuilder]'s own
+     * kdoc, this is just [kotlinx.coroutines.flow.StateFlow] reads plus an internally
+     * cache/mutex-guarded funding-rate fetch, not a fresh network round trip per call.
+     */
+    private suspend fun refreshAgentIndicators() {
+        val result = app.stateVectorBuilder.snapshot()
+        val state = result.fold(
+            onSuccess = { snapshot ->
+                QuickTradePanel.AgentIndicatorsUiState(
+                    available = true,
+                    rsi = snapshot.indicators.rsi,
+                    dx = snapshot.indicators.dx,
+                    ultimateOscillator = snapshot.indicators.ultimateOscillator,
+                    obv = snapshot.indicators.obv,
+                    htDominantCycle = snapshot.indicators.htDominantCycle,
+                    logVolume = snapshot.indicators.logVolume,
+                    fundingRate = snapshot.fundingRate,
+                    liquidationDistance = snapshot.liquidationDistance,
+                    asOfMs = snapshot.timestampMs,
+                )
+            },
+            onFailure = { e ->
+                val reason = (e as? org.example.syncora.bitget.StateVectorUnavailableException)?.reason?.let {
+                    when (it) {
+                        org.example.syncora.bitget.StateVectorUnavailable.NotConnected ->
+                            "No live account connected yet — connect a Bitget API key to see live state."
+                        org.example.syncora.bitget.StateVectorUnavailable.AccountDataStale ->
+                            "Account data is stale — the last position/balance poll failed."
+                        org.example.syncora.bitget.StateVectorUnavailable.InsufficientKlineHistory ->
+                            "Warming up — not enough kline history yet for the slower indicators."
+                    }
+                } ?: (e.message ?: "State vector unavailable")
+                QuickTradePanel.AgentIndicatorsUiState(available = false, unavailableReason = reason)
+            },
+        )
+        quickTradePanel.renderAgentIndicators(state)
     }
 
     private suspend fun refreshAgentHistory() {

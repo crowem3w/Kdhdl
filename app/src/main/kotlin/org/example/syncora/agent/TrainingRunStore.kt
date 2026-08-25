@@ -55,6 +55,33 @@ class TrainingRunStore(context: Context) {
         get() = prefs.getString(KEY_LAST_GATE_DECISION_SUMMARY, "") ?: ""
         set(value) = prefs.edit().putString(KEY_LAST_GATE_DECISION_SUMMARY, value).apply()
 
+    /**
+     * Structured counterpart to [lastGateDecisionSummary], populated only on a
+     * [GateDecision.Pass][org.example.syncora.agent.GateDecision.Pass] - the swept
+     * [org.example.syncora.ml.PpoHyperparameters.clipEpsilon]/[org.example.syncora.ml.PpoHyperparameters.learningRate]
+     * of the winning config, so the Agent tab can render a proper hyperparameter readout
+     * instead of parsing them back out of the free-text summary string. `NaN`/`0` before any
+     * pass has ever happened - callers should gate on [lastGateDecisionPassed] rather than on
+     * these being non-default.
+     */
+    var lastWinningClipEpsilon: Float
+        get() = prefs.getFloat(KEY_LAST_WINNING_CLIP_EPSILON, Float.NaN)
+        set(value) = prefs.edit().putFloat(KEY_LAST_WINNING_CLIP_EPSILON, value).apply()
+
+    var lastWinningLearningRate: Float
+        get() = prefs.getFloat(KEY_LAST_WINNING_LEARNING_RATE, Float.NaN)
+        set(value) = prefs.edit().putFloat(KEY_LAST_WINNING_LEARNING_RATE, value).apply()
+
+    /** [org.example.syncora.agent.GateDecision.Pass.pboProbability] of the winning config on its promotion run - lower is better, gate threshold is 0.10 (design doc §4). */
+    var lastPboProbability: Float
+        get() = prefs.getFloat(KEY_LAST_PBO_PROBABILITY, Float.NaN)
+        set(value) = prefs.edit().putFloat(KEY_LAST_PBO_PROBABILITY, value).apply()
+
+    /** [org.example.syncora.agent.GateDecision.Pass.splitsEvaluated] the winning config was ranked across. */
+    var lastSplitsEvaluated: Int
+        get() = prefs.getInt(KEY_LAST_SPLITS_EVALUATED, 0)
+        set(value) = prefs.edit().putInt(KEY_LAST_SPLITS_EVALUATED, value).apply()
+
     private companion object {
         const val PREFS_NAME = "training_run_state"
         const val KEY_LAST_PROMOTION_AT_MS = "last_promotion_at_ms"
@@ -62,5 +89,9 @@ class TrainingRunStore(context: Context) {
         const val KEY_LAST_GATE_DECISION_AT_MS = "last_gate_decision_at_ms"
         const val KEY_LAST_GATE_DECISION_PASSED = "last_gate_decision_passed"
         const val KEY_LAST_GATE_DECISION_SUMMARY = "last_gate_decision_summary"
+        const val KEY_LAST_WINNING_CLIP_EPSILON = "last_winning_clip_epsilon"
+        const val KEY_LAST_WINNING_LEARNING_RATE = "last_winning_learning_rate"
+        const val KEY_LAST_PBO_PROBABILITY = "last_pbo_probability"
+        const val KEY_LAST_SPLITS_EVALUATED = "last_splits_evaluated"
     }
 }

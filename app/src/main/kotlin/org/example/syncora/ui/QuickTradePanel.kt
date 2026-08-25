@@ -868,6 +868,31 @@ class QuickTradePanel @JvmOverloads constructor(
         /** Size + last-modified summary for the currently loaded model file. */
         val policyModelSubtext: String,
         val lastPromotionAtMs: Long,
+        /** e.g. "PPO, clip ε=0.20, lr=3.0e-4 · PBO 0.04 over 6 splits" for the most recent promotion's winning sweep config, or `null` if nothing has ever passed the gate. */
+        val policyHyperparametersText: String?,
+    )
+
+    /**
+     * Live `f_t` indicator block plus the two scalar context fields (`F_t`, `q_t`) from the same
+     * [org.example.syncora.bitget.MdpStateSnapshot] the policy is actually fed each decision
+     * tick - a direct window into what the agent is looking at right now, not a re-derivation
+     * of it. [available] is `false` (and every numeric field meaningless) whenever
+     * [org.example.syncora.bitget.StateVectorBuilder.snapshot] can't produce one yet (no
+     * connection, insufficient kline history, etc.) - same "not ready, don't fake a zero"
+     * discipline [org.example.syncora.bitget.TechnicalIndicators] itself follows.
+     */
+    data class AgentIndicatorsUiState(
+        val available: Boolean,
+        val unavailableReason: String = "",
+        val rsi: Double = 0.0,
+        val dx: Double = 0.0,
+        val ultimateOscillator: Double = 0.0,
+        val obv: Double = 0.0,
+        val htDominantCycle: Double = 0.0,
+        val logVolume: Double = 0.0,
+        val fundingRate: Double = 0.0,
+        val liquidationDistance: Double = 0.0,
+        val asOfMs: Long = 0L,
     )
 
     /** One row of [renderAgentHistory] - a resolved (reward-known) transition off [org.example.syncora.agent.ExperienceLogStore.resolvedRowsSince]. */
@@ -897,12 +922,19 @@ class QuickTradePanel @JvmOverloads constructor(
     private lateinit var agentTrainingStatusText: TextView
     private lateinit var agentPolicyLabelText: TextView
     private lateinit var agentPolicySubtext: TextView
+    private lateinit var agentPolicyHyperparamsText: TextView
+
+    private lateinit var agentIndicatorsGrid: LinearLayout
+    private lateinit var agentIndicatorsEmptyText: TextView
+    private lateinit var agentIndicatorsAsOfText: TextView
 
     private fun buildAgentContent(): View {
         val col = LinearLayout(context).apply { orientation = VERTICAL }
         col.addView(buildAgentOverviewCard())
         col.addView(spacer(12))
         col.addView(buildAgentStatusCard())
+        col.addView(spacer(12))
+        col.addView(buildAgentIndicatorsCard())
         col.addView(spacer(12))
         col.addView(buildAgentKillSwitchCard())
         col.addView(spacer(12))
@@ -977,7 +1009,66 @@ class QuickTradePanel @JvmOverloads constructor(
             setTextColor(mutedColor)
         }
         addView(agentPolicySubtext)
+        agentPolicyHyperparamsText = TextView(context).apply {
+            textSize = 11f
+            setTextColor(mutedColor)
+        }
+        addView(agentPolicyHyperparamsText)
     }
+
+    /**
+     * Read-only view into the live `f_t` block plus `F_t`/`q_t` - see [AgentIndicatorsUiState].
+     * Purely diagnostic: nothing here is editable or drives a callback, it's just "what is the
+     * policy currently seeing," rendered as a small label/value grid.
+     */
+    private fun buildAgentIndicatorsCard(): View = agentSectionCard {
+        val headerRow = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        headerRow.addView(agentSectionLabel("State snapshot").apply {
+            layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+        })
+        agentIndicatorsAsOfText = TextView(context).apply {
+            textSize = 10f
+            setTextColor(mutedColor)
+        }
+        headerRow.addView(agentIndicatorsAsOfText)
+        addView(headerRow)
+        addView(spacer(8))
+
+        agentIndicatorsEmptyText = TextView(context).apply {
+            text = "Not ready yet — waiting on account data and kline history."
+            textSize = 12f
+            setTextColor(mutedColor)
+        }
+        addView(agentIndicatorsEmptyText)
+
+        agentIndicatorsGrid = LinearLayout(context).apply { orientation = VERTICAL }
+        addView(agentIndicatorsGrid)
+    }
+
+    private fun indicatorRow(label: String, value: String): View =
+        LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            setPadding(0, dp(3), 0, dp(3))
+            addView(
+                TextView(context).apply {
+                    text = label
+                    textSize = 12f
+                    setTextColor(mutedColor)
+                    layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+                },
+            )
+            addView(
+                TextView(context).apply {
+                    text = value
+                    textSize = 12f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(labelColor)
+                },
+            )
+        }
 
     private fun agentSectionCard(builder: LinearLayout.() -> Unit): View =
         LinearLayout(context).apply {
@@ -1139,6 +1230,31 @@ class QuickTradePanel @JvmOverloads constructor(
             agentPolicyLabelText.setTextColor(mutedColor)
         }
         agentPolicySubtext.text = overview.policyModelSubtext
+        agentPolicyHyperparamsText.text = overview.policyHyperparametersText ?: "No config has passed the CPCV/PBO gate yet"
+    }
+
+    /** Renders [AgentIndicatorsUiState] into the "State snapshot" card - a plain label/value grid when [AgentIndicatorsUiState.available], an explanatory empty-state line otherwise. */
+    fun renderAgentIndicators(state: AgentIndicatorsUiState) {
+        agentIndicatorsGrid.removeAllViews()
+        if (!state.available) {
+            agentIndicatorsEmptyText.visibility = View.VISIBLE
+            agentIndicatorsEmptyText.text = state.unavailableReason.ifBlank {
+                "Not ready yet — waiting on account data and kline history."
+            }
+            agentIndicatorsAsOfText.text = ""
+            return
+        }
+        agentIndicatorsEmptyText.visibility = View.GONE
+        agentIndicatorsAsOfText.text = agentTimeFormatter.format(Date(state.asOfMs))
+
+        agentIndicatorsGrid.addView(indicatorRow("RSI (14)", String.format(Locale.US, "%.1f", state.rsi)))
+        agentIndicatorsGrid.addView(indicatorRow("DX (14)", String.format(Locale.US, "%.1f", state.dx)))
+        agentIndicatorsGrid.addView(indicatorRow("Ultimate Osc.", String.format(Locale.US, "%.1f", state.ultimateOscillator)))
+        agentIndicatorsGrid.addView(indicatorRow("OBV (z, tanh)", String.format(Locale.US, "%.3f", state.obv)))
+        agentIndicatorsGrid.addView(indicatorRow("HT dominant cycle", String.format(Locale.US, "%.1f bars", state.htDominantCycle)))
+        agentIndicatorsGrid.addView(indicatorRow("log(volume)", String.format(Locale.US, "%.3f", state.logVolume)))
+        agentIndicatorsGrid.addView(indicatorRow("Funding rate", String.format(Locale.US, "%.4f%%", state.fundingRate * 100.0)))
+        agentIndicatorsGrid.addView(indicatorRow("Liq. distance", String.format(Locale.US, "%.2f%%", state.liquidationDistance * 100.0)))
     }
 
     /**

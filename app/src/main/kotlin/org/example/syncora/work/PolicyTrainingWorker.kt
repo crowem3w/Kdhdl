@@ -137,6 +137,10 @@ class PolicyTrainingWorker(
                 Result.success()
             }
             is GateDecision.Pass -> {
+                app.trainingRunStore.lastWinningClipEpsilon = decision.winningHyperparameters.clipEpsilon
+                app.trainingRunStore.lastWinningLearningRate = decision.winningHyperparameters.learningRate
+                app.trainingRunStore.lastPboProbability = decision.pboProbability.toFloat()
+                app.trainingRunStore.lastSplitsEvaluated = decision.splitsEvaluated
                 promote(app, trainer, baseModelFile, windows, decision)
                 Result.success()
             }
