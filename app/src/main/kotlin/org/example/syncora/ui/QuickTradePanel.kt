@@ -842,6 +842,34 @@ class QuickTradePanel @JvmOverloads constructor(
         val autoTradingEnabled: Boolean,
     )
 
+    /** High-level state the top-of-tab badge collapses everything else down to - see [renderAgentOverview]'s kdoc for how [MainActivity] derives this. */
+    enum class AgentState { TRAINING, LIVE_TRADING, HALTED, NO_POLICY }
+
+    /**
+     * Everything the "Agent overview" card at the top of the Agent tab needs - the agent's
+     * current [AgentState], the live [org.example.syncora.work.PolicyTrainingWorker] run's
+     * progress (if one is in flight), and a description of the policy
+     * [org.example.syncora.ml.PolicyInferenceEngine] is currently running inference against.
+     * Assembled by [MainActivity], same contract as [AgentStatusUiState].
+     */
+    data class AgentOverviewUiState(
+        val agentState: AgentState,
+        /** `true` while [org.example.syncora.work.TrainingScheduler]'s periodic work is `RUNNING` right now. */
+        val trainingIsRunning: Boolean,
+        /** `0..100`, only meaningful while [trainingIsRunning] - the in-flight run's latest reported stage. */
+        val trainingProgressPercent: Int,
+        /** Human-readable label for the in-flight run's current stage, or the outcome of the most recently completed one when nothing is running. */
+        val trainingStatusText: String,
+        /** True once any resolved-training outcome (success, skip, or reject) has ever been recorded - distinguishes "never run yet" from "ran and had nothing to do." */
+        val hasTrainingHistory: Boolean,
+        val policyLoaded: Boolean,
+        /** e.g. "current_live_model.tflite" - just the filename, [policyModelSubtext] carries the rest. */
+        val policyModelLabel: String,
+        /** Size + last-modified summary for the currently loaded model file. */
+        val policyModelSubtext: String,
+        val lastPromotionAtMs: Long,
+    )
+
     /** One row of [renderAgentHistory] - a resolved (reward-known) transition off [org.example.syncora.agent.ExperienceLogStore.resolvedRowsSince]. */
     data class AgentHistoryEntryUiState(
         val timestampMs: Long,
@@ -863,14 +891,92 @@ class QuickTradePanel @JvmOverloads constructor(
     private lateinit var agentHistoryContainer: LinearLayout
     private lateinit var agentHistoryEmptyText: TextView
 
+    private lateinit var agentStateDot: View
+    private lateinit var agentStateText: TextView
+    private lateinit var agentTrainingProgressBar: android.widget.ProgressBar
+    private lateinit var agentTrainingStatusText: TextView
+    private lateinit var agentPolicyLabelText: TextView
+    private lateinit var agentPolicySubtext: TextView
+
     private fun buildAgentContent(): View {
         val col = LinearLayout(context).apply { orientation = VERTICAL }
+        col.addView(buildAgentOverviewCard())
+        col.addView(spacer(12))
         col.addView(buildAgentStatusCard())
         col.addView(spacer(12))
         col.addView(buildAgentKillSwitchCard())
         col.addView(spacer(12))
         col.addView(buildAgentHistoryCard())
         return col
+    }
+
+    /**
+     * Top-of-tab summary card: at-a-glance agent state, batch-training progress, and which
+     * policy is currently live - the three things a "what is my agent doing right now" glance
+     * needs, ahead of the more detailed position/decision/promotion breakdown below it.
+     */
+    private fun buildAgentOverviewCard(): View = agentSectionCard {
+        addView(agentSectionLabel("Agent state"))
+        addView(spacer(6))
+        val stateRow = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        agentStateDot = View(context).apply {
+            layoutParams = LayoutParams(dp(8), dp(8)).apply { rightMargin = dp(8) }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(mutedColor)
+            }
+        }
+        stateRow.addView(agentStateDot)
+        agentStateText = TextView(context).apply {
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(labelColor)
+        }
+        stateRow.addView(agentStateText)
+        addView(stateRow)
+
+        addView(spacer(12))
+        addView(agentDivider())
+        addView(spacer(12))
+
+        addView(agentSectionLabel("Training progress"))
+        addView(spacer(6))
+        agentTrainingProgressBar = android.widget.ProgressBar(
+            context,
+            null,
+            android.R.attr.progressBarStyleHorizontal,
+        ).apply {
+            max = 100
+            isIndeterminate = false
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dp(6))
+        }
+        addView(agentTrainingProgressBar)
+        addView(spacer(6))
+        agentTrainingStatusText = TextView(context).apply {
+            textSize = 11.5f
+            setTextColor(mutedColor)
+        }
+        addView(agentTrainingStatusText)
+
+        addView(spacer(12))
+        addView(agentDivider())
+        addView(spacer(12))
+
+        addView(agentSectionLabel("Current policy"))
+        addView(spacer(4))
+        agentPolicyLabelText = TextView(context).apply {
+            textSize = 13f
+            setTextColor(labelColor)
+        }
+        addView(agentPolicyLabelText)
+        agentPolicySubtext = TextView(context).apply {
+            textSize = 11f
+            setTextColor(mutedColor)
+        }
+        addView(agentPolicySubtext)
     }
 
     private fun agentSectionCard(builder: LinearLayout.() -> Unit): View =
@@ -994,6 +1100,45 @@ class QuickTradePanel @JvmOverloads constructor(
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    /**
+     * Renders the top-of-tab overview card - state badge, training-run progress, and current
+     * policy - from an [AgentOverviewUiState] [MainActivity] assembles once per poll tick (see
+     * that class's `buildAgentOverviewUiState`). Separate entry point from [renderAgentStatus]
+     * since the two are fed by different underlying sources (`WorkManager`'s `WorkInfo` for
+     * this one, [org.example.syncora.agent.DecisionLoopScheduler]/[org.example.syncora.bitget.LiveTradingRepository]
+     * for that one) and there's no reason to force one render pass to wait on the other.
+     */
+    fun renderAgentOverview(overview: AgentOverviewUiState) {
+        val (dotColor, label) = when (overview.agentState) {
+            AgentState.TRAINING -> bullColor to "Training"
+            AgentState.LIVE_TRADING -> bullColor to "Live — trading"
+            AgentState.HALTED -> bearColor to "Halted"
+            AgentState.NO_POLICY -> mutedColor to "No policy loaded"
+        }
+        (agentStateDot.background as? GradientDrawable)?.setColor(dotColor)
+        agentStateText.text = label
+        agentStateText.setTextColor(dotColor)
+
+        if (overview.trainingIsRunning) {
+            agentTrainingProgressBar.isIndeterminate = false
+            agentTrainingProgressBar.progress = overview.trainingProgressPercent.coerceIn(0, 100)
+            agentTrainingProgressBar.alpha = 1f
+        } else {
+            agentTrainingProgressBar.progress = if (overview.hasTrainingHistory) 100 else 0
+            agentTrainingProgressBar.alpha = 0.35f
+        }
+        agentTrainingStatusText.text = overview.trainingStatusText
+
+        if (overview.policyLoaded) {
+            agentPolicyLabelText.text = overview.policyModelLabel
+            agentPolicyLabelText.setTextColor(labelColor)
+        } else {
+            agentPolicyLabelText.text = "No model loaded yet"
+            agentPolicyLabelText.setTextColor(mutedColor)
+        }
+        agentPolicySubtext.text = overview.policyModelSubtext
     }
 
     /**

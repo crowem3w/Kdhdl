@@ -68,6 +68,10 @@ import org.example.syncora.ui.ScrollRevealContainer
 import org.example.syncora.service.MarketDataForegroundService
 import org.example.syncora.ui.SkeletonLoadingView
 import org.example.syncora.ui.TradingModeDialog
+import org.example.syncora.work.TrainingProgress
+import org.example.syncora.work.TrainingScheduler
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -701,8 +705,23 @@ class MainActivity : AppCompatActivity() {
                         }
                 }
                 launch {
+                    // WorkInfo is the only reactive source for "is a training run in flight
+                    // right now, and how far along is it" - unlike lastDecision/positions above,
+                    // there's no in-process StateFlow for a WorkManager-scheduled worker's
+                    // progress, so this is the one truly reactive leg of the overview card;
+                    // everything else it needs (autoTradingEnabled, the loaded policy, the last
+                    // completed run) is picked up fresh on each WorkInfo emission too.
+                    WorkManager.getInstance(this@MainActivity)
+                        .getWorkInfosForUniqueWorkFlow(TrainingScheduler.UNIQUE_WORK_NAME)
+                        .collectLatest { infos ->
+                            latestTrainingWorkInfo = infos.firstOrNull()
+                            refreshAgentOverview()
+                        }
+                }
+                launch {
                     while (true) {
                         refreshAgentHistory()
+                        refreshAgentOverview()
                         delay(15_000L)
                     }
                 }
@@ -744,6 +763,82 @@ class MainActivity : AppCompatActivity() {
     private fun refreshAgentStatus() {
         quickTradePanel.renderAgentStatus(
             buildAgentStatusUiState(app.decisionLoopScheduler.lastDecision.value, liveTradingRepository.positions.value),
+        )
+        refreshAgentOverview()
+    }
+
+    /** Most recent [WorkInfo] for [TrainingScheduler.UNIQUE_WORK_NAME], kept from [observeAgentTab]'s `WorkManager` flow so the 15s poll leg and any on-demand [refreshAgentStatus] call can both re-render the overview card without re-querying `WorkManager` themselves. */
+    private var latestTrainingWorkInfo: WorkInfo? = null
+
+    private val trainingProgressTimeFormatter = SimpleDateFormat("MMM d, HH:mm", Locale.US)
+
+    /**
+     * Feeds [QuickTradePanel.renderAgentOverview]. Three independent inputs, each already
+     * described where it lives:
+     * - Whether the decision loop is actually allowed to trade
+     *   ([org.example.syncora.bitget.RiskSettingsStore.autoTradingEnabled]).
+     * - Which policy [org.example.syncora.ml.PolicyInferenceEngine] is currently serving
+     *   inference against ([org.example.syncora.ml.PolicyInferenceEngine.currentVersion]).
+     * - How the scheduled batch retrain ([org.example.syncora.work.PolicyTrainingWorker]) is
+     *   doing right now, from [latestTrainingWorkInfo]'s state/progress, falling back to
+     *   [org.example.syncora.agent.TrainingRunStore]'s durable record of the last *completed*
+     *   run once nothing is currently `RUNNING` (`WorkInfo.progress` is cleared by `WorkManager`
+     *   the moment a run finishes, so it can't describe anything after the fact).
+     */
+    private fun refreshAgentOverview() {
+        val workInfo = latestTrainingWorkInfo
+        val isTrainingRunning = workInfo?.state == WorkInfo.State.RUNNING
+        val store = app.trainingRunStore
+
+        val agentState = when {
+            isTrainingRunning -> QuickTradePanel.AgentState.TRAINING
+            !app.policyInferenceEngine.isReady() -> QuickTradePanel.AgentState.NO_POLICY
+            app.riskSettingsStore.autoTradingEnabled -> QuickTradePanel.AgentState.LIVE_TRADING
+            else -> QuickTradePanel.AgentState.HALTED
+        }
+
+        val progressPercent = workInfo?.progress?.getInt(TrainingProgress.KEY_PERCENT, 0) ?: 0
+        val hasTrainingHistory = store.lastGateDecisionAtMs > 0L
+        val trainingStatusText = if (isTrainingRunning) {
+            val stage = TrainingProgress.Stage.fromWireValue(workInfo?.progress?.getString(TrainingProgress.KEY_STAGE))
+            val detail = workInfo?.progress?.getString(TrainingProgress.KEY_DETAIL)
+            val stageLabel = stage?.label ?: "Running"
+            if (detail.isNullOrBlank()) stageLabel else "$stageLabel — $detail"
+        } else if (hasTrainingHistory) {
+            val outcome = if (store.lastGateDecisionPassed) "passed" else "did not pass"
+            val when_ = trainingProgressTimeFormatter.format(Date(store.lastGateDecisionAtMs))
+            "Last run $when_ ($outcome) — ${store.lastGateDecisionSummary}"
+        } else {
+            "No training run has completed yet — runs roughly daily"
+        }
+
+        val loadedVersion = app.policyInferenceEngine.currentVersion
+        val policyModelLabel = loadedVersion?.filePath?.substringAfterLast('/') ?: ""
+        val policyModelSubtext = if (loadedVersion != null) {
+            val sizeKb = loadedVersion.sizeBytes / 1024.0
+            val loadedAt = trainingProgressTimeFormatter.format(Date(loadedVersion.lastModifiedMs))
+            val promotedSuffix = if (store.lastPromotionAtMs > 0L) {
+                ", promoted ${trainingProgressTimeFormatter.format(Date(store.lastPromotionAtMs))}"
+            } else {
+                ""
+            }
+            String.format(Locale.US, "%.0f KB, last written %s%s", sizeKb, loadedAt, promotedSuffix)
+        } else {
+            "The decision loop will skip ticks until a model is loaded"
+        }
+
+        quickTradePanel.renderAgentOverview(
+            QuickTradePanel.AgentOverviewUiState(
+                agentState = agentState,
+                trainingIsRunning = isTrainingRunning,
+                trainingProgressPercent = progressPercent,
+                trainingStatusText = trainingStatusText,
+                hasTrainingHistory = hasTrainingHistory,
+                policyLoaded = loadedVersion != null,
+                policyModelLabel = policyModelLabel,
+                policyModelSubtext = policyModelSubtext,
+                lastPromotionAtMs = store.lastPromotionAtMs,
+            ),
         )
     }
 

@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.example.syncora.SyncoraApplication
@@ -71,11 +72,13 @@ class PolicyTrainingWorker(
             runTrainingAttempt(app)
         } catch (e: Exception) {
             Log.e(TAG, "Scheduled PPO training run failed: ${e.message}", e)
+            reportProgress(TrainingProgress.Stage.FAILED, 100, e.message ?: e.toString())
             Result.retry()
         }
     }
 
-    private fun runTrainingAttempt(app: SyncoraApplication): Result {
+    private suspend fun runTrainingAttempt(app: SyncoraApplication): Result {
+        reportProgress(TrainingProgress.Stage.CHECKING_MODEL, 0, "Checking for a live model to fine-tune from")
         if (!app.policyModelStore.hasLiveModel()) {
             Log.i(TAG, "No live model yet to fine-tune from; skipping this scheduled run")
             return Result.success()
@@ -84,6 +87,7 @@ class PolicyTrainingWorker(
         val trainer = PpoTrainer()
 
         val sinceMs = app.trainingRunStore.lastPromotionAtMs
+        reportProgress(TrainingProgress.Stage.BUILDING_WINDOWS, 5, "Pulling resolved experience since last promotion")
         val windowBuilder = RolloutWindowBuilder(
             experienceLogStore = app.experienceLogStore,
             criticValueFn = { state -> trainer.estimateValue(baseModelFile, state) },
@@ -92,28 +96,44 @@ class PolicyTrainingWorker(
         val totalTransitions = windows.sumOf { it.steps.size }
         if (totalTransitions < MIN_TRANSITIONS_FOR_TRAINING) {
             Log.i(TAG, "Only $totalTransitions resolved transition(s) since last promotion (need $MIN_TRANSITIONS_FOR_TRAINING); skipping")
+            reportProgress(
+                TrainingProgress.Stage.SKIPPED_INSUFFICIENT_DATA,
+                100,
+                "$totalTransitions/$MIN_TRANSITIONS_FOR_TRAINING resolved transitions logged",
+            )
             return Result.success()
         }
 
+        reportProgress(TrainingProgress.Stage.SPLITTING, 10, "Partitioning ${windows.size} rollout window(s)")
         val splits = CombinatorialPurgedCrossValidator().splits(windows)
         if (splits.isEmpty()) {
             Log.i(TAG, "Only ${windows.size} rollout window(s) available - not enough yet for a CPCV split; skipping")
+            reportProgress(TrainingProgress.Stage.SKIPPED_INSUFFICIENT_SPLITS, 100, "${windows.size} rollout window(s) available")
             return Result.success()
         }
 
         val cacheDir = File(app.cacheDir, "ppo_cpcv").apply { mkdirs() }
         val performances = try {
-            HYPERPARAMETER_SWEEP.map { hp -> evaluateAcrossSplits(trainer, hp, baseModelFile, splits, cacheDir) }
+            HYPERPARAMETER_SWEEP.mapIndexed { index, hp ->
+                reportProgress(
+                    TrainingProgress.Stage.TRAINING_SWEEP,
+                    10 + (index * 70 / HYPERPARAMETER_SWEEP.size),
+                    "Config ${index + 1}/${HYPERPARAMETER_SWEEP.size} across ${splits.size} split(s)",
+                )
+                evaluateAcrossSplits(trainer, hp, baseModelFile, splits, cacheDir)
+            }
         } finally {
             cacheDir.deleteRecursively()
         }
 
+        reportProgress(TrainingProgress.Stage.GATING, 85, "${HYPERPARAMETER_SWEEP.size} config(s) evaluated")
         return when (val decision = CpcvPboValidationGate().decide(performances)) {
             is GateDecision.Reject -> {
                 Log.i(TAG, "Candidate rejected by CPCV/PBO gate: ${decision.reason}")
                 app.trainingRunStore.lastGateDecisionAtMs = System.currentTimeMillis()
                 app.trainingRunStore.lastGateDecisionPassed = false
                 app.trainingRunStore.lastGateDecisionSummary = decision.reason
+                reportProgress(TrainingProgress.Stage.REJECTED, 100, decision.reason)
                 Result.success()
             }
             is GateDecision.Pass -> {
@@ -146,13 +166,14 @@ class PolicyTrainingWorker(
     }
 
     /** Design doc §3.3 step 5's "Promote on pass" - retrains the gate's winning config on every available window, stages it, promotes it, and reloads inference, rolling back if the newly promoted file doesn't load. */
-    private fun promote(
+    private suspend fun promote(
         app: SyncoraApplication,
         trainer: PpoTrainer,
         baseModelFile: File,
         windows: List<RolloutWindow>,
         decision: GateDecision.Pass,
     ) {
+        reportProgress(TrainingProgress.Stage.PROMOTING, 90, "Retraining gate winner on ${windows.size} window(s)")
         val trainedAt = System.currentTimeMillis()
         val trainResult = trainer.train(
             baseModelFile = baseModelFile,
@@ -174,11 +195,13 @@ class PolicyTrainingWorker(
             decision.splitsEvaluated,
         )
 
+        reportProgress(TrainingProgress.Stage.RELOADING, 95, "Staging and reloading inference")
         if (!app.policyModelStore.promoteCandidateToLive()) {
             Log.e(TAG, "Gate passed but staging the candidate model failed; nothing was promoted")
             app.trainingRunStore.lastGateDecisionAtMs = trainedAt
             app.trainingRunStore.lastGateDecisionPassed = false
             app.trainingRunStore.lastGateDecisionSummary = "Gate passed ($gateSummary) but staging the candidate failed"
+            reportProgress(TrainingProgress.Stage.FAILED, 100, "Staging the candidate model failed")
             return
         }
 
@@ -189,6 +212,7 @@ class PolicyTrainingWorker(
             app.trainingRunStore.lastGateDecisionAtMs = trainedAt
             app.trainingRunStore.lastGateDecisionPassed = false
             app.trainingRunStore.lastGateDecisionSummary = "Gate passed ($gateSummary) but the promoted file failed to load; rolled back"
+            reportProgress(TrainingProgress.Stage.FAILED, 100, "Promoted file failed to load; rolled back")
             return
         }
 
@@ -201,6 +225,22 @@ class PolicyTrainingWorker(
         // never be re-pulled, since the next run's sinceMs is trainedAt.
         val pruned = app.experienceLogStore.deleteResolvedBefore(trainedAt)
         Log.i(TAG, "Promoted new policy at $trainedAt; pruned $pruned resolved row(s) older than the new watermark")
+        reportProgress(TrainingProgress.Stage.PROMOTED, 100, gateSummary)
+    }
+
+    /** Thin wrapper over [CoroutineWorker.setProgress] using the shared [TrainingProgress] key/stage schema - best-effort, since a progress update racing the worker's own completion is never worth failing the run over. */
+    private suspend fun reportProgress(stage: TrainingProgress.Stage, percent: Int, detail: String) {
+        try {
+            setProgress(
+                workDataOf(
+                    TrainingProgress.KEY_STAGE to stage.wireValue,
+                    TrainingProgress.KEY_PERCENT to percent,
+                    TrainingProgress.KEY_DETAIL to detail,
+                ),
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to publish training progress (stage=${stage.wireValue}): ${e.message}")
+        }
     }
 
     companion object {
