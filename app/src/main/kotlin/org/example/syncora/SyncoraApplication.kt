@@ -5,6 +5,7 @@ import org.example.syncora.agent.AgentKillSwitchController
 import org.example.syncora.agent.DecisionLoopScheduler
 import org.example.syncora.agent.ExperienceLogStore
 import org.example.syncora.agent.ModelRollbackController
+import org.example.syncora.agent.TrainingRunHistoryStore
 import org.example.syncora.agent.TrainingRunStore
 import org.example.syncora.bitget.BitgetEnvironment
 import org.example.syncora.bitget.BitgetFeeRateClient
@@ -211,6 +212,12 @@ class SyncoraApplication : Application() {
 
     val trainingRunStore: TrainingRunStore by lazy {
         TrainingRunStore(applicationContext)
+    }
+
+    // Trend counterpart to trainingRunStore's single latest-run snapshot - see
+    // TrainingRunHistoryStore's kdoc for why the Agent tab needs both.
+    val trainingRunHistoryStore: TrainingRunHistoryStore by lazy {
+        TrainingRunHistoryStore(applicationContext)
     }
 
     // The manual counterpart to PolicyTrainingWorker's automatic

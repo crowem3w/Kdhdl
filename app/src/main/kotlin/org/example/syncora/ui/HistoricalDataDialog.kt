@@ -9,6 +9,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -25,11 +26,10 @@ import org.example.syncora.R
 /**
  * Full-screen modal launched from the bottom-bar "data" button.
  *
- * Mirrors [TradingModeDialog]'s glass-shell frame (same strong blurred
- * backdrop, bottom-weighted floating shell, floating circular back/close
- * controls, stacked frosted-glass row panels) but opens straight onto a
- * vertical list of data categories - Order Book, OHLCV, Open Interest,
- * Funding Rates - each row showing a small leading icon plus a
+ * Mirrors [TradingModeDialog]'s glass-card shell (same blurred backdrop,
+ * translucent bordered card, header row with back/close controls) but opens
+ * straight onto a vertical list of data categories - Order Book, OHLCV, Open
+ * Interest, Funding Rates - each row showing a small leading icon plus a
  * title/description text block. Each row drills into its own bare screen;
  * the content for those screens is intentionally left empty for now.
  */
@@ -72,37 +72,34 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
     )
 
     private companion object {
-        // Same glass-shell math as TradingModeDialog, kept in sync so the
+        // Same glass-panel math as TradingModeDialog, kept in sync so the
         // two modals read as one consistent design language.
-        const val SHELL_FILL_ALPHA_PERCENT = 0.12f
-        const val ROW_FILL_ALPHA_PERCENT = 0.06f
+        const val CARD_FILL_OPACITY_PERCENT = 0.75f
+        val CARD_BASE_COLOR_RGB = Color.parseColor("#1C1C1E")
 
-        const val BACKDROP_BLUR_PERCENT = 0.92f
+        const val BACKDROP_BLUR_PERCENT = 0.80f
         const val MAX_BACKDROP_BLUR_DP = 100
 
-        const val SHELL_CORNER_RADIUS_DP = 32
-        const val ROW_CORNER_RADIUS_DP = 20
-        const val CONTROL_DIAMETER_DP = 40
-        const val EDGE_SPACING_DP = 18
-        const val BOTTOM_SPACING_DP = 28
+        const val CARD_CORNER_RADIUS_DP = 14
     }
 
-    private val shellColor = Color.argb((255 * SHELL_FILL_ALPHA_PERCENT).toInt(), 0, 0, 0)
-    private val rowColor = Color.argb((255 * ROW_FILL_ALPHA_PERCENT).toInt(), 255, 255, 255)
-    private val controlColor = Color.argb((255 * ROW_FILL_ALPHA_PERCENT).toInt(), 255, 255, 255)
-    private val borderColor = Color.parseColor("#24FFFFFF") // ultra-thin soft border
-    private val rowBorderColor = Color.parseColor("#14FFFFFF")
-    private val cardHighlightTop = Color.parseColor("#33FFFFFF")
-    private val dividerColor = Color.parseColor("#14FFFFFF")
-    private val labelColor = Color.parseColor("#F5F6F7")
-    private val mutedColor = Color.parseColor("#AEB2BD")
-    private val scrimColor = Color.parseColor("#40000000") // light scrim - backdrop stays visible
+    private val cardColor = Color.argb(
+        (255 * CARD_FILL_OPACITY_PERCENT).toInt(),
+        Color.red(CARD_BASE_COLOR_RGB),
+        Color.green(CARD_BASE_COLOR_RGB),
+        Color.blue(CARD_BASE_COLOR_RGB),
+    )
+    private val cardHighlightTop = Color.parseColor("#4DFFFFFF")
+    private val dividerColor = Color.parseColor("#26FFFFFF")
+    private val labelColor = Color.parseColor("#EAECEF")
+    private val mutedColor = Color.parseColor("#B2B5BE")
+    private val scrimColor = Color.parseColor("#99000000")
 
     private val thinFont by lazy { ResourcesCompat.getFont(context, R.font.inter_thin) }
 
     private lateinit var rootView: FrameLayout
     private lateinit var titleText: TextView
-    private lateinit var backButton: View
+    private lateinit var backButton: TextView
     private lateinit var contentContainer: FrameLayout
     private val optionsScreen by lazy { buildOptionsScreen() }
     private var currentScreen: Screen = Screen.OPTIONS
@@ -123,7 +120,7 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
         win.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
         win.setGravity(Gravity.CENTER)
-        win.setDimAmount(0.18f)
+        win.setDimAmount(0.35f)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
@@ -135,7 +132,7 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
         }
     }
 
-    // ---- Root scaffold: full-bleed scrim + bottom-weighted floating glass shell ----
+    // ---- Root scaffold: full-screen scrim + centered glass card ----
 
     private fun buildRootView(): View {
         rootView = FrameLayout(context).apply {
@@ -145,13 +142,12 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
             setOnClickListener { dismiss() }
         }
 
-        val cornerRadiusPx = dp(SHELL_CORNER_RADIUS_DP).toFloat()
+        val cornerRadiusPx = dp(CARD_CORNER_RADIUS_DP).toFloat()
 
         val cardOuter = FrameLayout(context).apply {
             background = GradientDrawable().apply {
                 cornerRadius = cornerRadiusPx
-                setColor(shellColor)
-                setStroke(dp(1), borderColor)
+                setColor(cardColor)
             }
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
@@ -159,29 +155,28 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
                 }
             }
             clipToOutline = true
-            elevation = dp(6).toFloat() // minimal shadow - depth reads from transparency, not elevation
+            elevation = dp(16).toFloat()
             isClickable = true
-            setOnClickListener { /* consume: don't dismiss when tapping inside the shell */ }
+            setOnClickListener { /* consume: don't dismiss when tapping inside the card */ }
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply {
-                gravity = Gravity.BOTTOM
-                marginStart = dp(EDGE_SPACING_DP)
-                marginEnd = dp(EDGE_SPACING_DP)
-                bottomMargin = dp(BOTTOM_SPACING_DP)
+                gravity = Gravity.CENTER
+                marginStart = dp(20)
+                marginEnd = dp(20)
             }
         }
 
         val cardContent = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(20), dp(20), dp(24))
+            setPadding(dp(18), dp(16), dp(18), dp(20))
         }
         cardContent.addView(buildHeaderRow())
         cardContent.addView(View(context).apply {
             setBackgroundColor(dividerColor)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
-                topMargin = dp(18); bottomMargin = dp(18)
+                topMargin = dp(14); bottomMargin = dp(14)
             }
         })
         contentContainer = FrameLayout(context)
@@ -193,8 +188,8 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
                 intArrayOf(Color.TRANSPARENT, cardHighlightTop, Color.TRANSPARENT),
             )
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
-                leftMargin = dp(SHELL_CORNER_RADIUS_DP)
-                rightMargin = dp(SHELL_CORNER_RADIUS_DP)
+                leftMargin = dp(CARD_CORNER_RADIUS_DP)
+                rightMargin = dp(CARD_CORNER_RADIUS_DP)
                 gravity = Gravity.TOP
             }
         }
@@ -212,9 +207,15 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
             gravity = Gravity.CENTER_VERTICAL
         }
 
-        backButton = circleControl(glyph = "‹") { showScreen(Screen.OPTIONS) }.apply {
+        backButton = TextView(context).apply {
+            text = "‹"
+            textSize = 20f
+            setTextColor(labelColor)
+            isClickable = true
+            isFocusable = true
+            setPadding(0, 0, dp(10), 0)
             visibility = View.GONE
-            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(12)
+            setOnClickListener { showScreen(Screen.OPTIONS) }
         }
 
         titleText = TextView(context).apply {
@@ -222,45 +223,23 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
             textSize = 16f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(labelColor)
-            gravity = Gravity.CENTER_VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
 
-        val closeButton = circleControl(glyph = "✕", glyphSizeSp = 13f) { dismiss() }
+        val closeButton = TextView(context).apply {
+            text = "✕"
+            textSize = 16f
+            setTextColor(mutedColor)
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            setOnClickListener { dismiss() }
+        }
 
         row.addView(backButton)
         row.addView(titleText)
         row.addView(closeButton)
         return row
-    }
-
-    /** A small floating circular glass control - the "floating circular controls" affordance used for back/close. */
-    private fun circleControl(glyph: String, glyphSizeSp: Float = 15f, onClick: () -> Unit): View {
-        val diameter = dp(CONTROL_DIAMETER_DP)
-        return FrameLayout(context).apply {
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(controlColor)
-                setStroke(dp(1), rowBorderColor)
-            }
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setOval(0, 0, view.width, view.height)
-                }
-            }
-            clipToOutline = true
-            isClickable = true
-            isFocusable = true
-            layoutParams = LinearLayout.LayoutParams(diameter, diameter)
-            setOnClickListener { onClick() }
-            addView(TextView(context).apply {
-                text = glyph
-                textSize = glyphSizeSp
-                setTextColor(labelColor)
-                gravity = Gravity.CENTER
-                layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            })
-        }
     }
 
     private fun showScreen(screen: Screen) {
@@ -290,7 +269,7 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
         }
     }
 
-    // ---- Screen 1: vertical list of icon + title/description rows, as stacked glass panels ----
+    // ---- Screen 1: vertical list of icon + title/description rows ----
 
     private fun buildOptionsScreen(): View {
         val list = LinearLayout(context).apply {
@@ -304,7 +283,10 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
             list.addView(buildTile(category))
             if (index != categories.lastIndex) {
                 list.addView(View(context).apply {
-                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(10))
+                    setBackgroundColor(dividerColor)
+                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                        topMargin = dp(4); bottomMargin = dp(4)
+                    }
                 })
             }
         }
@@ -312,13 +294,16 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
     }
 
     private fun buildTile(category: Category): View {
+        val rippleValue = TypedValue()
+        context.theme.resolveAttribute(android.R.attr.selectableItemBackground, rippleValue, true)
+
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             isClickable = true
             isFocusable = true
-            background = rowGlassDrawable()
-            setPadding(dp(14), dp(14), dp(14), dp(14))
+            setBackgroundResource(rippleValue.resourceId)
+            setPadding(dp(10), dp(12), dp(10), dp(12))
             setOnClickListener { showScreen(category.screen) }
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -330,7 +315,7 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
             setImageResource(category.iconRes)
             layoutParams = LinearLayout.LayoutParams(dp(28), dp(28)).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                marginEnd = dp(14)
+                marginEnd = dp(12)
             }
         })
 
@@ -358,13 +343,6 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
         row.addView(textContainer)
 
         return row
-    }
-
-    /** A single stacked "pane" of glass: soft fill, ultra-thin border, radius matched to the shell. */
-    private fun rowGlassDrawable(): GradientDrawable = GradientDrawable().apply {
-        cornerRadius = dp(ROW_CORNER_RADIUS_DP).toFloat()
-        setColor(rowColor)
-        setStroke(dp(1), rowBorderColor)
     }
 
     // ---- Screens 2-5: bare placeholders, content intentionally left empty ----

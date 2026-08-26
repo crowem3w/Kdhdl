@@ -22,6 +22,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.widget.NestedScrollView
+import org.example.syncora.agent.TrainingRunOutcome
+import org.example.syncora.agent.TrainingRunRecord
 import org.example.syncora.bitget.DepthLevel
 import org.example.syncora.bitget.PaperAccountBalance
 import org.example.syncora.bitget.PaperPosition
@@ -928,9 +930,16 @@ class QuickTradePanel @JvmOverloads constructor(
     private lateinit var agentIndicatorsEmptyText: TextView
     private lateinit var agentIndicatorsAsOfText: TextView
 
+    private lateinit var trainingTrendChart: TrainingTrendChartView
+    private lateinit var trainingTrendEmptyText: TextView
+    private lateinit var trainingTrendSummaryText: TextView
+    private lateinit var trainingTrendRunsContainer: LinearLayout
+
     private fun buildAgentContent(): View {
         val col = LinearLayout(context).apply { orientation = VERTICAL }
         col.addView(buildAgentOverviewCard())
+        col.addView(spacer(12))
+        col.addView(buildTrainingTrendCard())
         col.addView(spacer(12))
         col.addView(buildAgentStatusCard())
         col.addView(spacer(12))
@@ -1069,6 +1078,84 @@ class QuickTradePanel @JvmOverloads constructor(
                 },
             )
         }
+
+    /**
+     * Trend view over the last several
+     * [org.example.syncora.work.PolicyTrainingWorker] runs - a
+     * [TrainingTrendChartView] bar chart of PBO probability per run plus a short scrollable list
+     * of the same runs with their outcome/PBO/splits, so "is the gate passing more or less often
+     * lately, and how close to the reject threshold" is visible without leaving the tab. Purely
+     * historical/diagnostic, fed by [renderTrainingTrend] off
+     * [org.example.syncora.agent.TrainingRunHistoryStore.recent] - distinct from
+     * [buildAgentOverviewCard]'s in-flight progress and [buildAgentStatusCard]'s single
+     * latest-run summary.
+     */
+    private fun buildTrainingTrendCard(): View = agentSectionCard {
+        addView(agentSectionLabel("Training run trend"))
+        addView(spacer(6))
+        trainingTrendEmptyText = TextView(context).apply {
+            text = "No completed training runs yet."
+            textSize = 12f
+            setTextColor(mutedColor)
+        }
+        addView(trainingTrendEmptyText)
+
+        trainingTrendChart = TrainingTrendChartView(context).apply {
+            passColor = bullColor
+            rejectColor = bearColor
+            neutralColor = mutedColor
+            thresholdColor = mutedColor
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dp(56))
+        }
+        addView(trainingTrendChart)
+        addView(spacer(4))
+
+        val legendRow = LinearLayout(context).apply { orientation = HORIZONTAL }
+        legendRow.addView(trendLegendChip("Passed", bullColor))
+        legendRow.addView(spacerHorizontal(10))
+        legendRow.addView(trendLegendChip("Rejected", bearColor))
+        legendRow.addView(spacerHorizontal(10))
+        legendRow.addView(trendLegendChip("Skipped/failed", mutedColor))
+        addView(legendRow)
+        addView(spacer(4))
+
+        trainingTrendSummaryText = TextView(context).apply {
+            textSize = 11f
+            setTextColor(mutedColor)
+        }
+        addView(trainingTrendSummaryText)
+
+        addView(spacer(10))
+        addView(agentDivider())
+        addView(spacer(10))
+
+        trainingTrendRunsContainer = LinearLayout(context).apply { orientation = VERTICAL }
+        addView(trainingTrendRunsContainer)
+    }
+
+    private fun trendLegendChip(label: String, color: Int): View {
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(
+            View(context).apply {
+                layoutParams = LayoutParams(dp(7), dp(7)).apply { rightMargin = dp(4) }
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(color)
+                }
+            },
+        )
+        row.addView(
+            TextView(context).apply {
+                text = label
+                textSize = 10f
+                setTextColor(mutedColor)
+            },
+        )
+        return row
+    }
 
     private fun agentSectionCard(builder: LinearLayout.() -> Unit): View =
         LinearLayout(context).apply {
@@ -1364,6 +1451,74 @@ class QuickTradePanel @JvmOverloads constructor(
         agentHistoryContainer.removeAllViews()
         agentHistoryEmptyText.visibility = if (entries.isEmpty()) View.VISIBLE else View.GONE
         entries.forEach { entry -> agentHistoryContainer.addView(agentHistoryRow(entry)) }
+    }
+
+    /**
+     * Feeds [buildTrainingTrendCard] off [org.example.syncora.agent.TrainingRunHistoryStore.recent]
+     * (newest-first, same order that store returns). Rebuilds the run-list rows on each call for
+     * the same reason [renderAgentHistory] does - a bounded, infrequently-refreshed list, not a
+     * hot per-tick update.
+     */
+    fun renderTrainingTrend(runsNewestFirst: List<TrainingRunRecord>) {
+        val hasHistory = runsNewestFirst.isNotEmpty()
+        trainingTrendEmptyText.visibility = if (hasHistory) View.GONE else View.VISIBLE
+        trainingTrendChart.visibility = if (hasHistory) View.VISIBLE else View.GONE
+        trainingTrendChart.render(runsNewestFirst)
+
+        val passed = runsNewestFirst.count { it.outcome == TrainingRunOutcome.PASSED }
+        val rejected = runsNewestFirst.count { it.outcome == TrainingRunOutcome.REJECTED }
+        val latestPbo = runsNewestFirst.firstOrNull { it.pboProbability != null }?.pboProbability
+        trainingTrendSummaryText.text = if (hasHistory) {
+            val pboText = latestPbo?.let { String.format(Locale.US, ", latest PBO %.3f", it) } ?: ""
+            "Last ${runsNewestFirst.size} runs — $passed passed, $rejected rejected$pboText"
+        } else {
+            ""
+        }
+
+        trainingTrendRunsContainer.removeAllViews()
+        runsNewestFirst.take(8).forEach { run -> trainingTrendRunsContainer.addView(trainingTrendRunRow(run)) }
+    }
+
+    private fun trainingTrendRunRow(run: TrainingRunRecord): View {
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(5), 0, dp(5))
+        }
+        val (outcomeLabel, outcomeColor) = when (run.outcome) {
+            TrainingRunOutcome.PASSED -> "Passed" to bullColor
+            TrainingRunOutcome.REJECTED -> "Rejected" to bearColor
+            TrainingRunOutcome.SKIPPED_INSUFFICIENT_DATA -> "Skipped (data)" to mutedColor
+            TrainingRunOutcome.SKIPPED_INSUFFICIENT_SPLITS -> "Skipped (splits)" to mutedColor
+            TrainingRunOutcome.FAILED -> "Failed" to bearColor
+        }
+        row.addView(
+            TextView(context).apply {
+                text = agentTimeFormatter.format(Date(run.timestampMs))
+                textSize = 11f
+                setTextColor(mutedColor)
+                layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.3f)
+            },
+        )
+        row.addView(
+            TextView(context).apply {
+                text = outcomeLabel
+                textSize = 11.5f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(outcomeColor)
+                layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+            },
+        )
+        row.addView(
+            TextView(context).apply {
+                text = run.pboProbability?.let { String.format(Locale.US, "PBO %.3f", it) } ?: "—"
+                textSize = 11f
+                setTextColor(labelColor)
+                gravity = Gravity.END
+                layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+            },
+        )
+        return row
     }
 
     private fun agentHistoryRow(entry: AgentHistoryEntryUiState): View {

@@ -721,6 +721,7 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     while (true) {
                         refreshAgentHistory()
+                        refreshTrainingTrend()
                         refreshAgentOverview()
                         refreshAgentIndicators()
                         delay(15_000L)
@@ -909,6 +910,12 @@ class MainActivity : AppCompatActivity() {
                 .map { QuickTradePanel.AgentHistoryEntryUiState(it.timestampMs, it.action, it.reward) }
         }
         quickTradePanel.renderAgentHistory(entries)
+    }
+
+    /** Feeds [QuickTradePanel.renderTrainingTrend] off [org.example.syncora.agent.TrainingRunHistoryStore.recent] - same poll cadence as [refreshAgentHistory], since this is just as bounded/infrequent a list. */
+    private suspend fun refreshTrainingTrend() {
+        val runs = withContext(Dispatchers.IO) { app.trainingRunHistoryStore.recent() }
+        quickTradePanel.renderTrainingTrend(runs)
     }
 
     /**

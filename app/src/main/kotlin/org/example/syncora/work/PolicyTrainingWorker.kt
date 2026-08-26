@@ -16,6 +16,8 @@ import org.example.syncora.agent.CpcvSplit
 import org.example.syncora.agent.GateDecision
 import org.example.syncora.agent.RolloutWindow
 import org.example.syncora.agent.RolloutWindowBuilder
+import org.example.syncora.agent.TrainingRunOutcome
+import org.example.syncora.agent.TrainingRunRecord
 import org.example.syncora.ml.PpoHyperparameters
 import org.example.syncora.ml.PpoTrainer
 import java.io.File
@@ -72,7 +74,9 @@ class PolicyTrainingWorker(
             runTrainingAttempt(app)
         } catch (e: Exception) {
             Log.e(TAG, "Scheduled PPO training run failed: ${e.message}", e)
-            reportProgress(TrainingProgress.Stage.FAILED, 100, e.message ?: e.toString())
+            val detail = e.message ?: e.toString()
+            reportProgress(TrainingProgress.Stage.FAILED, 100, detail)
+            recordRun(app, TrainingRunOutcome.FAILED, summary = detail)
             Result.retry()
         }
     }
@@ -96,11 +100,9 @@ class PolicyTrainingWorker(
         val totalTransitions = windows.sumOf { it.steps.size }
         if (totalTransitions < MIN_TRANSITIONS_FOR_TRAINING) {
             Log.i(TAG, "Only $totalTransitions resolved transition(s) since last promotion (need $MIN_TRANSITIONS_FOR_TRAINING); skipping")
-            reportProgress(
-                TrainingProgress.Stage.SKIPPED_INSUFFICIENT_DATA,
-                100,
-                "$totalTransitions/$MIN_TRANSITIONS_FOR_TRAINING resolved transitions logged",
-            )
+            val detail = "$totalTransitions/$MIN_TRANSITIONS_FOR_TRAINING resolved transitions logged"
+            reportProgress(TrainingProgress.Stage.SKIPPED_INSUFFICIENT_DATA, 100, detail)
+            recordRun(app, TrainingRunOutcome.SKIPPED_INSUFFICIENT_DATA, summary = detail)
             return Result.success()
         }
 
@@ -108,7 +110,9 @@ class PolicyTrainingWorker(
         val splits = CombinatorialPurgedCrossValidator().splits(windows)
         if (splits.isEmpty()) {
             Log.i(TAG, "Only ${windows.size} rollout window(s) available - not enough yet for a CPCV split; skipping")
-            reportProgress(TrainingProgress.Stage.SKIPPED_INSUFFICIENT_SPLITS, 100, "${windows.size} rollout window(s) available")
+            val detail = "${windows.size} rollout window(s) available"
+            reportProgress(TrainingProgress.Stage.SKIPPED_INSUFFICIENT_SPLITS, 100, detail)
+            recordRun(app, TrainingRunOutcome.SKIPPED_INSUFFICIENT_SPLITS, summary = detail)
             return Result.success()
         }
 
@@ -133,6 +137,12 @@ class PolicyTrainingWorker(
                 app.trainingRunStore.lastGateDecisionAtMs = System.currentTimeMillis()
                 app.trainingRunStore.lastGateDecisionPassed = false
                 app.trainingRunStore.lastGateDecisionSummary = decision.reason
+                recordRun(
+                    app,
+                    TrainingRunOutcome.REJECTED,
+                    pboProbability = decision.pboProbability,
+                    summary = decision.reason,
+                )
                 reportProgress(TrainingProgress.Stage.REJECTED, 100, decision.reason)
                 Result.success()
             }
@@ -141,7 +151,10 @@ class PolicyTrainingWorker(
                 app.trainingRunStore.lastWinningLearningRate = decision.winningHyperparameters.learningRate
                 app.trainingRunStore.lastPboProbability = decision.pboProbability.toFloat()
                 app.trainingRunStore.lastSplitsEvaluated = decision.splitsEvaluated
-                promote(app, trainer, baseModelFile, windows, decision)
+                val winnerMeanOos = performances
+                    .firstOrNull { it.hyperparameters == decision.winningHyperparameters }
+                    ?.meanOutOfSampleScore
+                promote(app, trainer, baseModelFile, windows, decision, winnerMeanOos)
                 Result.success()
             }
         }
@@ -176,6 +189,7 @@ class PolicyTrainingWorker(
         baseModelFile: File,
         windows: List<RolloutWindow>,
         decision: GateDecision.Pass,
+        winnerMeanOutOfSampleScore: Double?,
     ) {
         reportProgress(TrainingProgress.Stage.PROMOTING, 90, "Retraining gate winner on ${windows.size} window(s)")
         val trainedAt = System.currentTimeMillis()
@@ -205,6 +219,15 @@ class PolicyTrainingWorker(
             app.trainingRunStore.lastGateDecisionAtMs = trainedAt
             app.trainingRunStore.lastGateDecisionPassed = false
             app.trainingRunStore.lastGateDecisionSummary = "Gate passed ($gateSummary) but staging the candidate failed"
+            recordRun(
+                app,
+                TrainingRunOutcome.FAILED,
+                pboProbability = decision.pboProbability,
+                splitsEvaluated = decision.splitsEvaluated,
+                meanOutOfSampleScore = winnerMeanOutOfSampleScore,
+                summary = "Gate passed ($gateSummary) but staging the candidate failed",
+                timestampMs = trainedAt,
+            )
             reportProgress(TrainingProgress.Stage.FAILED, 100, "Staging the candidate model failed")
             return
         }
@@ -216,6 +239,15 @@ class PolicyTrainingWorker(
             app.trainingRunStore.lastGateDecisionAtMs = trainedAt
             app.trainingRunStore.lastGateDecisionPassed = false
             app.trainingRunStore.lastGateDecisionSummary = "Gate passed ($gateSummary) but the promoted file failed to load; rolled back"
+            recordRun(
+                app,
+                TrainingRunOutcome.FAILED,
+                pboProbability = decision.pboProbability,
+                splitsEvaluated = decision.splitsEvaluated,
+                meanOutOfSampleScore = winnerMeanOutOfSampleScore,
+                summary = "Gate passed ($gateSummary) but the promoted file failed to load; rolled back",
+                timestampMs = trainedAt,
+            )
             reportProgress(TrainingProgress.Stage.FAILED, 100, "Promoted file failed to load; rolled back")
             return
         }
@@ -224,12 +256,53 @@ class PolicyTrainingWorker(
         app.trainingRunStore.lastGateDecisionAtMs = trainedAt
         app.trainingRunStore.lastGateDecisionPassed = true
         app.trainingRunStore.lastGateDecisionSummary = "Promoted — $gateSummary"
+        recordRun(
+            app,
+            TrainingRunOutcome.PASSED,
+            pboProbability = decision.pboProbability,
+            splitsEvaluated = decision.splitsEvaluated,
+            meanOutOfSampleScore = winnerMeanOutOfSampleScore,
+            summary = "Promoted — $gateSummary",
+            timestampMs = trainedAt,
+        )
         // Everything this run pulled (and anything older that was somehow
         // still unpruned) is now baked into the promoted model and will
         // never be re-pulled, since the next run's sinceMs is trainedAt.
         val pruned = app.experienceLogStore.deleteResolvedBefore(trainedAt)
         Log.i(TAG, "Promoted new policy at $trainedAt; pruned $pruned resolved row(s) older than the new watermark")
         reportProgress(TrainingProgress.Stage.PROMOTED, 100, gateSummary)
+    }
+
+    /**
+     * Appends one entry to [org.example.syncora.agent.TrainingRunHistoryStore] for every
+     * terminal outcome this worker can reach - the trend counterpart to
+     * [org.example.syncora.agent.TrainingRunStore]'s single latest-run fields, which this method
+     * leaves untouched. Best-effort like [reportProgress]: history is diagnostic only, never
+     * worth failing an otherwise-successful run over.
+     */
+    private fun recordRun(
+        app: SyncoraApplication,
+        outcome: TrainingRunOutcome,
+        pboProbability: Double? = null,
+        splitsEvaluated: Int? = null,
+        meanOutOfSampleScore: Double? = null,
+        summary: String,
+        timestampMs: Long = System.currentTimeMillis(),
+    ) {
+        try {
+            app.trainingRunHistoryStore.append(
+                TrainingRunRecord(
+                    timestampMs = timestampMs,
+                    outcome = outcome,
+                    pboProbability = pboProbability,
+                    splitsEvaluated = splitsEvaluated,
+                    meanOutOfSampleScore = meanOutOfSampleScore,
+                    summary = summary,
+                ),
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to append training run history: ${e.message}")
+        }
     }
 
     /** Thin wrapper over [CoroutineWorker.setProgress] using the shared [TrainingProgress] key/stage schema - best-effort, since a progress update racing the worker's own completion is never worth failing the run over. */
