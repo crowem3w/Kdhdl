@@ -30,8 +30,11 @@ import org.example.syncora.R
  * content behind the modal is real-time blurred on Android 12+ (where the
  * device/user has cross-window blur enabled); on older devices it falls
  * back to a plain dark scrim, since window blur-behind isn't available
- * pre-S. The modal surface itself uses a translucent, bordered "glass" card
- * to read as dark-mode glassmorphism either way.
+ * pre-S. Inside the modal itself, a full-bleed [CinematicBackgroundView]
+ * fills the frame edge-to-edge beneath a dim scrim, and the modal surface
+ * uses a translucent, bordered "glass" card so that backdrop stays faintly
+ * visible through the panel - dark-mode glassmorphism with real depth
+ * behind it either way.
  */
 class TradingModeDialog(
     context: Context,
@@ -47,11 +50,12 @@ class TradingModeDialog(
         // Android has no native 0-100% "blurriness" scale, so these two
         // knobs translate the requested percentages into concrete values:
 
-        // Card fill: charcoal-black at 75% opacity (25% see-through), which
+        // Card fill: charcoal-black at 58% opacity (42% see-through), which
         // is what "blurriness" means for a flat glass panel - the more
         // translucent it is, the more it reads as frosted glass rather than
-        // a solid card.
-        const val CARD_FILL_OPACITY_PERCENT = 0.75f
+        // a solid card. Kept low enough that the cinematic backdrop view
+        // remains legible through the panel.
+        const val CARD_FILL_OPACITY_PERCENT = 0.58f
         val CARD_BASE_COLOR_RGB = Color.parseColor("#1C1C1E") // charcoal-black
 
         // Backdrop (whole homepage/chart) blur radius behind the window,
@@ -118,10 +122,26 @@ class TradingModeDialog(
     private fun buildRootView(): View {
         rootView = FrameLayout(context).apply {
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            setBackgroundColor(scrimColor)
             isClickable = true
             setOnClickListener { dismiss() }
         }
+
+        // Full-bleed cinematic backdrop: fills the entire modal frame
+        // edge-to-edge, sitting beneath the dim scrim and the glass card so
+        // it stays visible (softly) through both.
+        rootView.addView(
+            CinematicBackgroundView(context).apply {
+                layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            },
+        )
+
+        // Dim scrim on top of the backdrop, beneath the card.
+        rootView.addView(
+            View(context).apply {
+                setBackgroundColor(scrimColor)
+                layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            },
+        )
 
         val cornerRadiusPx = dp(CARD_CORNER_RADIUS_DP).toFloat()
 
