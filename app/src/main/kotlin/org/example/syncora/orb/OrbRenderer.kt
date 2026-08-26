@@ -30,6 +30,13 @@ internal class OrbRenderer : GLSurfaceView.Renderer {
     @Volatile var saturation: Float = 0f // 0 = fully monochrome, 1 = original color
     @Volatile var backgroundColor: FloatArray = floatArrayOf(0f, 0f, 0f)
 
+    /**
+     * 0 = perfect circular orb, 1 = fully morphed into the §-shaped rim.
+     * Intended to be driven by a ValueAnimator from the UI layer for the
+     * orb -> § transition; any value in between blends the two SDFs.
+     */
+    @Volatile var sectionMorph: Float = 0f
+
     // Base palette the orb cycles/mixes between. Defaults match the original
     // violet/cyan/navy Orb.jsx palette; callers can override for a brand look
     // (e.g. a white-core, teal-glow orb) without touching the shader itself.
@@ -54,6 +61,7 @@ internal class OrbRenderer : GLSurfaceView.Renderer {
     private var uColor1 = 0
     private var uColor2 = 0
     private var uColor3 = 0
+    private var uSectionMorph = 0
 
     private var vertexBuffer: FloatBuffer
     private var uvBuffer: FloatBuffer
@@ -110,6 +118,7 @@ internal class OrbRenderer : GLSurfaceView.Renderer {
         uColor1 = GLES20.glGetUniformLocation(program, "baseColor1")
         uColor2 = GLES20.glGetUniformLocation(program, "baseColor2")
         uColor3 = GLES20.glGetUniformLocation(program, "baseColor3")
+        uSectionMorph = GLES20.glGetUniformLocation(program, "sectionMorph")
 
         startTimeNanos = SystemClock.elapsedRealtimeNanos()
         lastFrameNanos = startTimeNanos
@@ -154,6 +163,7 @@ internal class OrbRenderer : GLSurfaceView.Renderer {
         GLES20.glUniform1f(uRot, currentRot)
         GLES20.glUniform1f(uHoverIntensity, hoverIntensity)
         GLES20.glUniform1f(uSaturation, saturation)
+        GLES20.glUniform1f(uSectionMorph, sectionMorph)
         val c1 = color1
         val c2 = color2
         val c3 = color3
@@ -207,7 +217,49 @@ internal class OrbRenderer : GLSurfaceView.Renderer {
             uniform vec3 baseColor1;
             uniform vec3 baseColor2;
             uniform vec3 baseColor3;
+            uniform float sectionMorph;
             varying vec2 vUv;
+
+            // Distance from p to the segment a-b (a "capsule" without the radius term).
+            float sdSegment(vec2 p, vec2 a, vec2 b) {
+              vec2 pa = p - a;
+              vec2 ba = b - a;
+              float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+              return length(pa - ba * h);
+            }
+
+            // Centerline of a vertically-oriented section-sign (§), as a chain of
+            // line segments. Traces: small upper hook -> pinch -> diagonal
+            // crossover -> lower loop -> pinch -> rounded tip, per the
+            // orb-to-section-shape deformation spec.
+            float sectionDist(vec2 uv) {
+              vec2 p0  = vec2( 0.05,  0.85);
+              vec2 p1  = vec2( 0.38,  0.72);
+              vec2 p2  = vec2( 0.32,  0.50);
+              vec2 p3  = vec2( 0.04,  0.42);
+              vec2 p4  = vec2(-0.32,  0.28);
+              vec2 p5  = vec2(-0.12,  0.04);
+              vec2 p6  = vec2( 0.28, -0.16);
+              vec2 p7  = vec2( 0.10, -0.36);
+              vec2 p8  = vec2(-0.28, -0.46);
+              vec2 p9  = vec2(-0.38, -0.66);
+              vec2 p10 = vec2(-0.16, -0.86);
+              vec2 p11 = vec2( 0.12, -0.80);
+
+              float d = 1.0e5;
+              d = min(d, sdSegment(uv, p0,  p1));
+              d = min(d, sdSegment(uv, p1,  p2));
+              d = min(d, sdSegment(uv, p2,  p3));
+              d = min(d, sdSegment(uv, p3,  p4));
+              d = min(d, sdSegment(uv, p4,  p5));
+              d = min(d, sdSegment(uv, p5,  p6));
+              d = min(d, sdSegment(uv, p6,  p7));
+              d = min(d, sdSegment(uv, p7,  p8));
+              d = min(d, sdSegment(uv, p8,  p9));
+              d = min(d, sdSegment(uv, p9,  p10));
+              d = min(d, sdSegment(uv, p10, p11));
+              return d;
+            }
 
             vec3 rgb2yiq(vec3 c) {
               float y = dot(c, vec3(0.299, 0.587, 0.114));
@@ -299,12 +351,23 @@ internal class OrbRenderer : GLSurfaceView.Renderer {
 
               float n0 = snoise3(vec3(uv * noiseScale, iTime * 0.5)) * 0.5 + 0.5;
               float r0 = mix(mix(innerRadius, 1.0, 0.4), mix(innerRadius, 1.0, 0.6), n0);
-              float d0 = distance(uv, (r0 * invLen) * uv);
+
+              // Circular rim distance (original orb) vs. §-glyph rim distance,
+              // blended by sectionMorph so the tube deforms continuously from
+              // one to the other rather than cross-fading two images.
+              float dCircle = distance(uv, (r0 * invLen) * uv);
+              float dGlyph = sectionDist(uv) - innerRadius * 0.5;
+              float d0 = mix(dCircle, dGlyph, sectionMorph);
               float v0 = light1(1.0, 10.0, d0);
 
-              v0 *= smoothstep(r0 * 1.05, r0, len);
+              // Circular version fades by radial distance from center; the glyph
+              // has no radial symmetry, so its mask instead comes from proximity
+              // to the traced rim itself (a tube-width falloff).
+              float circleMask = smoothstep(r0 * 1.05, r0, len);
               float innerFade = smoothstep(r0 * 0.8, r0 * 0.95, len);
-              v0 *= mix(innerFade, 1.0, bgLuminance * 0.7);
+              circleMask *= mix(innerFade, 1.0, bgLuminance * 0.7);
+              float glyphMask = smoothstep(0.22, 0.0, dGlyph);
+              v0 *= mix(circleMask, glyphMask, sectionMorph);
               float cl = cos(ang + iTime * 2.0) * 0.5 + 0.5;
 
               float a = iTime * -1.0;
@@ -313,8 +376,16 @@ internal class OrbRenderer : GLSurfaceView.Renderer {
               float v1 = light2(1.5, 5.0, d);
               v1 *= light1(1.0, 50.0, d0);
 
-              float v2 = smoothstep(1.0, mix(innerRadius, 1.0, n0 * 0.5), len);
-              float v3 = smoothstep(innerRadius, mix(innerRadius, 1.0, 0.5), len);
+              float v2 = mix(
+                smoothstep(1.0, mix(innerRadius, 1.0, n0 * 0.5), len),
+                1.0,
+                sectionMorph
+              );
+              float v3 = mix(
+                smoothstep(innerRadius, mix(innerRadius, 1.0, 0.5), len),
+                1.0,
+                sectionMorph
+              );
 
               vec3 colBase = mix(color1, color2, cl);
               float fadeAmount = mix(1.0, 0.1, bgLuminance);
