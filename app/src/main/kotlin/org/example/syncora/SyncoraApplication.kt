@@ -10,6 +10,7 @@ import org.example.syncora.bitget.FileKlineCacheStore
 import org.example.syncora.bitget.LiveTradingRepository
 import org.example.syncora.bitget.LocalPaperTradingStore
 import org.example.syncora.bitget.PaperTradingRepository
+import org.example.syncora.bitget.RLFeatureVectorPipeline
 import org.example.syncora.bitget.RiskSettingsStore
 import org.example.syncora.bitget.StopLossGuard
 import org.example.syncora.bitget.Timeframe
@@ -97,6 +98,25 @@ class SyncoraApplication : Application() {
         LiveTradingRepository(credentialsStore = liveCredentialsStore, symbol = "BTCUSDT")
     }
 
+    // Supplies u_t, Δp_t, δ_t, κ_t, and ŷ_t (design doc §9 /
+    // recurrent-reinforcement-learning-crypto-agent.md Appendix A) off the
+    // same live pipelines above - no separate data path, so the RL agent's
+    // inputs never disagree with what the chart/paper-trading engine see.
+    // Defaults to reading position/funding state off the paper trading
+    // engine; point [positionProvider]/[equityProvider]/[fundingRateProvider]
+    // at liveTradingRepository instead once live trading is the source of
+    // truth for a given deployment.
+    val rlFeaturePipeline: RLFeatureVectorPipeline by lazy {
+        RLFeatureVectorPipeline(
+            chartPipeline = pipeline,
+            depthPipeline = depthPipeline,
+            tradeSocket = tradeSocket,
+            fundingRateProvider = { paperTradingRepository.currentFunding.value },
+            positionProvider = { paperTradingRepository.positions.value },
+            equityProvider = { paperTradingRepository.balance.value?.equity },
+        )
+    }
+
     val riskSettingsStore: RiskSettingsStore by lazy {
         RiskSettingsStore(applicationContext)
     }
@@ -128,6 +148,7 @@ class SyncoraApplication : Application() {
         tradeSocket.connect()
         liveTradingRepository.start()
         stopLossGuard.start(liveTradingRepository.positions)
+        rlFeaturePipeline.start()
     }
 
     /** Call only when the foreground service itself is being torn down, not on activity backgrounding. */
@@ -138,5 +159,6 @@ class SyncoraApplication : Application() {
         tradeSocket.disconnect()
         liveTradingRepository.stop()
         stopLossGuard.stop()
+        rlFeaturePipeline.stop()
     }
 }
