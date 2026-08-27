@@ -6,6 +6,10 @@ import org.example.syncora.bitget.BitgetFundingRateClient
 import org.example.syncora.bitget.BitgetLiveCredentialsStore
 import org.example.syncora.bitget.BitgetTradeSocket
 import org.example.syncora.bitget.DepthPipeline
+import org.example.syncora.bitget.DirectRLPositionPipeline
+import org.example.syncora.bitget.DirectRLReadout
+import org.example.syncora.bitget.EchoStateReservoir
+import org.example.syncora.bitget.FeatureAugmentationPipeline
 import org.example.syncora.bitget.FileKlineCacheStore
 import org.example.syncora.bitget.LiveTradingRepository
 import org.example.syncora.bitget.LocalPaperTradingStore
@@ -114,7 +118,38 @@ class SyncoraApplication : Application() {
             fundingRateProvider = { paperTradingRepository.currentFunding.value },
             positionProvider = { paperTradingRepository.positions.value },
             equityProvider = { paperTradingRepository.balance.value?.equity },
+            // Same real taker rate (see BitgetFeeRateClient) the paper
+            // trading engine simulates fills against - paper §3.3's cost
+            // model is book-walk slippage *plus* a taker exchange fee, not
+            // slippage alone.
+            feeRateProvider = { paperTradingRepository.feeRates.value.takerRate },
         )
+    }
+
+    // The source (ESN reservoir) and target (direct-RL readout) halves of
+    // the paper's transfer-learning pipeline (§3.2) - see
+    // recurrent-reinforcement-learning-crypto-agent.md. nInput/nBack take
+    // their defaults from RLFeatureVectorPipeline.FEATURE_COUNT / its own
+    // nBack=10 default respectively, so these three stay in lockstep
+    // without hand-duplicating the sizes here.
+    val rlReservoir: EchoStateReservoir by lazy { EchoStateReservoir() }
+
+    val rlFeatureAugmentationPipeline: FeatureAugmentationPipeline by lazy {
+        FeatureAugmentationPipeline(source = rlFeaturePipeline, reservoir = rlReservoir)
+    }
+
+    val rlReadout: DirectRLReadout by lazy { DirectRLReadout(reservoir = rlReservoir) }
+
+    // Emits one DirectRLDecision (targetPosition/gatedPosition/utility/etc,
+    // §3.2.2 Eq. 6-12) per tick of live market data. Deliberately *not*
+    // wired to place any order itself - see [rlPositionPipeline]'s own
+    // docs and [DirectRLDecision.gatedPosition] - turning this into trades
+    // is a separate, explicit product decision, not something starting
+    // market data should silently begin doing. For now this only computes
+    // and exposes the agent's decision stream (e.g. for logging/future UI)
+    // while online training runs continuously against live data.
+    val rlPositionPipeline: DirectRLPositionPipeline by lazy {
+        DirectRLPositionPipeline(source = rlFeatureAugmentationPipeline, readout = rlReadout)
     }
 
     val riskSettingsStore: RiskSettingsStore by lazy {
@@ -149,6 +184,13 @@ class SyncoraApplication : Application() {
         liveTradingRepository.start()
         stopLossGuard.start(liveTradingRepository.positions)
         rlFeaturePipeline.start()
+        // Order matters only in that each of these subscribes to the
+        // previous one's StateFlow rather than driving it directly, so
+        // starting them in dependency order isn't strictly required - but
+        // doing so anyway means the reservoir/readout don't sit spun up
+        // with nothing feeding them even for the first tick.
+        rlFeatureAugmentationPipeline.start()
+        rlPositionPipeline.start()
     }
 
     /** Call only when the foreground service itself is being torn down, not on activity backgrounding. */
@@ -159,6 +201,8 @@ class SyncoraApplication : Application() {
         tradeSocket.disconnect()
         liveTradingRepository.stop()
         stopLossGuard.stop()
+        rlPositionPipeline.stop()
+        rlFeatureAugmentationPipeline.stop()
         rlFeaturePipeline.stop()
     }
 }

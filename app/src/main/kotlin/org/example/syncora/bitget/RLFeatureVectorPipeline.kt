@@ -45,13 +45,17 @@ data class RLFeatureSample(
     val deltaP: Double,
 
     /**
-     * δ_t - the price-taker execution cost a marketable order of
-     * `referenceOrderSize` would incur *right now*, walked through the
-     * live book (see [OrderBookWalker]) rather than assumed as a flat
-     * half-spread - design doc §9 is explicit that this pipeline should
-     * source δ_t this way, unlike the paper's own simplified Eq. 9. Always
-     * a non-negative price quantity (same units as [deltaP]). Null only if
-     * the relevant side of the book isn't primed yet.
+     * δ_t - the full price-taker execution cost a marketable order of
+     * `referenceOrderSize` would incur *right now*: book-walk slippage
+     * (see [OrderBookWalker]) rather than assumed as a flat half-spread -
+     * design doc §9 is explicit that this pipeline should source the
+     * slippage component this way, unlike the paper's own simplified
+     * Eq. 9 - **plus** the taker exchange fee (paper §3.3: "cost = Eq. (9)
+     * + 5 bps exchange fee"), so this already includes both cost sources
+     * the paper's own experiment design charges; a consumer computing r_t
+     * (Eq. 8) should not add any further fee on top. Always a non-negative
+     * price quantity (same units as [deltaP]). Null only if the relevant
+     * side of the book isn't primed yet.
      *
      * Both directions are reported because a feature snapshot is taken
      * before the agent has chosen f_t; a consumer computing a realized
@@ -109,6 +113,16 @@ class RLFeatureVectorPipeline(
     private val fundingRateProvider: () -> FundingRateInfo?,
     private val positionProvider: () -> List<PaperPosition>,
     private val equityProvider: () -> Double?,
+    // Taker fee rate (fraction, e.g. 0.0006 = 6 bps) added on top of
+    // book-walk slippage to build [RLFeatureSample.executionCostLong]/
+    // [executionCostShort] - paper §3.3: "cost = Eq. (9) + 5 bps exchange
+    // fee". Typically `{ paperTradingRepository.feeRates.value.takerRate }`
+    // so the RL agent is charged the same real, possibly account-specific
+    // rate (see [BitgetFeeRateClient]) the paper-trading engine itself
+    // simulates fills against, rather than a second, possibly-diverging
+    // fee assumption. Defaults to 0.0 (slippage-only) so existing callers/
+    // tests that don't care about fees keep working unchanged.
+    private val feeRateProvider: () -> Double = { 0.0 },
     // Order size (base coin) used to probe execution cost via
     // [OrderBookWalker] - should roughly track the size the trading engine
     // actually trades, since slippage is size-dependent.
@@ -266,14 +280,19 @@ class RLFeatureVectorPipeline(
             (kappaT ?: 0.0).toFloat(),
         )
 
-        // δ_t via OrderBookWalker, not a flat half-spread (design doc §9).
-        // LONG walks the asks upward, so vwap >= reference and slippage is
-        // already a non-negative cost. SHORT walks the bids downward, so
-        // vwap <= reference and slippage is <= 0 - negate it to express
-        // the same "cost as a positive price quantity" convention.
-        val executionCostLong = OrderBookWalker.walk(depth, PositionSide.LONG, referenceOrderSize)?.slippage
+        // δ_t via OrderBookWalker, not a flat half-spread (design doc §9),
+        // plus the taker fee (paper §3.3: "Eq. (9) + 5 bps exchange fee"),
+        // expressed in the same price units as the slippage term via
+        // referencePrice * feeRate. LONG walks the asks upward, so vwap >=
+        // reference and slippage is already a non-negative cost. SHORT
+        // walks the bids downward, so vwap <= reference and slippage is
+        // <= 0 - negate it to express the same "cost as a positive price
+        // quantity" convention; the fee is added as a positive cost either way.
+        val takerFeeRate = feeRateProvider()
+        val executionCostLong = OrderBookWalker.walk(depth, PositionSide.LONG, referenceOrderSize)
+            ?.let { it.slippage + it.referencePrice * takerFeeRate }
         val executionCostShort = OrderBookWalker.walk(depth, PositionSide.SHORT, referenceOrderSize)
-            ?.let { -it.slippage }
+            ?.let { -it.slippage + it.referencePrice * takerFeeRate }
 
         val yHatSnapshot: List<Float>
         val newPosition = currentNetPositionFraction()
