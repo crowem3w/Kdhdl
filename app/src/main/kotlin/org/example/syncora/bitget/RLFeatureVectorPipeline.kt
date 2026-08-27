@@ -28,7 +28,8 @@ import kotlin.math.ln
  * (W^input, W^hidden, W^back, the tanh reservoir recurrence in §3.2.1) and
  * the direct-RL readout (w_out, the EKF update in the paper's Algorithm 1)
  * is a distinct model-training concern that consumes this pipeline's
- * output - it is not implemented here.
+ * output - it is not implemented here. See [EchoStateReservoir] and
+ * [DirectRLReadout] respectively.
  */
 data class RLFeatureSample(
     val timestampMs: Long,
