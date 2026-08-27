@@ -4,7 +4,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,6 +19,15 @@ import org.junit.Test
  * against values re-derived from the Kotlin under test - is what makes
  * this a meaningful regression check on the math itself, not just a
  * change-detector for whatever the code currently does.
+ *
+ * Regenerated for the Fix 4 correction (train on gated P&L, not raw f_t
+ * P&L): the oracle now evaluates the §3.3 trading gate before computing
+ * r_t, uses the *gated* position (not raw f_t) for Delta f_t and the
+ * funding term, and zeroes dr_t/df_t whenever the gate is closed (since a
+ * gate-flattened tick's realized position no longer depends on this
+ * tick's own raw output). Ticks 0-1 are unchanged from the pre-Fix-4
+ * golden values (the gate is open throughout both, so gated == f there);
+ * ticks 2-4 differ, since the gate is closed starting tick 2.
  */
 class DirectRLReadoutTest {
 
@@ -117,21 +125,18 @@ class DirectRLReadoutTest {
             sample(doubleArrayOf(0.15, -0.05, 0.25, -0.2), -2.0, 1.05, 1.0, 0.0005),
         )
 
-        // f, shouldTrade, gated, r, realizedReturn, mu, sigma2, utility, ir -
-        // per tick, from the Python oracle (see class doc). realizedReturn
-        // is r_t recomputed off the gated position series rather than the
-        // raw one - see [DirectRLDecision.realizedReturn]'s docs.
+        // f, shouldTrade, gated, r, mu, sigma2, utility, ir - per tick, from
+        // the Python oracle (see class doc).
         data class Golden(
             val f: Double, val shouldTrade: Boolean, val gated: Double, val r: Double,
-            val realizedReturn: Double,
             val mu: Double, val sigma2: Double, val utility: Double, val ir: Double,
         )
         val golden = listOf(
-            Golden(0.0, true, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-            Golden(-2.3023023023022913e-08, true, -2.3023023023022913e-08, -2.5323023023022903e-08, -2.5323023023022903e-08, -2.5323023023022924e-11, 6.399736252899944e-19, -2.5323023023026123e-11, 0.0),
-            Golden(-4.769728315680269e-07, false, 0.0, -5.004644790362929e-07, -8.978978978978936e-08, -5.257621790362933e-10, 2.5057805426454515e-16, -5.257621790375461e-10, -0.5272518300102641),
-            Golden(0.0, false, 0.0, -7.154592473520404e-07, 0.0, -1.240695664209298e-09, 7.604356157853442e-16, -1.2406956642131e-09, -0.7142237872091302),
-            Golden(-0.00014973015760143065, false, 0.0, -0.00014965529252262993, 0.0, -1.5089474749117515e-07, 2.2352324629287108e-11, -1.5089474760293678e-07, -0.5066558306611761),
+            Golden(0.0, true, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+            Golden(-2.3023023023022913e-08, true, -2.3023023023022913e-08, -2.5323023023022903e-08, -2.5323023023022924e-11, 6.399736252899945e-19, -2.5323023023026123e-11, 0.0),
+            Golden(-4.769728315680269e-07, false, 0.0, -8.978978978978936e-08, -1.1508748978978935e-10, 8.680885884258262e-18, -1.1508748978983275e-10, -0.6200780589964049),
+            Golden(0.0, false, 0.0, 0.0, -1.1497240229999956e-10, 8.672218217027293e-18, -1.1497240230004292e-10, -0.6197674700766653),
+            Golden(-0.000341820699557628, false, 0.0, 0.0, -1.1485742989769956e-10, 8.663559191039469e-18, -1.1485742989774288e-10, -0.619457037199642),
         )
 
         ticks.zip(golden).forEachIndexed { i, (tick, g) ->
@@ -140,7 +145,6 @@ class DirectRLReadoutTest {
             assertEquals("tick $i shouldTrade", g.shouldTrade, d.shouldTrade)
             assertClose(g.gated, d.gatedPosition, "tick $i gatedPosition")
             assertClose(g.r, d.netReturn, "tick $i netReturn")
-            assertClose(g.realizedReturn, d.realizedReturn, "tick $i realizedReturn", absTol = 1e-9)
             assertClose(g.mu, d.mu, "tick $i mu")
             assertClose(g.sigma2, d.variance, "tick $i variance")
             assertClose(g.utility, d.utility, "tick $i utility")
@@ -213,41 +217,57 @@ class DirectRLReadoutTest {
         assertFalse("t=3's gate must reflect the strongly negative mu produced by t=2", t3.shouldTrade)
     }
 
-    @Test
-    fun `realizedReturn is zero while gated off, even though netReturn keeps training on the raw target`() {
-        // Single-weight readout, same shape as the mu-entering-the-tick
-        // test above: t=0 nudges w_out off zero via kappaT; t=1 makes
-        // mu go strongly negative, gating t=2 and t=3 off. netReturn
-        // should keep reflecting the raw (ungated) f_t throughout - that's
-        // the differentiable training target - while realizedReturn must
-        // collapse to (at most) a one-off unwind cost at the tick the gate
-        // first turns off, then sit at exactly zero for as long as the
-        // gate stays off and the raw target doesn't cross back through
-        // zero (since nothing is left to flatten again).
-        val readout = DirectRLReadout(augmentedSize = 1, tau = 0.5)
+    // ---- Fix 4 acceptance criteria: train on gated P&L, not raw f_t P&L ----
 
+    @Test
+    fun `funding term uses gated position, not raw f_t, once the gate is closed`() {
+        // Same driving sequence as "trading gate uses mu entering the
+        // tick...": t=0's nonzero kappaT nudges w_out off zero, t=1 leaves
+        // mu at 0 entering t=2, and t=2's huge deltaP against the nonzero
+        // f_1 sends mu strongly negative, closing the gate for t=3.
+        val readout = DirectRLReadout(augmentedSize = 1, tau = 0.5)
         readout.step(sample(doubleArrayOf(1.0), deltaP = 0.0, execLong = 0.0, execShort = 0.0, kappaT = 0.1))!!
         readout.step(sample(doubleArrayOf(1.0), deltaP = 0.0, execLong = 0.0, execShort = 0.0, kappaT = 0.0))!!
-        val t2 = readout.step(sample(doubleArrayOf(1.0), deltaP = 500.0, execLong = 0.0, execShort = 0.0, kappaT = 0.0))!!
-        assertTrue("t=2 should still be trading (gate reflects mu_1 = 0)", t2.shouldTrade)
+        readout.step(sample(doubleArrayOf(1.0), deltaP = 500.0, execLong = 0.0, execShort = 0.0, kappaT = 0.0))!!
 
-        val t3 = readout.step(sample(doubleArrayOf(1.0), deltaP = 0.0, execLong = 0.0, execShort = 0.0, kappaT = 0.0))!!
-        assertFalse("t=3's gate should be off", t3.shouldTrade)
-        assertEquals("t=3 gatedPosition is flat", 0.0, t3.gatedPosition, 1e-12)
-        assertNotEquals("t=3 netReturn keeps tracking the raw (nonzero) target", 0.0, t3.netReturn)
-        // t=2 was actually trading a nonzero executed position (its own
-        // gate reflected mu_1 = 0, still true), so t=3's forced flatten
-        // *would* realize an unwind cost if execLong/execShort were
-        // nonzero here - they're zero throughout this scenario purely to
-        // keep the arithmetic hand-verifiable, so that cost term is zero
-        // and deltaP is also 0 at t=3, leaving nothing else to realize.
+        // t=3: gate is closed (see the referenced test), so gated_3 = 0.
+        // deltaP/cost are held at 0 here so only the funding term (kappaT *
+        // position) can contribute to r_3 - a nonzero kappaT with the bug
+        // (funding on raw f_3, which is not 0 here) would make r_3 != 0.
+        val t3 = readout.step(sample(doubleArrayOf(1.0), deltaP = 0.0, execLong = 0.0, execShort = 0.0, kappaT = 0.5))!!
+        assertFalse("t=3's gate must be closed for this case to be meaningful", t3.shouldTrade)
+        assertTrue("expected raw f_3 to be nonzero for this case to be meaningful", t3.targetPosition != 0.0)
+        assertEquals(0.0, t3.gatedPosition, 1e-12)
         assertEquals(
-            "t=3 realizedReturn: zero deltaP and zero cost here, so nothing to realize",
-            0.0, t3.realizedReturn, 1e-12,
+            "funding term must use gated (0), not raw f_3 (nonzero) - r_3 should be exactly 0 with deltaP/cost held at 0",
+            0.0,
+            t3.netReturn,
+            1e-12,
         )
+    }
 
-        val t4 = readout.step(sample(doubleArrayOf(1.0), deltaP = 0.0, execLong = 0.0, execShort = 0.0, kappaT = 0.0))!!
-        assertEquals("t=4 stays realized-flat while the gate stays off", 0.0, t4.realizedReturn, 1e-12)
+    @Test
+    fun `next tick's price term uses the previous gated position, not raw f_t, once the gate has closed`() {
+        val readout = DirectRLReadout(augmentedSize = 1, tau = 0.5)
+        readout.step(sample(doubleArrayOf(1.0), deltaP = 0.0, execLong = 0.0, execShort = 0.0, kappaT = 0.1))!!
+        readout.step(sample(doubleArrayOf(1.0), deltaP = 0.0, execLong = 0.0, execShort = 0.0, kappaT = 0.0))!!
+        readout.step(sample(doubleArrayOf(1.0), deltaP = 500.0, execLong = 0.0, execShort = 0.0, kappaT = 0.0))!!
+        val t3 = readout.step(sample(doubleArrayOf(1.0), deltaP = 0.0, execLong = 0.0, execShort = 0.0, kappaT = 0.0))!!
+        assertFalse("t=3's gate must be closed for this case to be meaningful", t3.shouldTrade)
+        assertTrue("expected raw f_3 to be nonzero for this case to be meaningful", t3.targetPosition != 0.0)
+
+        // t=4: cost/funding held at 0 so only the price term
+        // (deltaP * f_{t-1}) can contribute to r_4. With the bug (prevF
+        // rolled forward as raw f_3, which is nonzero), a large deltaP
+        // here would make r_4 strongly nonzero; with the fix (prevF rolled
+        // forward as gated_3 = 0), r_4 must be exactly 0.
+        val t4 = readout.step(sample(doubleArrayOf(1.0), deltaP = 777.0, execLong = 0.0, execShort = 0.0, kappaT = 0.0))!!
+        assertEquals(
+            "price term must use the previous *gated* position (0), not raw f_3 (nonzero)",
+            0.0,
+            t4.netReturn,
+            1e-12,
+        )
     }
 
     @Test

@@ -43,32 +43,8 @@ data class DirectRLDecision(
     /** [targetPosition] if [shouldTrade], else 0.0 - the position an execution engine should actually target. */
     val gatedPosition: Double,
 
-    /**
-     * r_t (Eq. 8), computed off the *raw* (ungated) target position
-     * f_{t-1}->f_t - the differentiable training target that [mu],
-     * [variance], [utility], and the EKF gradient (Eq. 12) are all derived
-     * from. Deliberately *not* gated: the paper's chain-rule derivatives
-     * (Eq. 12's constituent-derivatives block) are written entirely in
-     * terms of f_t, and a hard mu_t>=0 cutoff has no gradient to
-     * differentiate through, so gating this would either stall learning
-     * during abstention or require inventing a derivative the paper
-     * doesn't define. Zero on the very first tick (no prior position to
-     * have carried P&L on). See [realizedReturn] for the P&L an execution
-     * engine actually earns once §3.3's "flatten and wait" gate is
-     * applied.
-     */
+    /** r_t (Eq. 8) realized this tick off the *previous gated* position f_{t-1} (Fix 4: the position actually held, not the raw target) - price P&L minus execution cost minus funding. Zero on the very first tick (no prior position to have carried P&L on). */
     val netReturn: Double,
-
-    /**
-     * The P&L an execution engine actually realizes this tick, i.e. r_t
-     * (Eq. 8) recomputed off [gatedPosition] and the *previous tick's*
-     * gated position, rather than the raw target - so it goes to exactly
-     * 0.0 while [shouldTrade] is false (§3.3: "flatten and wait"),
-     * matching the flat stretches Table 1's position/execution/carry/pnl
-     * series show during abstention. This is a reporting quantity only;
-     * it plays no part in training (see [netReturn]).
-     */
-    val realizedReturn: Double,
 
     /** mu_t (Eq. 7) - online exponentially-decayed mean of r_t, *after* folding in this tick's [netReturn]. */
     val mu: Double,
@@ -149,22 +125,19 @@ class DirectRLReadout(
     private var mu: Double = 0.0
     private var sigma2: Double = 0.0
 
-    // f_{t-1} - the readout's own previous raw target (Eq. 10), which is
-    // what Eq. 8's r_t and Eq. 12's recurrent term are actually defined
-    // against; deliberately *not* re-derived from [RLFeatureSample.yHat],
-    // since that field tracks realised (possibly gate-flattened or
-    // execution-lagged) account state rather than this class's own
-    // differentiable output - see [RLFeatureSample.yHat]'s own docs.
+    // f_{t-1} - the readout's own previous *gated* position (§3.3's
+    // trading gate applied to Eq. 10's raw output), since that's what the
+    // account would actually have carried P&L on and accrued funding
+    // against - not the raw, possibly gate-flattened target. Deliberately
+    // *not* re-derived from [RLFeatureSample.yHat] either, since that field
+    // tracks realised (possibly execution-lagged) account state rather
+    // than this class's own differentiable output - see
+    // [RLFeatureSample.yHat]'s own docs. Despite the name, this has stored
+    // the *gated* previous position since the Fix 4 correction below; kept
+    // as `prevF` since it still plays exactly the f_{t-1} role Eq. 8 and
+    // Eq. 12 are written against - it's just that "the position held"
+    // is the gated one, not the raw one.
     private var prevF: Double = 0.0
-
-    // f_{t-1} of the *executed* (gate-respecting) position series - the
-    // previous tick's [DirectRLDecision.gatedPosition], not [prevF]. Kept
-    // separate because during a "flatten and wait" tick prevF still
-    // advances to the raw f_t (so training keeps seeing the true
-    // recurrent f_t sequence), but the position an execution engine
-    // actually carried into the next tick was 0 - [realizedReturn] needs
-    // that distinction to go to zero while gated off.
-    private var prevExecutedF: Double = 0.0
 
     /** df_{t-1}/dw_{t-1}^out (the recurrent term of Eq. 12) - an eligibility trace carried between [step] calls. Exposed read-only purely for diagnostics/tests. */
     var lastGradient: DoubleArray = DoubleArray(augmentedSize)
@@ -177,7 +150,6 @@ class DirectRLReadout(
         mu = 0.0
         sigma2 = 0.0
         prevF = 0.0
-        prevExecutedF = 0.0
         lastGradient = DoubleArray(augmentedSize)
     }
 
@@ -202,30 +174,6 @@ class DirectRLReadout(
         val f = tanh(s)
         val oneMinusTanhSq = 1.0 - f * f
 
-        val deltaF = f - prevF
-
-        // §3.3's execution gate ("trade freely if mu_t >= 0; else flatten
-        // and wait"), evaluated against mu *entering* this tick (mu_{t-1}),
-        // since mu_t itself isn't known until r_t is realized below.
-        val shouldTrade = mu >= 0.0
-        val executedF = if (shouldTrade) f else 0.0
-        val deltaExecuted = executedF - prevExecutedF
-
-        // Resolve whichever execution-cost side(s) this tick actually
-        // needs - the raw delta for the differentiable training target
-        // below, and the executed delta for [DirectRLDecision.realizedReturn]
-        // - bailing out (no state mutated) rather than silently assuming a
-        // zero cost if a needed side is missing. Short-circuits before any
-        // mutation, matching the class's existing "read it, never assume
-        // it" discipline.
-        fun costFor(delta: Double): Double? = when {
-            delta == 0.0 -> 0.0
-            delta > 0.0 -> source.executionCostLong
-            else -> source.executionCostShort
-        }
-        val executionCost = costFor(deltaF) ?: return null
-        val executionCostExecuted = costFor(deltaExecuted) ?: return null
-
         // g_t = df_t/dw_t^out = (1 - tanh^2(s_t)) * (z_t + w_t^out[n] * g_{t-1}),
         // the recurrent eligibility trace behind Eq. 12's "df_t/dw_t^out"
         // constituent derivative (§3.2.2's "Constituent derivatives" block).
@@ -235,27 +183,54 @@ class DirectRLReadout(
             g[i] = oneMinusTanhSq * (z[i] + wn * lastGradient[i])
         }
 
-        // r_t = Δp_t f_{t-1} - δ_t|Δf_t| - κ_t f_t  (Eq. 8) - the
-        // differentiable training target, off the *raw* f_t/f_{t-1}. See
-        // [DirectRLDecision.netReturn]'s docs for why this stays ungated.
-        val r = source.deltaP * prevF - executionCost * kotlin.math.abs(deltaF) - kappaT * f
+        // Gate evaluated against mu entering this tick (mu_{t-1}), same as
+        // today - §3.3: "trade freely if mu_t >= 0; else flatten and wait".
+        // Computed *before* r_t (Fix 4): r_t, the funding term, and
+        // Delta f_t must all be measured against what the account actually
+        // holds - the gated position - not the raw, possibly-flattened f_t.
+        val muBefore = mu // mu_{t-1}, entering this tick - what the §3.3 trading gate is evaluated against.
+        val shouldTrade = muBefore >= 0.0
+        val gated = if (shouldTrade) f else 0.0
+
+        // Delta f_t now reflects the change in *held* (gated) position,
+        // not raw f_t - a gate-flattened tick never actually traded, so it
+        // shouldn't be charged execution cost against the raw target.
+        val deltaF = gated - prevF
+        val executionCost: Double = when {
+            deltaF == 0.0 -> 0.0
+            deltaF > 0.0 -> source.executionCostLong ?: return null
+            else -> source.executionCostShort ?: return null
+        }
+
+        // r_t = Δp_t f_{t-1} - δ_t|Δf_t| - κ_t gated_t  (Eq. 8, with f_{t-1}
+        // and f_t both read as the *gated* position actually held/traded -
+        // see Fix 4 / this class's prevF doc).
+        val r = source.deltaP * prevF - executionCost * kotlin.math.abs(deltaF) - kappaT * gated
 
         // mu_t, sigma_t^2 (Eq. 7) - note sigma_t^2 uses mu_t (post-update), per Eq. 7 as written.
-        // (mu itself, read above for shouldTrade, is mu_{t-1} entering this tick.)
         val muAfter = tau * mu + (1.0 - tau) * r
         val sigma2After = tau * sigma2 + (1.0 - tau) * (r - muAfter) * (r - muAfter)
         val utility = muAfter - (lambda / 2.0) * sigma2After
 
-        // Constituent derivatives (§3.2.2):
+        // Constituent derivatives (§3.2.2), adjusted for gating (Fix 4):
         //   dupsilon_t/dr_t = (1-tau)[1 - lambda(r_t - mu_t)]
-        //   dr_t/df_t       = -delta_t sign(Delta f_t) - kappa_t
+        //   dr_t/df_t       = -delta_t sign(Delta f_t) - kappa_t   *only when shouldTrade*,
+        //                     since gated_t = f_t only in that regime; when
+        //                     the gate is closed, gated_t = 0 identically
+        //                     this tick regardless of w_out, so the direct
+        //                     path from r_t back through this tick's raw
+        //                     f_t is cut (0), and only the recurrent term
+        //                     (through g_{t-1}, via prevF) still carries a
+        //                     gradient.
         //   dr_t/df_{t-1}   = Delta p_t + delta_t sign(Delta f_t)   -- from
         //     differentiating Eq. 8 w.r.t. f_{t-1} directly (not given as
         //     a standalone line in the paper's "Constituent derivatives"
-        //     block, but implied by Eq. 8 the same way dr_t/df_t is).
+        //     block, but implied by Eq. 8 the same way dr_t/df_t is);
+        //     unaffected by gating, since prevF enters r_t directly
+        //     (through Delta p_t * prevF) and through Delta f_t either way.
         val deltaFSign = sign(deltaF)
         val dUpsilonDr = (1.0 - tau) * (1.0 - lambda * (r - muAfter))
-        val drDf = -executionCost * deltaFSign - kappaT
+        val drDf = if (shouldTrade) -executionCost * deltaFSign - kappaT else 0.0
         val drDfPrev = source.deltaP + executionCost * deltaFSign
 
         // nabla upsilon_t (Eq. 12): dupsilon/dr_t * { dr_t/df_t * g_t + dr_t/df_{t-1} * g_{t-1} }.
@@ -266,28 +241,22 @@ class DirectRLReadout(
 
         applyEkfUpdate(gradient)
 
-        // Realized P&L (§3.3's gate reflected in what an execution engine
-        // actually earns - zero while shouldTrade is false), kept separate
-        // from r_t above so gating never has to be threaded through Eq. 12.
-        val realizedReturn = source.deltaP * prevExecutedF -
-            executionCostExecuted * kotlin.math.abs(deltaExecuted) - kappaT * executedF
-
         val ir = if (sigma2After > 1e-18) sqrt(ANNUALISATION_FACTOR) * muAfter / sqrt(sigma2After) else 0.0
 
-        // Roll state forward for the next tick.
+        // Roll state forward for the next tick - prevF now carries the
+        // *gated* position (Fix 4), not the raw f_t, since that's what the
+        // account actually held/carried funding on.
         mu = muAfter
         sigma2 = sigma2After
-        prevF = f
-        prevExecutedF = executedF
+        prevF = gated
         lastGradient = g
 
         return DirectRLDecision(
             timestampMs = sample.timestampMs,
             targetPosition = f,
             shouldTrade = shouldTrade,
-            gatedPosition = executedF,
+            gatedPosition = gated,
             netReturn = r,
-            realizedReturn = realizedReturn,
             mu = muAfter,
             variance = sigma2After,
             utility = utility,
@@ -371,13 +340,35 @@ class DirectRLPositionPipeline(
     private val _positionTarget = MutableStateFlow<DirectRLDecision?>(null)
     val positionTarget: StateFlow<DirectRLDecision?> = _positionTarget.asStateFlow()
 
+    /**
+     * The most recent [DirectRLDecision.gatedPosition] (0.0 before any
+     * decision exists) - Fix 2 (Option A)'s feedback channel back into
+     * [RLFeatureVectorPipeline.yHat]. Deliberately `gatedPosition`, not
+     * `targetPosition`: Eq. 11's ŷ_t should reflect what this readout
+     * actually held/traded that tick (consistent with [DirectRLReadout]'s
+     * Fix 4 correction), not the raw, possibly gate-flattened target. Plain
+     * `@Volatile Double`, not a `StateFlow`, since a caller (typically
+     * `RLFeatureVectorPipeline`'s `rawPositionProvider`) just needs the
+     * latest value synchronously, on whatever thread it happens to read it
+     * from - it isn't collecting a stream of it.
+     */
+    @Volatile
+    var lastGatedPosition: Double = 0.0
+        private set
+
     /** Starts consuming [source]'s augmented-state stream. Resets [readout] first, so a restart doesn't carry over a stale w_out/EKF-covariance from a previous run. */
     fun start() {
         stop()
         readout.reset()
+        lastGatedPosition = 0.0
         job = source.augmentedFeature
             .filterNotNull()
-            .onEach { sample -> readout.step(sample)?.let { decision -> _positionTarget.value = decision } }
+            .onEach { sample ->
+                readout.step(sample)?.let { decision ->
+                    _positionTarget.value = decision
+                    lastGatedPosition = decision.gatedPosition
+                }
+            }
             .catch { e -> Log.e(TAG, "Error computing direct-RL position; dropping tick", e) }
             .launchIn(scope)
     }

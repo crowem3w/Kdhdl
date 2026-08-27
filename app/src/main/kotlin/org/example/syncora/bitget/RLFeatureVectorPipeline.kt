@@ -45,17 +45,16 @@ data class RLFeatureSample(
     val deltaP: Double,
 
     /**
-     * δ_t - the full price-taker execution cost a marketable order of
-     * `referenceOrderSize` would incur *right now*: book-walk slippage
-     * (see [OrderBookWalker]) rather than assumed as a flat half-spread -
-     * design doc §9 is explicit that this pipeline should source the
-     * slippage component this way, unlike the paper's own simplified
-     * Eq. 9 - **plus** the taker exchange fee (paper §3.3: "cost = Eq. (9)
-     * + 5 bps exchange fee"), so this already includes both cost sources
-     * the paper's own experiment design charges; a consumer computing r_t
-     * (Eq. 8) should not add any further fee on top. Always a non-negative
-     * price quantity (same units as [deltaP]). Null only if the relevant
-     * side of the book isn't primed yet.
+     * δ_t - the price-taker execution cost a marketable order of
+     * `referenceOrderSize` would incur *right now*: the live-book slippage
+     * (see [OrderBookWalker]) *plus* the taker exchange fee (paper §3.3:
+     * spread cost + 5bps exchange fee), rather than either a flat
+     * half-spread or slippage alone - design doc §9 is explicit that this
+     * pipeline should source the spread portion of δ_t by walking the book,
+     * and the paper's own experiment design (§3.3) is explicit that δ_t
+     * also includes the exchange's taker fee. Always a non-negative price
+     * quantity (same units as [deltaP]). Null only if the relevant side of
+     * the book isn't primed yet.
      *
      * Both directions are reported because a feature snapshot is taken
      * before the agent has chosen f_t; a consumer computing a realized
@@ -69,13 +68,20 @@ data class RLFeatureSample(
     val kappaT: Double?,
 
     /**
-     * ŷ_t - feedback vector of the agent's own last `n_back` realized net
+     * ŷ_t - feedback vector of the readout's own last `n_back` *gated*
      * positions (Eq. 11), oldest first, zero-padded until that much real
-     * history exists. Each entry is f_t itself: signed net exposure on
-     * [-1, 1] (net notional / equity), not a raw base-coin size - and each
-     * is read directly off live position/balance state at the time it was
-     * recorded rather than assumed, same "never assume a fill, a price, or
-     * a cost - read it" discipline as the rest of this pipeline.
+     * history exists. Per Eq. 11, this is the model's own past output
+     * `[f_{t-n_back}, ..., f_{t-1}]`, not realized account state - it's
+     * sourced from [DirectRLPositionPipeline] via [rawPositionProvider],
+     * which pushes each tick's `gatedPosition` (not `targetPosition`, and
+     * not a fill or balance read) back into this pipeline after
+     * [DirectRLReadout.step] runs. `gatedPosition` (not the raw target) is
+     * used so this self-referential feedback matches what the model
+     * actually held/traded that tick (see [DirectRLReadout]'s Fix 4 note),
+     * consistent with the funding/cost terms Eq. 8 charges against the
+     * same gated position. Defaults to `0f` before the first decision
+     * exists (e.g. before [DirectRLPositionPipeline] has started, or on
+     * the very first ticks of a fresh run).
      */
     val yHat: List<Float>,
 )
@@ -95,11 +101,16 @@ data class RLFeatureSample(
  *  - [fundingRateProvider] - typically `{ paperTradingRepository.currentFunding.value }`
  *    or the live-trading equivalent, so κ_t matches whatever the trading
  *    engine is actually accruing against open positions.
- *  - [positionProvider] / [equityProvider] - typically
- *    `paperTradingRepository.positions`/`.balance` (or the
- *    `liveTradingRepository` equivalents), so ŷ_t reflects whichever
- *    engine is actually live, per design doc §9's "PaperTradingRepository
- *    / LiveTradingRepository position state" line.
+ *  - [feeRateProvider] - typically `{ paperTradingRepository.feeRates.value }`
+ *    or the live-trading equivalent, so δ_t's fee component matches
+ *    whatever the trading engine would actually be charged.
+ *  - [rawPositionProvider] - the readout's own last `gatedPosition`
+ *    (Eq. 11's ŷ_t is the model's own past output, not realized account
+ *    state - see [RLFeatureSample.yHat] and [DirectRLReadout]'s Fix 4
+ *    note); wired to `DirectRLPositionPipeline.lastGatedPosition` once
+ *    that pipeline exists, defaulting to always-0f otherwise so this
+ *    pipeline is still usable standalone (e.g. in tests) before a readout
+ *    is in the loop.
  *
  * This does not own or start/stop [chartPipeline], [depthPipeline], or
  * [tradeSocket] - those have their own lifecycles (see
@@ -111,18 +122,18 @@ class RLFeatureVectorPipeline(
     private val depthPipeline: DepthPipeline,
     private val tradeSocket: BitgetTradeSocket,
     private val fundingRateProvider: () -> FundingRateInfo?,
-    private val positionProvider: () -> List<PaperPosition>,
-    private val equityProvider: () -> Double?,
-    // Taker fee rate (fraction, e.g. 0.0006 = 6 bps) added on top of
-    // book-walk slippage to build [RLFeatureSample.executionCostLong]/
-    // [executionCostShort] - paper §3.3: "cost = Eq. (9) + 5 bps exchange
-    // fee". Typically `{ paperTradingRepository.feeRates.value.takerRate }`
-    // so the RL agent is charged the same real, possibly account-specific
-    // rate (see [BitgetFeeRateClient]) the paper-trading engine itself
-    // simulates fills against, rather than a second, possibly-diverging
-    // fee assumption. Defaults to 0.0 (slippage-only) so existing callers/
-    // tests that don't care about fees keep working unchanged.
-    private val feeRateProvider: () -> Double = { 0.0 },
+    // Taker fee rate a marketable order would actually be charged - see
+    // [RLFeatureSample.executionCostLong]/[executionCostShort]. Same
+    // "read it, never assume it" pattern as [fundingRateProvider]; falls
+    // back to [DEFAULT_TAKER_FEE_RATE] (the paper's own 5bps) whenever the
+    // live rate isn't known yet, so training never silently reverts to a
+    // zero fee.
+    private val feeRateProvider: () -> FeeRates?,
+    // ŷ_t's feedback source (Fix 2, Option A) - the readout's own last
+    // gated position, *not* realized account state. Defaults to always-0f
+    // (flat) so a caller that hasn't wired a readout yet still gets valid,
+    // if uninteresting, samples rather than a crash.
+    private val rawPositionProvider: () -> Float = { 0f },
     // Order size (base coin) used to probe execution cost via
     // [OrderBookWalker] - should roughly track the size the trading engine
     // actually trades, since slippage is size-dependent.
@@ -140,6 +151,15 @@ class RLFeatureVectorPipeline(
 ) {
     companion object {
         private const val TAG = "RLFeatureVectorPipeline"
+
+        /**
+         * Fallback taker fee rate used when [feeRateProvider] hasn't
+         * returned live data yet - the paper's own stated 5bps (§3.3:
+         * "cost = Eq. (9) [half-spread] + 5 bps exchange fee"), so the
+         * training cost signal never silently drops the fee component to
+         * zero just because a live fee refresh hasn't landed.
+         */
+        const val DEFAULT_TAKER_FEE_RATE: Double = 0.0005
 
         // u_t layout - keep in sync with buildFeatureVector().
         const val IDX_KLINE_RETURN = 0
@@ -281,21 +301,21 @@ class RLFeatureVectorPipeline(
         )
 
         // δ_t via OrderBookWalker, not a flat half-spread (design doc §9),
-        // plus the taker fee (paper §3.3: "Eq. (9) + 5 bps exchange fee"),
-        // expressed in the same price units as the slippage term via
-        // referencePrice * feeRate. LONG walks the asks upward, so vwap >=
-        // reference and slippage is already a non-negative cost. SHORT
-        // walks the bids downward, so vwap <= reference and slippage is
-        // <= 0 - negate it to express the same "cost as a positive price
-        // quantity" convention; the fee is added as a positive cost either way.
-        val takerFeeRate = feeRateProvider()
+        // plus the taker exchange fee (paper §3.3). LONG walks the asks
+        // upward, so vwap >= reference and slippage is already a
+        // non-negative cost. SHORT walks the bids downward, so vwap <=
+        // reference and slippage is <= 0 - negate it to express the same
+        // "cost as a positive price quantity" convention. The fee is
+        // always a cost regardless of direction, so it adds on both sides;
+        // only the slippage term is direction-signed.
+        val takerFeeRate = feeRateProvider()?.takerRate ?: DEFAULT_TAKER_FEE_RATE
         val executionCostLong = OrderBookWalker.walk(depth, PositionSide.LONG, referenceOrderSize)
-            ?.let { it.slippage + it.referencePrice * takerFeeRate }
+            ?.let { it.slippage + it.vwapPrice * takerFeeRate }
         val executionCostShort = OrderBookWalker.walk(depth, PositionSide.SHORT, referenceOrderSize)
-            ?.let { -it.slippage + it.referencePrice * takerFeeRate }
+            ?.let { -it.slippage + it.vwapPrice * takerFeeRate }
 
         val yHatSnapshot: List<Float>
-        val newPosition = currentNetPositionFraction()
+        val newPosition = rawPositionProvider()
         synchronized(historyLock) {
             yHatSnapshot = positionHistory.toList()
             positionHistory.addLast(newPosition)
@@ -311,21 +331,5 @@ class RLFeatureVectorPipeline(
             kappaT = kappaT,
             yHat = yHatSnapshot,
         )
-    }
-
-    /**
-     * f_t read directly off live position/balance state: signed net
-     * notional across every open position, divided by account equity,
-     * clamped to the paper's [-1, 1] bound on f_t. Returns 0f (flat) if
-     * equity isn't known yet rather than guessing.
-     */
-    private fun currentNetPositionFraction(): Float {
-        val equity = equityProvider() ?: return 0f
-        if (equity <= 0.0) return 0f
-        val netNotional = positionProvider().sumOf { position ->
-            val signed = if (position.side == PositionSide.LONG) position.notionalValue else -position.notionalValue
-            signed
-        }
-        return (netNotional / equity).toFloat().coerceIn(-1f, 1f)
     }
 }
