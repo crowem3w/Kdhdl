@@ -246,27 +246,4 @@ class TradingChartPipeline(
         val snapshot = buffer.applyUpdates(batch)
         _klines.value = snapshot
     }
-
-    /**
-     * Test-only entry point used by the Task 12 resilience harness
-     * (`org.example.syncora.resilience.PipelineResilienceTest`) to drive
-     * deterministic kline closes without a real Bitget socket/REST
-     * connection. [BitgetKlineSocket]/[BitgetKlineRestClient] aren't
-     * behind an injectable interface today, so a real fake/mock can't be
-     * substituted at construction time - this bypasses them entirely and
-     * feeds [kline] straight into the same [applyLive] path a real socket
-     * tick would take, which is what [org.example.syncora.agent.DecisionLoopScheduler]
-     * actually watches via [klines].
-     *
-     * Marks the buffer primed on first use so a test doesn't also need to
-     * fake a REST snapshot response. Not gated behind
-     * `BuildConfig.ENABLE_RESILIENCE_TEST_HARNESS` itself (that flag lives
-     * in the `app` module's `BuildConfig`, not reachable from here without
-     * a circular reference) - callers are expected to be androidTest-only
-     * code, which never ships regardless.
-     */
-    fun injectTestKline(kline: Kline) {
-        primed = true
-        applyLive(listOf(kline))
-    }
 }

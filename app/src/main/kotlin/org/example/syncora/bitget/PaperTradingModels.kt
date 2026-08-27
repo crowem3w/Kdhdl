@@ -32,11 +32,6 @@ data class PaperPosition(
     val leverage: Int,
     val marginSize: Double,
     val unrealizedPnl: Double,
-    // Bitget's estimated liquidation price for this position (design doc
-    // §3.1's q_t needs a distance-to-liquidation figure, which has to be
-    // derived from this). 0.0 when the venue doesn't report one (e.g. a
-    // locally-synthesized position that predates this field).
-    val liquidationPrice: Double = 0.0,
     // Sum of every maker/taker fee already charged to open or add to this
     // position (see [PaperTradingRepository]'s fee simulation). Not the fee
     // for closing it - that's charged only when the position actually

@@ -24,14 +24,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.example.syncora.agent.DecisionOutcome
-import org.example.syncora.agent.DecisionRecord
 import org.example.syncora.bitget.ClosedPaperTrade
 import org.example.syncora.bitget.FeeRates
 import org.example.syncora.bitget.Kline
@@ -68,10 +64,6 @@ import org.example.syncora.ui.ScrollRevealContainer
 import org.example.syncora.service.MarketDataForegroundService
 import org.example.syncora.ui.SkeletonLoadingView
 import org.example.syncora.ui.TradingModeDialog
-import org.example.syncora.work.TrainingProgress
-import org.example.syncora.work.TrainingScheduler
-import androidx.work.WorkInfo
-import androidx.work.WorkManager
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -168,6 +160,8 @@ class MainActivity : AppCompatActivity() {
     private val bearColor = Color.parseColor("#FF5A6E")
     private val mutedColor = Color.parseColor("#8A96A3")
     private val inactivePillTextColor = Color.parseColor("#8A96A3")
+    private val activePillBgColor = Color.parseColor("#102A2B")
+    private val timeframeContainerColor = Color.parseColor("#0A1015")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -243,7 +237,6 @@ class MainActivity : AppCompatActivity() {
         setupLiveTrading()
         setupQuickTradePanel()
         setupQuickTradeScrollGesture()
-        observeAgentTab()
 
         drawingContextToolbar.bind(
             candleChart,
@@ -671,251 +664,8 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this, "Order canceled", Toast.LENGTH_SHORT).show()
                     }
                 },
-                onEngageKillSwitch = {
-                    lifecycleScope.launch {
-                        val result = app.agentKillSwitchController.engage()
-                        quickTradePanel.showKillSwitchResult(result.positionsFlattenedCount, result.positionsFailedToFlatten)
-                        refreshAgentStatus()
-                    }
-                },
-                onResumeAgent = {
-                    app.agentKillSwitchController.resumeLoopOnly()
-                    refreshAgentStatus()
-                },
             ),
         )
-    }
-
-    /**
-     * Feeds the Agent tab. [DecisionLoopScheduler.lastDecision] and
-     * [LiveTradingRepository.positions] are [StateFlow]s, so those two update reactively the
-     * instant a decision tick or a position poll lands. [TrainingRunStore] (SharedPreferences)
-     * and [ExperienceLogStore] (SQLite) aren't reactive sources, so their section is refreshed
-     * on a light poll instead - same tradeoff [performanceMonitor] already makes elsewhere in
-     * this activity for non-Flow telemetry.
-     */
-    private fun observeAgentTab() {
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch {
-                    app.decisionLoopScheduler.lastDecision
-                        .combine(liveTradingRepository.positions) { decision, positions -> decision to positions }
-                        .collectLatest { (decision, positions) ->
-                            quickTradePanel.renderAgentStatus(buildAgentStatusUiState(decision, positions))
-                        }
-                }
-                launch {
-                    // WorkInfo is the only reactive source for "is a training run in flight
-                    // right now, and how far along is it" - unlike lastDecision/positions above,
-                    // there's no in-process StateFlow for a WorkManager-scheduled worker's
-                    // progress, so this is the one truly reactive leg of the overview card;
-                    // everything else it needs (autoTradingEnabled, the loaded policy, the last
-                    // completed run) is picked up fresh on each WorkInfo emission too.
-                    WorkManager.getInstance(this@MainActivity)
-                        .getWorkInfosForUniqueWorkFlow(TrainingScheduler.UNIQUE_WORK_NAME)
-                        .collectLatest { infos ->
-                            latestTrainingWorkInfo = infos.firstOrNull()
-                            refreshAgentOverview()
-                        }
-                }
-                launch {
-                    while (true) {
-                        refreshAgentHistory()
-                        refreshTrainingTrend()
-                        refreshAgentOverview()
-                        refreshAgentIndicators()
-                        delay(15_000L)
-                    }
-                }
-            }
-        }
-    }
-
-    private fun buildAgentStatusUiState(
-        decision: DecisionRecord?,
-        positions: List<PaperPosition>,
-    ): QuickTradePanel.AgentStatusUiState {
-        val store = app.trainingRunStore
-        return QuickTradePanel.AgentStatusUiState(
-            position = positions.firstOrNull { it.symbol == "BTCUSDT" },
-            lastDecisionAtMs = decision?.timestampMs,
-            lastDecisionSummary = decision?.outcome.describeForAgentTab(),
-            lastPromotionAtMs = store.lastPromotionAtMs,
-            lastGateDecisionAtMs = store.lastGateDecisionAtMs,
-            lastGateDecisionPassed = store.lastGateDecisionPassed,
-            lastGateDecisionSummary = store.lastGateDecisionSummary,
-            autoTradingEnabled = app.riskSettingsStore.autoTradingEnabled,
-        )
-    }
-
-    private fun DecisionOutcome?.describeForAgentTab(): String = when (this) {
-        null -> "No decisions logged yet"
-        is DecisionOutcome.Dispatched -> String.format(
-            Locale.US,
-            "Dispatched — target %.4f → %.4f BTC (%d order(s))",
-            currentPositionSize,
-            targetPositionSize,
-            orderIds.size,
-        )
-        is DecisionOutcome.Skipped -> "Skipped — $reason"
-        is DecisionOutcome.Failed -> "Failed — $message"
-    }
-
-    /** Re-reads [org.example.syncora.agent.TrainingRunStore] and the live position/decision state immediately (e.g. right after a kill-switch action) instead of waiting for [observeAgentTab]'s next poll tick. */
-    private fun refreshAgentStatus() {
-        quickTradePanel.renderAgentStatus(
-            buildAgentStatusUiState(app.decisionLoopScheduler.lastDecision.value, liveTradingRepository.positions.value),
-        )
-        refreshAgentOverview()
-    }
-
-    /** Most recent [WorkInfo] for [TrainingScheduler.UNIQUE_WORK_NAME], kept from [observeAgentTab]'s `WorkManager` flow so the 15s poll leg and any on-demand [refreshAgentStatus] call can both re-render the overview card without re-querying `WorkManager` themselves. */
-    private var latestTrainingWorkInfo: WorkInfo? = null
-
-    private val trainingProgressTimeFormatter = SimpleDateFormat("MMM d, HH:mm", Locale.US)
-
-    /**
-     * Feeds [QuickTradePanel.renderAgentOverview]. Three independent inputs, each already
-     * described where it lives:
-     * - Whether the decision loop is actually allowed to trade
-     *   ([org.example.syncora.bitget.RiskSettingsStore.autoTradingEnabled]).
-     * - Which policy [org.example.syncora.ml.PolicyInferenceEngine] is currently serving
-     *   inference against ([org.example.syncora.ml.PolicyInferenceEngine.currentVersion]).
-     * - How the scheduled batch retrain ([org.example.syncora.work.PolicyTrainingWorker]) is
-     *   doing right now, from [latestTrainingWorkInfo]'s state/progress, falling back to
-     *   [org.example.syncora.agent.TrainingRunStore]'s durable record of the last *completed*
-     *   run once nothing is currently `RUNNING` (`WorkInfo.progress` is cleared by `WorkManager`
-     *   the moment a run finishes, so it can't describe anything after the fact).
-     */
-    private fun refreshAgentOverview() {
-        val workInfo = latestTrainingWorkInfo
-        val isTrainingRunning = workInfo?.state == WorkInfo.State.RUNNING
-        val store = app.trainingRunStore
-
-        val agentState = when {
-            isTrainingRunning -> QuickTradePanel.AgentState.TRAINING
-            !app.policyInferenceEngine.isReady() -> QuickTradePanel.AgentState.NO_POLICY
-            app.riskSettingsStore.autoTradingEnabled -> QuickTradePanel.AgentState.LIVE_TRADING
-            else -> QuickTradePanel.AgentState.HALTED
-        }
-
-        val progressPercent = workInfo?.progress?.getInt(TrainingProgress.KEY_PERCENT, 0) ?: 0
-        val hasTrainingHistory = store.lastGateDecisionAtMs > 0L
-        val trainingStatusText = if (isTrainingRunning) {
-            val stage = TrainingProgress.Stage.fromWireValue(workInfo?.progress?.getString(TrainingProgress.KEY_STAGE))
-            val detail = workInfo?.progress?.getString(TrainingProgress.KEY_DETAIL)
-            val stageLabel = stage?.label ?: "Running"
-            if (detail.isNullOrBlank()) stageLabel else "$stageLabel — $detail"
-        } else if (hasTrainingHistory) {
-            val outcome = if (store.lastGateDecisionPassed) "passed" else "did not pass"
-            val when_ = trainingProgressTimeFormatter.format(Date(store.lastGateDecisionAtMs))
-            "Last run $when_ ($outcome) — ${store.lastGateDecisionSummary}"
-        } else {
-            "No training run has completed yet — runs roughly daily"
-        }
-
-        val loadedVersion = app.policyInferenceEngine.currentVersion
-        val policyModelLabel = loadedVersion?.filePath?.substringAfterLast('/') ?: ""
-        val policyModelSubtext = if (loadedVersion != null) {
-            val sizeKb = loadedVersion.sizeBytes / 1024.0
-            val loadedAt = trainingProgressTimeFormatter.format(Date(loadedVersion.lastModifiedMs))
-            val promotedSuffix = if (store.lastPromotionAtMs > 0L) {
-                ", promoted ${trainingProgressTimeFormatter.format(Date(store.lastPromotionAtMs))}"
-            } else {
-                ""
-            }
-            String.format(Locale.US, "%.0f KB, last written %s%s", sizeKb, loadedAt, promotedSuffix)
-        } else {
-            "The decision loop will skip ticks until a model is loaded"
-        }
-
-        // Only meaningful once a config has actually cleared the CPCV/PBO gate at least once -
-        // lastWinningClipEpsilon is NaN before that, matching TrainingRunStore's own contract
-        // for these fields (see its kdoc).
-        val policyHyperparametersText = store.lastWinningClipEpsilon.takeIf { !it.isNaN() }?.let { clipEpsilon ->
-            String.format(
-                Locale.US,
-                "PPO — clip ε=%.2f, lr=%.1e · PBO %.3f over %d split(s)",
-                clipEpsilon,
-                store.lastWinningLearningRate,
-                store.lastPboProbability,
-                store.lastSplitsEvaluated,
-            )
-        }
-
-        quickTradePanel.renderAgentOverview(
-            QuickTradePanel.AgentOverviewUiState(
-                agentState = agentState,
-                trainingIsRunning = isTrainingRunning,
-                trainingProgressPercent = progressPercent,
-                trainingStatusText = trainingStatusText,
-                hasTrainingHistory = hasTrainingHistory,
-                policyLoaded = loadedVersion != null,
-                policyModelLabel = policyModelLabel,
-                policyModelSubtext = policyModelSubtext,
-                lastPromotionAtMs = store.lastPromotionAtMs,
-                policyHyperparametersText = policyHyperparametersText,
-            ),
-        )
-    }
-
-    /**
-     * Feeds [QuickTradePanel.renderAgentIndicators] straight off
-     * [org.example.syncora.bitget.StateVectorBuilder.snapshot] - the same call
-     * [org.example.syncora.agent.DecisionLoopScheduler] makes at each decision boundary, so
-     * this shows exactly what the policy is currently seeing rather than a separately-derived
-     * approximation of it. Cheap to call on every poll tick: per [StateVectorBuilder]'s own
-     * kdoc, this is just [kotlinx.coroutines.flow.StateFlow] reads plus an internally
-     * cache/mutex-guarded funding-rate fetch, not a fresh network round trip per call.
-     */
-    private suspend fun refreshAgentIndicators() {
-        val result = app.stateVectorBuilder.snapshot()
-        val state = result.fold(
-            onSuccess = { snapshot ->
-                QuickTradePanel.AgentIndicatorsUiState(
-                    available = true,
-                    rsi = snapshot.indicators.rsi,
-                    dx = snapshot.indicators.dx,
-                    ultimateOscillator = snapshot.indicators.ultimateOscillator,
-                    obv = snapshot.indicators.obv,
-                    htDominantCycle = snapshot.indicators.htDominantCycle,
-                    logVolume = snapshot.indicators.logVolume,
-                    fundingRate = snapshot.fundingRate,
-                    liquidationDistance = snapshot.liquidationDistance,
-                    asOfMs = snapshot.timestampMs,
-                )
-            },
-            onFailure = { e ->
-                val reason = (e as? org.example.syncora.bitget.StateVectorUnavailableException)?.reason?.let {
-                    when (it) {
-                        org.example.syncora.bitget.StateVectorUnavailable.NotConnected ->
-                            "No live account connected yet — connect a Bitget API key to see live state."
-                        org.example.syncora.bitget.StateVectorUnavailable.AccountDataStale ->
-                            "Account data is stale — the last position/balance poll failed."
-                        org.example.syncora.bitget.StateVectorUnavailable.InsufficientKlineHistory ->
-                            "Warming up — not enough kline history yet for the slower indicators."
-                    }
-                } ?: (e.message ?: "State vector unavailable")
-                QuickTradePanel.AgentIndicatorsUiState(available = false, unavailableReason = reason)
-            },
-        )
-        quickTradePanel.renderAgentIndicators(state)
-    }
-
-    private suspend fun refreshAgentHistory() {
-        val entries = withContext(Dispatchers.IO) {
-            app.experienceLogStore.resolvedRowsSince(0L)
-                .sortedByDescending { it.timestampMs }
-                .take(30)
-                .map { QuickTradePanel.AgentHistoryEntryUiState(it.timestampMs, it.action, it.reward) }
-        }
-        quickTradePanel.renderAgentHistory(entries)
-    }
-
-    /** Feeds [QuickTradePanel.renderTrainingTrend] off [org.example.syncora.agent.TrainingRunHistoryStore.recent] - same poll cadence as [refreshAgentHistory], since this is just as bounded/infrequent a list. */
-    private suspend fun refreshTrainingTrend() {
-        val runs = withContext(Dispatchers.IO) { app.trainingRunHistoryStore.recent() }
-        quickTradePanel.renderTrainingTrend(runs)
     }
 
     /**

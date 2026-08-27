@@ -1,13 +1,10 @@
 package org.example.syncora.orb
 
-import android.animation.Animator
-import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Color
 import android.opengl.GLSurfaceView
 import android.util.AttributeSet
 import android.view.MotionEvent
-import android.view.animation.DecelerateInterpolator
 import kotlin.math.min
 import kotlin.math.sqrt
 
@@ -55,45 +52,6 @@ class OrbView @JvmOverloads constructor(
     var saturation: Float
         get() = renderer.saturation
         set(value) { renderer.saturation = value }
-
-    /**
-     * 0 = perfect circular orb, 1 = fully morphed into the §-shaped rim.
-     * Set directly for a static shape, or drive it via [animateToSection] /
-     * [animateToOrb] for the transition.
-     */
-    var sectionMorph: Float
-        get() = renderer.sectionMorph
-        set(value) { renderer.sectionMorph = value.coerceIn(0f, 1f) }
-
-    private var morphAnimator: ValueAnimator? = null
-
-    /** Animates from the current shape into the full § form. */
-    fun animateToSection(durationMs: Long = 900L, onEnd: (() -> Unit)? = null) {
-        animateMorphTo(1f, durationMs, onEnd)
-    }
-
-    /** Animates from the current shape back into a perfect orb. */
-    fun animateToOrb(durationMs: Long = 900L, onEnd: (() -> Unit)? = null) {
-        animateMorphTo(0f, durationMs, onEnd)
-    }
-
-    private fun animateMorphTo(target: Float, durationMs: Long, onEnd: (() -> Unit)?) {
-        morphAnimator?.cancel()
-        morphAnimator = ValueAnimator.ofFloat(sectionMorph, target).apply {
-            duration = durationMs
-            interpolator = DecelerateInterpolator()
-            addUpdateListener { renderer.sectionMorph = it.animatedValue as Float }
-            if (onEnd != null) {
-                addListener(object : Animator.AnimatorListener {
-                    override fun onAnimationStart(animation: Animator) {}
-                    override fun onAnimationEnd(animation: Animator) = onEnd()
-                    override fun onAnimationCancel(animation: Animator) {}
-                    override fun onAnimationRepeat(animation: Animator) {}
-                })
-            }
-            start()
-        }
-    }
 
     init {
         setEGLContextClientVersion(2)

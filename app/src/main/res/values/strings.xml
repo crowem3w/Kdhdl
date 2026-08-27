@@ -1,14 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Syncora</string>
+    <string name="stream_title">BTCUSDT Perpetual — Live Klines</string>
+    <string name="status_idle">Idle</string>
 
     <string name="symbol_label">BTCUSDT.P</string>
     <string name="contract_label">Perpetual</string>
     <string name="live_label">Live</string>
     <string name="connecting_label">Connecting…</string>
+    <string name="heatmap_selector_label">Heatmap (Bid/Ask)</string>
+    <string name="price_axis_label">Price (USDT)</string>
+    <string name="legend_low">Low</string>
+    <string name="legend_high">High</string>
     <string name="timeframe_expand_content_description">More timeframes</string>
     <string name="drawing_tools_content_description">Drawing tools</string>
     <string name="paragraph_button_content_description">Paragraph</string>
+    <string name="chart_long_button_label">Long</string>
+    <string name="chart_short_button_label">Short</string>
+    <string name="chart_long_button_content_description">Long</string>
+    <string name="chart_short_button_content_description">Short</string>
     <string name="connectivity_banner_retry">Retry</string>
     <string name="connectivity_banner_dismiss">✕</string>
     <string name="connectivity_banner_market_data">Can\'t reach Bitget\'s market data. If this persists, your network may be blocking it rather than a connection issue — try a VPN or a different network.</string>

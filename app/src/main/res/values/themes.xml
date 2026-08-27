@@ -16,6 +16,22 @@
         <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
     </style>
 
+    <!--
+         Frame styling for the "Keep the agent running in the background"
+         onboarding dialog. Swaps the default AlertDialog chrome for the
+         translucent, thin-bordered glass-panel look used elsewhere in the
+         onboarding mock, with the app's teal accent carried through to the
+         primary action.
+    -->
+    <style name="BatteryDialogTheme" parent="Theme.AppCompat.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/bg_battery_dialog</item>
+        <item name="android:windowMinWidthMajor">88%</item>
+        <item name="android:windowMinWidthMinor">88%</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#B8C0C8</item>
+        <item name="colorAccent">#26C7C3</item>
+    </style>
+
     <style name="TradingModalTheme" parent="Theme.AppCompat.Dialog">
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowIsFloating">false</item>

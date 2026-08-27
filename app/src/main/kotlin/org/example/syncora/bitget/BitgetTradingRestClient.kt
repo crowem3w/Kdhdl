@@ -291,7 +291,6 @@ class BitgetTradingRestClient(
             leverage = row.optString("leverage", "1").toDoubleOrNull()?.toInt() ?: 1,
             marginSize = row.optString("marginSize", "0").toDoubleOrNull() ?: 0.0,
             unrealizedPnl = row.optString("unrealizedPL", "0").toDoubleOrNull() ?: 0.0,
-            liquidationPrice = row.optString("liquidationPrice", "0").toDoubleOrNull() ?: 0.0,
         )
     }
 

@@ -84,7 +84,7 @@ class OnboardingActivity : AppCompatActivity() {
         }
         prefs.hasRequestedBatteryOptimizationExemption = true
 
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(this, R.style.BatteryDialogTheme)
             .setTitle(R.string.onboarding_battery_dialog_title)
             .setMessage(R.string.onboarding_battery_dialog_message)
             .setCancelable(false)
