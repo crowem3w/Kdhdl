@@ -11,33 +11,38 @@ import kotlin.math.sqrt
  * history (see the reference architecture diagram / `docs/agent-design-
  * contract.md` and `ESN_RRL_Agent_Task_Prompts.md` Prompt 6).
  *
- * ### This class is offline/backtest-only - by construction, not by flag
- * [runBacktest] is the *only* entry point this class exposes. There is no
- * live-mode method, no dependency anywhere in this file on
- * [org.example.syncora.bitget.LiveTradingRepository],
+ * ### Zero live or paper orders - still true through Prompt 7b
+ * Neither [runBacktest] nor [processLiveBar] depends anywhere in this file
+ * on [org.example.syncora.bitget.LiveTradingRepository],
  * [org.example.syncora.bitget.PaperTradingRepository],
  * [org.example.syncora.ui.PaperTradePanel],
  * [org.example.syncora.bitget.LocalPaperTradingStore], or
  * [org.example.syncora.bitget.BitgetLiveCredentialsStore] - so there is no
  * code path anywhere in this class that could place a live or paper order.
  * "Zero live or paper orders" is a property of what this file does *not*
- * import, not a runtime switch that could be flipped. Live-mode wiring
- * (real-time bar-close subscription, emitting a target position into the
- * paper-trading order path) is explicitly Phase 6's job
- * (`ESN_RRL_Agent_Task_Prompts.md` Prompt 7) - extending this same class,
+ * import, not a runtime switch that could be flipped. Order emission is
+ * explicitly Prompt 7c's job - taking [processLiveBar]'s returned
+ * [DecisionLog].position and handing it to
+ * [org.example.syncora.ui.PaperTradePanel] - extending this same class,
  * not something this phase does early.
  *
  * ### Live-mode wiring, one small piece at a time (Prompt 7a onward)
- * [LiveBarCloseSubscriber] is Prompt 7a's entire deliverable: the
- * event-driven bar-close *detector* that will eventually hand each closed
- * bar to the Phase 1-5 chain above. It deliberately stops at detection -
- * it does not call [FeatureAssembler], does not touch order emission,
- * checkpointing, or UI (Prompts 7b-7g), and still places zero live or
- * paper orders, same as [runBacktest]. It is nested here, not in its own
- * file, because it is the live-mode counterpart to the bar-close loop
- * inside [runBacktest] above - same class, same "which bar am I looking
- * at" concern, different data source (a live [Flow] instead of a
- * pre-fetched [List]).
+ * [LiveBarCloseSubscriber] is Prompt 7a's deliverable: the event-driven
+ * bar-close *detector* that hands each closed bar, as a [LiveBarClose], to
+ * whatever consumes it next. It is nested here, not in its own file,
+ * because it is the live-mode counterpart to the bar-close loop inside
+ * [runBacktest] above - same class, same "which bar am I looking at"
+ * concern, different data source (a live [Flow] instead of a pre-fetched
+ * [List]).
+ *
+ * [processLiveBar] is Prompt 7b's deliverable: it takes a
+ * [LiveBarCloseSubscriber]-produced [LiveBarClose] and drives it through
+ * the *same* per-bar chain [runBacktest] uses (both call the private
+ * [processBar] - see that method's doc for why this makes bar-for-bar
+ * equivalence a construction guarantee, not an assertion to maintain by
+ * hand). It still does not touch order emission, checkpointing, or UI
+ * (Prompts 7c-7g), and still places zero live or paper orders, same as
+ * [runBacktest].
  *
  * ### The chain, per bar
  * 1. [FeatureAssembler.assemble] -> `u_t` (Phase 1).
@@ -135,9 +140,7 @@ class AgentOrchestrator(
         val decisions = ArrayList<DecisionLog>(klines.size)
         val returns = ArrayList<Double>(klines.size)
 
-        var previousState: FloatArray? = null
-        var prevMid = Double.NaN
-        var prevBarStart = 0L
+        val loopState = LiveInferenceState()
         var stable = true
         var trades = 0
 
@@ -145,85 +148,23 @@ class AgentOrchestrator(
             val kline = klines[t]
             val klinesSoFar = klines.subList(0, t + 1)
             val depth = depthAt(t, kline)
-            val nowMs = kline.startTime
 
-            val u = featureAssembler.assemble(klinesSoFar, depth, nowMs)
-            val state = reservoir.step(u).copyOf() // copy: this bar's audit log must survive the next step() call reusing the buffer
-
-            // Complete last bar's forecast now that this bar's actual return is known.
-            val prior = previousState
-            if (prior != null) {
-                val actualReturn = u[FeatureAssembler.RETURN_INDEX]
-                readoutTrainer.update(prior, floatArrayOf(actualReturn))
-            }
-
-            // Forecast the *next* bar's return from this bar's state - no
-            // look-ahead, and what PolicyEngine decides f_t from.
-            val forecast = readoutTrainer.predict(state)[0]
-
-            val prevPosition = policyEngine.currentPosition()
-            val currPosition = policyEngine.step(state, forecast)
-
-            val bids = depth.bids
-            val asks = depth.asks
-            val bid = if (bids.isNotEmpty()) bids[0].price else kline.close
-            val ask = if (asks.isNotEmpty()) asks[0].price else kline.close
-            val currMid = if (bids.isNotEmpty() && asks.isNotEmpty()) 0.5 * (bid + ask) else kline.close
-            if (prevMid.isNaN()) prevMid = currMid // first bar: no prior price yet, so Δp_0 = 0 by convention
-            val barSpanMs = if (t == 0) 0L else (kline.startTime - prevBarStart).coerceAtLeast(0L)
-            val fundingRate = fundingRateAt(nowMs)
-
-            val breakdown = rewardEngine.step(
-                prevMidPrice = prevMid,
-                currMidPrice = currMid,
-                prevPosition = prevPosition.toDouble(),
-                currPosition = currPosition.toDouble(),
-                bid = bid,
-                ask = ask,
+            val step = processBar(
+                barIndex = t,
+                kline = kline,
+                klinesSoFar = klinesSoFar,
+                depth = depth,
+                state = loopState,
+                fundingRateAt = fundingRateAt,
                 feeRate = feeRate,
-                fundingRate = fundingRate,
-                barSpanMs = barSpanMs,
+                tradeThreshold = tradeThreshold,
             )
 
-            val dRewardDPosition = RewardEngine.positionGradient(
-                prevPosition = prevPosition.toDouble(),
-                currPosition = currPosition.toDouble(),
-                currMidPrice = currMid,
-                bid = bid,
-                ask = ask,
-                feeRate = feeRate,
-                fundingRate = fundingRate,
-                barSpanMs = barSpanMs,
-            )
-            policyEngine.update(breakdown.differentialSharpeGradientWrtReward, dRewardDPosition)
+            if (!step.stable) stable = false
+            if (step.traded) trades++
 
-            if (!readoutTrainer.isStable() || !policyEngine.isStable() || !breakdown.reward.isFinite()) {
-                stable = false
-            }
-
-            if (kotlin.math.abs(currPosition - prevPosition) > tradeThreshold) trades++
-
-            decisions.add(
-                DecisionLog(
-                    barIndex = t,
-                    startTime = kline.startTime,
-                    features = u,
-                    reservoirState = state,
-                    readoutForecast = forecast,
-                    previousPosition = prevPosition,
-                    position = currPosition,
-                    reward = breakdown.reward,
-                    markToMarketPnl = breakdown.markToMarketPnl,
-                    transactionCost = breakdown.transactionCost,
-                    fundingCost = breakdown.fundingCost,
-                    differentialSharpe = breakdown.differentialSharpe,
-                ),
-            )
-            returns.add(breakdown.reward)
-
-            previousState = state
-            prevMid = currMid
-            prevBarStart = kline.startTime
+            decisions.add(step.log)
+            returns.add(step.log.reward)
         }
 
         val mean = returns.average()
@@ -267,6 +208,176 @@ class AgentOrchestrator(
         val klinesSoFar: List<Kline>,
         val depth: DepthSnapshot,
     )
+
+    /**
+     * The loop-carried state a bar-by-bar replay needs to thread from one
+     * bar to the next - what used to be [runBacktest]'s own local `var`s
+     * (`previousState`/`prevMid`/`prevBarStart`) before Prompt 7b pulled
+     * the per-bar body out into [processBar] so the live inference loop
+     * could reuse it verbatim instead of re-deriving it.
+     *
+     * One instance belongs to exactly one continuous replay session -
+     * [runBacktest] creates and owns its own for the length of one
+     * backtest; a live caller ([processLiveBar]) should construct exactly
+     * one and keep reusing it across every live bar-close for the
+     * lifetime of that trading session, the same way [runBacktest]'s old
+     * local vars persisted across its whole loop.
+     */
+    class LiveInferenceState {
+        internal var previousReservoirState: FloatArray? = null
+        internal var prevMid: Double = Double.NaN
+        internal var prevBarStart: Long = 0L
+        internal var hasPriorBar: Boolean = false
+    }
+
+    /** [processBar]'s result: the bar's [DecisionLog] plus the two aggregate signals [runBacktest] folds across the whole replay. */
+    private class BarStepResult(
+        val log: DecisionLog,
+        /** True iff [ReadoutTrainer.isStable], [PolicyEngine.isStable], and a finite reward all held for this bar. */
+        val stable: Boolean,
+        /** True iff `|Δf_t| > tradeThreshold` for this bar. */
+        val traded: Boolean,
+    )
+
+    /**
+     * One bar's full Phase 1-5 chain - [FeatureAssembler] ->
+     * [ReservoirEngine] -> [ReadoutTrainer] -> [RewardEngine] ->
+     * [PolicyEngine] - exactly as the class doc's six-step list describes,
+     * threading [state] forward exactly the way [runBacktest]'s own
+     * for-loop used to inline.
+     *
+     * This is the *single* implementation of that chain in this class.
+     * [runBacktest] and [processLiveBar] both call it and nothing else -
+     * neither re-derives the chain independently - which is what makes
+     * "live mode matches bar-for-bar the same computation path already
+     * proven in Phase 5's offline backtest" (Prompt 7b) true by
+     * construction rather than by two implementations happening to agree.
+     */
+    private fun processBar(
+        barIndex: Int,
+        kline: Kline,
+        klinesSoFar: List<Kline>,
+        depth: DepthSnapshot,
+        state: LiveInferenceState,
+        fundingRateAt: (nowMs: Long) -> Double,
+        feeRate: Double,
+        tradeThreshold: Double,
+    ): BarStepResult {
+        val nowMs = kline.startTime
+
+        val u = featureAssembler.assemble(klinesSoFar, depth, nowMs)
+        val reservoirState = reservoir.step(u).copyOf() // copy: this bar's audit log must survive the next step() call reusing the buffer
+
+        // Complete last bar's forecast now that this bar's actual return is known.
+        val prior = state.previousReservoirState
+        if (prior != null) {
+            val actualReturn = u[FeatureAssembler.RETURN_INDEX]
+            readoutTrainer.update(prior, floatArrayOf(actualReturn))
+        }
+
+        // Forecast the *next* bar's return from this bar's state - no
+        // look-ahead, and what PolicyEngine decides f_t from.
+        val forecast = readoutTrainer.predict(reservoirState)[0]
+
+        val prevPosition = policyEngine.currentPosition()
+        val currPosition = policyEngine.step(reservoirState, forecast)
+
+        val bids = depth.bids
+        val asks = depth.asks
+        val bid = if (bids.isNotEmpty()) bids[0].price else kline.close
+        val ask = if (asks.isNotEmpty()) asks[0].price else kline.close
+        val currMid = if (bids.isNotEmpty() && asks.isNotEmpty()) 0.5 * (bid + ask) else kline.close
+        if (state.prevMid.isNaN()) state.prevMid = currMid // first bar this session: no prior price yet, so Δp_0 = 0 by convention
+        val barSpanMs = if (!state.hasPriorBar) 0L else (kline.startTime - state.prevBarStart).coerceAtLeast(0L)
+        val fundingRate = fundingRateAt(nowMs)
+
+        val breakdown = rewardEngine.step(
+            prevMidPrice = state.prevMid,
+            currMidPrice = currMid,
+            prevPosition = prevPosition.toDouble(),
+            currPosition = currPosition.toDouble(),
+            bid = bid,
+            ask = ask,
+            feeRate = feeRate,
+            fundingRate = fundingRate,
+            barSpanMs = barSpanMs,
+        )
+
+        val dRewardDPosition = RewardEngine.positionGradient(
+            prevPosition = prevPosition.toDouble(),
+            currPosition = currPosition.toDouble(),
+            currMidPrice = currMid,
+            bid = bid,
+            ask = ask,
+            feeRate = feeRate,
+            fundingRate = fundingRate,
+            barSpanMs = barSpanMs,
+        )
+        policyEngine.update(breakdown.differentialSharpeGradientWrtReward, dRewardDPosition)
+
+        val stable = readoutTrainer.isStable() && policyEngine.isStable() && breakdown.reward.isFinite()
+        val traded = kotlin.math.abs(currPosition - prevPosition) > tradeThreshold
+
+        val log = DecisionLog(
+            barIndex = barIndex,
+            startTime = kline.startTime,
+            features = u,
+            reservoirState = reservoirState,
+            readoutForecast = forecast,
+            previousPosition = prevPosition,
+            position = currPosition,
+            reward = breakdown.reward,
+            markToMarketPnl = breakdown.markToMarketPnl,
+            transactionCost = breakdown.transactionCost,
+            fundingCost = breakdown.fundingCost,
+            differentialSharpe = breakdown.differentialSharpe,
+        )
+
+        state.previousReservoirState = reservoirState
+        state.prevMid = currMid
+        state.prevBarStart = kline.startTime
+        state.hasPriorBar = true
+
+        return BarStepResult(log = log, stable = stable, traded = traded)
+    }
+
+    /**
+     * Prompt 7b's live inference loop. Wires one live bar-close event -
+     * [LiveBarCloseSubscriber]'s output (Prompt 7a) - into the full
+     * Phase 1-5 chain via [processBar], the exact same call [runBacktest]
+     * makes for every offline bar: same [FeatureAssembler.assemble] ->
+     * [ReservoirEngine.step] -> [ReadoutTrainer.predict]/`update` ->
+     * [RewardEngine.step] -> [PolicyEngine.step]/`update` sequence,
+     * producing a fresh reservoir state, an online-RLS-updated `W_out`,
+     * and a new target position `f_t` for this bar.
+     *
+     * Order emission, checkpoint persistence, and the status UI are
+     * explicitly out of scope here (Prompts 7c-7g) - this method's only
+     * job is to return the [DecisionLog] a caller further up the stack
+     * (a future order-emitting Prompt 7c wrapper) will act on.
+     *
+     * @param liveBarClose One bar-close event from [LiveBarCloseSubscriber.collect]/`onSnapshot`.
+     * @param state This live session's [LiveInferenceState] - construct exactly one per live trading session and pass the *same* instance to every [processLiveBar] call in that session, so `state.prevBarStart`/`prevMid`/`previousReservoirState` correctly carry forward bar to bar, mirroring [runBacktest]'s own loop-local state across an entire replay.
+     * @param fundingRateAt Same contract as [runBacktest]'s parameter of the same name - defaults to 0.0 (no funding modeled).
+     * @param feeRate Same contract as [runBacktest]'s parameter of the same name - defaults to 0.0.
+     * @param tradeThreshold Same contract as [runBacktest]'s parameter of the same name - purely diagnostic, does not affect the chain's outputs.
+     */
+    fun processLiveBar(
+        liveBarClose: LiveBarClose,
+        state: LiveInferenceState,
+        fundingRateAt: (nowMs: Long) -> Double = { 0.0 },
+        feeRate: Double = 0.0,
+        tradeThreshold: Double = 1e-6,
+    ): DecisionLog = processBar(
+        barIndex = liveBarClose.barIndex,
+        kline = liveBarClose.kline,
+        klinesSoFar = liveBarClose.klinesSoFar,
+        depth = liveBarClose.depth,
+        state = state,
+        fundingRateAt = fundingRateAt,
+        feeRate = feeRate,
+        tradeThreshold = tradeThreshold,
+    ).log
 
     /**
      * Turns [org.example.syncora.bitget.TradingChartPipeline.klines]'s
