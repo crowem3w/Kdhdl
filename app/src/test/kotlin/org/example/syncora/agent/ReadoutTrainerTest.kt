@@ -137,7 +137,7 @@ class ReadoutTrainerTest {
     }
 
     @Test
-    fun `FileReadoutCheckpointStore save-then-load round trip is bit-identical`() = runBlocking {
+    fun `FileReadoutCheckpointStore save-then-load round trip is bit-identical`() = runBlocking<Unit> {
         val nHidden = 25
         val trainer = ReadoutTrainer(nHidden = nHidden, nOutputs = 2, forgettingFactor = 0.995f)
         for (state in stateSequence(nHidden, steps = 500, seed = 9L)) {
@@ -159,7 +159,7 @@ class ReadoutTrainerTest {
     }
 
     @Test
-    fun `loading from a store with no prior checkpoint returns null`() = runBlocking {
+    fun `loading from a store with no prior checkpoint returns null`() = runBlocking<Unit> {
         val tmpDir = Files.createTempDirectory("readout-checkpoint-test-empty").toFile()
         val store = FileReadoutCheckpointStore(File(tmpDir, "does-not-exist.json"))
         assertEquals(null, store.load())
