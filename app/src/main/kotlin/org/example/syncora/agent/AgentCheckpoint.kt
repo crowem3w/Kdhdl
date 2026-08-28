@@ -46,11 +46,22 @@ data class AgentCheckpoint(
     // (Prompt 7d's "matching in-memory state at the moment of the stop
     // signal" exit criterion), so equals()/hashCode() are overridden to
     // compare array *contents* - same reasoning as ReadoutCheckpoint.
+    //
+    // savedAtMs is deliberately excluded from both: it's diagnostic capture
+    // metadata (see its own kdoc), not part of the agent's in-memory state,
+    // so it has no business deciding whether two checkpoints represent the
+    // same state. Including it also made this comparison spuriously
+    // flaky in practice - AgentLiveSessionCheckpointSaveTest verifies a
+    // stop()-persisted checkpoint against a *second*, independent
+    // currentCheckpoint() call taken after the fact, and every call to
+    // currentCheckpoint() stamps its own fresh System.currentTimeMillis()
+    // by default, so two calls a moment apart almost never share a
+    // millisecond - equals() would fail even when every real field
+    // (reservoir state, W_out, covariance, policy weights) matched exactly.
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is AgentCheckpoint) return false
-        return savedAtMs == other.savedAtMs &&
-            reservoirState.contentEquals(other.reservoirState) &&
+        return reservoirState.contentEquals(other.reservoirState) &&
             readout == other.readout &&
             policyWeights.contentEquals(other.policyWeights) &&
             policyNHidden == other.policyNHidden &&
@@ -58,8 +69,7 @@ data class AgentCheckpoint(
     }
 
     override fun hashCode(): Int {
-        var result = savedAtMs.hashCode()
-        result = 31 * result + reservoirState.contentHashCode()
+        var result = reservoirState.contentHashCode()
         result = 31 * result + readout.hashCode()
         result = 31 * result + policyWeights.contentHashCode()
         result = 31 * result + policyNHidden
