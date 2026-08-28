@@ -1,0 +1,269 @@
+package org.example.syncora.agent
+
+import kotlin.math.tanh
+import kotlin.random.Random
+
+/**
+ * The Recurrent Reinforcement Learning (RRL) trading policy (see the
+ * reference architecture diagram / `docs/agent-design-contract.md` and
+ * Borrageiro, Firoozye & Barucca 2022, subsection III-B2). This is Phase 5:
+ * it sits on top of three fixed building blocks -
+ * [ReservoirEngine]'s hidden state `x_t` (Phase 2), [ReadoutTrainer]'s
+ * one-step-ahead return forecast `ŷ_t` (Phase 3), and [RewardEngine]'s
+ * `dsr_t` utility signal and its gradient helpers (Phase 4) - and produces
+ * a single bounded position `f_t ∈ [-1, 1]`.
+ *
+ * ### Architecture: reservoir state + the diagram's own-output feedback path
+ * The reference diagram feeds a network's own recent outputs `{ŷ_j}` for
+ * `j` from `t-n_back` to `t-1` back into the reservoir via `W_back`. This
+ * class reuses exactly that pattern, but applied to the *policy's own*
+ * output stream: `f_t` is a `tanh`-squashed linear combination of the
+ * reservoir state `x_t`, the readout's forecast `ŷ_t`, and the policy's
+ * own last `nBack` positions `f_{t-1}, ..., f_{t-nBack}` -
+ * ```
+ * z_t = w · [x_t, ŷ_t, f_{t-1}, ..., f_{t-nBack}, 1]
+ * f_t = tanh(z_t)
+ * ```
+ * `tanh` is what makes `f_t ∈ [-1, 1]` a hard guarantee, not a clamp -
+ * `+1` is max long, `-1` is max short, matching design doc §1's `f_{t-1}`
+ * convention exactly.
+ *
+ * ### Training: truncated RTRL on `dsr_t`
+ * The weights `w` are trained online via gradient ascent on the
+ * differential Sharpe ratio, per Moody & Saffell's RRL scheme:
+ * `dU/dw_i = d(dsr_t)/d(r_t) · d(r_t)/d(f_t) · d(f_t)/d(w_i)`. The first
+ * two factors are supplied by the caller each [update] call (from
+ * [RewardEngine.RewardBreakdown.differentialSharpeGradientWrtReward] and
+ * [RewardEngine.positionGradient] respectively - see those docs for why
+ * the reward gradient is truncated to `r_t`'s *immediate* dependence on
+ * `f_t`, not `r_{t+1}`'s). The third factor, `d(f_t)/d(w_i)`, is what this
+ * class computes itself via **real-time recurrent learning restricted to
+ * the feedback path**: because `f_t` depends on `w` both directly (through
+ * `x_t`/`ŷ_t`/bias) and indirectly through `f_{t-1}, ..., f_{t-nBack}`
+ * (which are themselves functions of `w` from earlier steps), the total
+ * derivative needs the chain rule through that recurrence:
+ * ```
+ * d(f_t)/d(w_i) = (1 - f_t²) · [ regressor_i(t) + Σ_{k=1}^{nBack} w_backₖ · d(f_{t-k})/d(w_i) ]
+ * ```
+ * This is exact RTRL for this network - not an approximation - but it is
+ * only ever applied to the small feedback path (`nBack` lagged scalars),
+ * never back into the reservoir itself: [ReservoirEngine]'s weights are
+ * fixed by construction (Phase 2), so there is nothing to differentiate
+ * there, and that is precisely what keeps "RTRL" cheap enough to call
+ * "-lite" here. Full RTRL through an `n`-unit *reservoir* would be
+ * `O(n_regressors² · n)` per step; this is `O(n_regressors · nBack)` per
+ * step - trivial next to [ReadoutTrainer]'s `O(n_regressors²)` RLS update,
+ * which [ReservoirEngineBenchmarkTest] already showed has enormous
+ * headroom inside the bar-close budget (Phase 2's on-device benchmark
+ * budgets a single reservoir step at under 1% of even the shortest, 60s,
+ * bar interval).
+ *
+ * ### Performance
+ * Flat `FloatArray`s throughout, no boxed `Double`, no object graphs,
+ * consistent with every phase since 1. [step] and [update] together are
+ * the only two allocation-free hot-path calls; [weightsSnapshot] is the
+ * one exception (a fresh copy, for logging/checkpointing use only, mirrors
+ * [ReadoutTrainer.wOutSnapshot]).
+ */
+class PolicyEngine(
+    val nHidden: Int,
+    val nBack: Int = DEFAULT_N_BACK,
+    val learningRate: Float = DEFAULT_LEARNING_RATE,
+    val weightClip: Float = DEFAULT_WEIGHT_CLIP,
+    initialWeights: FloatArray? = null,
+    seed: Long = 0L,
+) {
+    companion object {
+        const val DEFAULT_N_BACK = 5
+        const val DEFAULT_LEARNING_RATE = 0.01f
+        /** `|w_i|` is clamped to this after every [update] - online RTRL has no forgetting-factor stabilizer the way RLS does, so an explicit bound is this class's substitute. */
+        const val DEFAULT_WEIGHT_CLIP = 5f
+        /** `|Δw_i|` from a single [update] call is clamped to this before being applied, same defense-in-depth spirit as [DEFAULT_WEIGHT_CLIP]. */
+        const val DEFAULT_MAX_WEIGHT_DELTA = 0.5f
+        /** Initial weights are drawn uniformly from `[-INIT_SCALE, INIT_SCALE]` - small, to start near `f_t ≈ 0` (flat) rather than pinned at ±1 from the first bar. */
+        const val DEFAULT_INIT_SCALE = 0.05f
+    }
+
+    /** Regressor width: reservoir state (`nHidden`) + readout forecast (1) + own-output feedback (`nBack`) + bias (1). */
+    val nRegressors: Int = nHidden + 1 + nBack + 1
+
+    /** Index of the readout forecast `ŷ_t` slot in the regressor. */
+    private val readoutIndex: Int = nHidden
+
+    /** Base index of the `nBack` feedback slots (`f_{t-1}` at `feedbackBase`, ..., `f_{t-nBack}` at `feedbackBase+nBack-1`). */
+    private val feedbackBase: Int = nHidden + 1
+
+    /** Index of the trailing bias slot. */
+    private val biasIndex: Int = nHidden + 1 + nBack
+
+    init {
+        require(nHidden >= 1) { "nHidden must be >= 1, was $nHidden" }
+        require(nBack >= 0) { "nBack must be >= 0, was $nBack" }
+        require(learningRate > 0f) { "learningRate must be > 0, was $learningRate" }
+        require(weightClip > 0f) { "weightClip must be > 0, was $weightClip" }
+    }
+
+    // ---- weights (the only thing trained) ----
+    private val weights: FloatArray = if (initialWeights != null) {
+        require(initialWeights.size == nRegressors) {
+            "initialWeights size ${initialWeights.size} != nRegressors $nRegressors"
+        }
+        initialWeights.copyOf()
+    } else {
+        val rng = Random(seed)
+        FloatArray(nRegressors) { (rng.nextFloat() * 2f - 1f) * DEFAULT_INIT_SCALE }
+    }
+
+    // ---- recurrent state: the policy's own last nBack outputs ----
+    // pastPositions[0] = f_{t-1}, pastPositions[1] = f_{t-2}, ..., pastPositions[nBack-1] = f_{t-nBack}.
+    private val pastPositions: FloatArray = FloatArray(nBack)
+
+    // ---- RTRL trace state ----
+    // traceHistory[k * nRegressors + i] = d(f_{t-1-k}) / d(w_i), for k in 0 until nBack.
+    // traceHistory[0] is therefore d(f_{t-1})/d(w_i) - the trace of the
+    // *immediately preceding* step, exactly what the recurrence above needs.
+    private val traceHistory: FloatArray = FloatArray(nBack * nRegressors)
+
+    // Scratch buffers - allocated once, reused every step()/update() call.
+    private val regressorScratch = FloatArray(nRegressors)
+    private val newTraceScratch = FloatArray(nRegressors)
+
+    /** `d(f_t)/d(w_i)` from the most recent [step] call - what [update] applies the gradient against. */
+    private val lastTrace = FloatArray(nRegressors)
+
+    private var lastPosition: Float = 0f
+    private var stepsTaken: Long = 0L
+
+    /** The position `f_t` produced by the most recent [step] call (0 if [step] hasn't been called yet). */
+    fun currentPosition(): Float = lastPosition
+
+    /**
+     * Advances the policy by one bar-close step, producing `f_t` from the
+     * reservoir's current hidden state and the readout's forecast. Must be
+     * called exactly once per bar, and (when training online) followed by
+     * exactly one [update] call before the next [step] - [update] reads
+     * [lastTrace], which this method overwrites every call.
+     *
+     * @param reservoirState [ReservoirEngine.step] / [ReservoirEngine.currentState]'s `x_t`, `nHidden`-shaped.
+     * @param readoutForecast [ReadoutTrainer.predict]'s one-step-ahead forecast `ŷ_t`, made from `x_t` - i.e. a forecast of the *next* bar's return, not this one's (see [ReadoutTrainer.predict]'s own doc on call ordering). No look-ahead: it is computed from information already available at this bar's close.
+     */
+    fun step(reservoirState: FloatArray, readoutForecast: Float): Float {
+        require(reservoirState.size == nHidden) {
+            "reservoirState size ${reservoirState.size} != nHidden $nHidden"
+        }
+        buildRegressor(reservoirState, readoutForecast)
+
+        var z = 0f
+        var i = 0
+        while (i < nRegressors) {
+            z += weights[i] * regressorScratch[i]
+            i++
+        }
+        val f = tanh(z.toDouble()).toFloat()
+        val dtanh = 1f - f * f
+
+        // d(f_t)/d(w_i) = dtanh * [ regressor_i(t) + sum_k w_backK * d(f_{t-1-k})/d(w_i) ]
+        i = 0
+        while (i < nRegressors) {
+            var indirect = 0f
+            var k = 0
+            while (k < nBack) {
+                indirect += weights[feedbackBase + k] * traceHistory[k * nRegressors + i]
+                k++
+            }
+            newTraceScratch[i] = dtanh * (regressorScratch[i] + indirect)
+            i++
+        }
+        System.arraycopy(newTraceScratch, 0, lastTrace, 0, nRegressors)
+
+        // Shift the trace ring buffer: what was d(f_{t-1-k}) becomes d(f_{t-2-k}) for next step.
+        var k = nBack - 1
+        while (k >= 1) {
+            System.arraycopy(traceHistory, (k - 1) * nRegressors, traceHistory, k * nRegressors, nRegressors)
+            k--
+        }
+        if (nBack > 0) System.arraycopy(lastTrace, 0, traceHistory, 0, nRegressors)
+
+        // Shift the position feedback buffer the same way.
+        var p = nBack - 1
+        while (p >= 1) {
+            pastPositions[p] = pastPositions[p - 1]
+            p--
+        }
+        if (nBack > 0) pastPositions[0] = f
+
+        lastPosition = f
+        stepsTaken++
+        return f
+    }
+
+    /**
+     * One RTRL/gradient-ascent update against the utility signal derived
+     * from the bar this [step] call's `f_t` just priced in. See the class
+     * doc's "Training" section for the chain rule this multiplies out;
+     * `dUtilityDReward * dRewardDPosition` is `dU/d(f_t)`, so the applied
+     * per-weight gradient is `dU/d(f_t) * d(f_t)/d(w_i)` (this class's own
+     * [lastTrace]) - standard gradient *ascent* (utility is maximised, not
+     * minimised, hence `+=`, not `-=`).
+     *
+     * @param dUtilityDReward `d(dsr_t)/d(r_t)` - [RewardEngine.RewardBreakdown.differentialSharpeGradientWrtReward] from the *same* bar's [RewardEngine.step] call.
+     * @param dRewardDPosition `d(r_t)/d(f_t)` - [RewardEngine.positionGradient] computed with the *same* `prevPosition`/`currPosition` pair this bar's [step] call produced.
+     */
+    fun update(dUtilityDReward: Double, dRewardDPosition: Double) {
+        val gradientCoefficient = (dUtilityDReward * dRewardDPosition).toFloat()
+        if (!gradientCoefficient.isFinite()) return // guard: never let a bad gradient corrupt stable weights
+
+        var i = 0
+        while (i < nRegressors) {
+            var delta = learningRate * gradientCoefficient * lastTrace[i]
+            if (!delta.isFinite()) delta = 0f
+            delta = delta.coerceIn(-DEFAULT_MAX_WEIGHT_DELTA, DEFAULT_MAX_WEIGHT_DELTA)
+            val updated = (weights[i] + delta).coerceIn(-weightClip, weightClip)
+            weights[i] = updated
+            i++
+        }
+    }
+
+    private fun buildRegressor(reservoirState: FloatArray, readoutForecast: Float) {
+        System.arraycopy(reservoirState, 0, regressorScratch, 0, nHidden)
+        regressorScratch[readoutIndex] = readoutForecast
+        var k = 0
+        while (k < nBack) {
+            regressorScratch[feedbackBase + k] = pastPositions[k]
+            k++
+        }
+        regressorScratch[biasIndex] = 1f
+    }
+
+    /**
+     * True iff every weight and every RTRL trace entry is finite. A
+     * backtest replay should assert this after every [update] - mirrors
+     * [ReadoutTrainer.isStable]'s role for Phase 3, now for Phase 5's own
+     * online-learning stability requirement.
+     */
+    fun isStable(): Boolean {
+        for (w in weights) if (!w.isFinite()) return false
+        for (t in traceHistory) if (!t.isFinite()) return false
+        for (t in lastTrace) if (!t.isFinite()) return false
+        val f = lastPosition
+        if (!f.isFinite() || f < -1f || f > 1f) return false
+        return true
+    }
+
+    /** Snapshot (fresh copy) of the trained weights - for logging/future checkpointing (Phase 6), not read on the hot path. */
+    fun weightsSnapshot(): FloatArray = weights.copyOf()
+
+    /**
+     * Resets recurrent state (own-output feedback history and RTRL traces)
+     * to a fresh, no-history state, without touching the trained weights -
+     * same split [ReservoirEngine.resetState] draws between state and
+     * weights. Use when starting a new replay/episode with an
+     * already-trained policy.
+     */
+    fun resetState() {
+        pastPositions.fill(0f)
+        traceHistory.fill(0f)
+        lastTrace.fill(0f)
+        lastPosition = 0f
+    }
+}

@@ -94,6 +94,60 @@ class RewardEngine(
         // hair below 0. dsr_t is conventionally taken to be 0 during this
         // "no variance estimate yet" warm-up rather than NaN/±Inf.
         private const val VARIANCE_FLOOR = 1e-12
+
+        /**
+         * `d(r_t)/d(f_t)` - the sensitivity of this bar's reward to the
+         * *current* position `f_t`, holding `f_{t-1}` fixed. This is the
+         * other half [PolicyEngine] (Phase 5) needs for gradient ascent on
+         * `dsr_t` (the other half being [RewardBreakdown.differentialSharpeGradientWrtReward]);
+         * chaining the two via `d(dsr_t)/d(f_t) = d(dsr_t)/d(r_t) *
+         * d(r_t)/d(f_t)` is the chain rule Moody & Saffell's own RRL
+         * derivation uses, restricted here to `r_t`'s *immediate*
+         * dependence on `f_t` (the transaction-cost and funding terms) -
+         * not `r_{t+1}`'s dependence on `f_t` via next bar's
+         * mark-to-market term, which would require differentiating through
+         * a reward that hasn't happened yet. This one-bar-lookback-only
+         * gradient is the "RTRL-lite" simplification
+         * `ESN_RRL_Agent_Task_Prompts.md` Prompt 6 calls for.
+         *
+         * `r_t = Δp_t·f_{t-1} − (δ_t + feeRate·p_t)·|f_t−f_{t-1}| − f_t·p_t·fundingRate·intervalFraction`
+         * (design doc §1/§3, [step]'s exact formula), so:
+         * ```
+         * d(r_t)/d(f_t) = −(δ_t + feeRate·p_t)·sign(f_t−f_{t-1}) − p_t·fundingRate·intervalFraction
+         * ```
+         * The transaction-cost term is only a subgradient at `f_t ==
+         * f_{t-1}` (`|x|` isn't differentiable at 0); `sign(0) == 0` is
+         * used there, matching the convention that holding a position
+         * unchanged has no marginal cost either way at that exact point.
+         *
+         * Uses the *same* `(δ_t + feeRate·p_t)` and funding-accrual
+         * formulas [step] does - no second, parallel cost/funding formula,
+         * per design doc §3/§4's "one formula" requirement.
+         */
+        fun positionGradient(
+            prevPosition: Double,
+            currPosition: Double,
+            currMidPrice: Double,
+            bid: Double,
+            ask: Double,
+            feeRate: Double = 0.0,
+            fundingRate: Double = 0.0,
+            barSpanMs: Long = 0L,
+        ): Double {
+            require(ask >= bid) { "ask ($ask) must be >= bid ($bid)" }
+            require(feeRate >= 0.0) { "feeRate must be >= 0, was $feeRate" }
+            require(barSpanMs >= 0L) { "barSpanMs must be >= 0, was $barSpanMs" }
+
+            val deltaPosition = currPosition - prevPosition
+            val halfSpread = 0.5 * (ask - bid)
+            val costRate = halfSpread + feeRate * currMidPrice
+            val costGradient = -costRate * kotlin.math.sign(deltaPosition)
+
+            val intervalFraction = barSpanMs.toDouble() / FundingSchedule.INTERVAL_MS
+            val fundingGradient = -currMidPrice * fundingRate * intervalFraction
+
+            return costGradient + fundingGradient
+        }
     }
 
     init {
@@ -120,6 +174,19 @@ class RewardEngine(
         val fundingCost: Double,
         /** `dsr_t` - the differential Sharpe ratio, computed from `r_t` and the moments *before* this step folded it in. */
         val differentialSharpe: Double,
+        /**
+         * `d(dsr_t)/d(r_t)`, evaluated at the same pre-step moments
+         * `a_{t-1}`/`b_{t-1}` used for [differentialSharpe] itself - the
+         * closed form `(b_{t-1} - a_{t-1}*r_t) / (b_{t-1}-a_{t-1}^2)^{3/2}`
+         * (Moody & Saffell 1998). [PolicyEngine] (Phase 5) is the only
+         * consumer: it needs this to perform gradient ascent on `dsr_t`
+         * without differentiating through `RewardEngine`'s internals
+         * itself, and it must be read from *this* call's breakdown - by
+         * the next [step] call, `a`/`b` have already advanced to
+         * `a_t`/`b_t` and this value would no longer correspond to
+         * [differentialSharpe] above.
+         */
+        val differentialSharpeGradientWrtReward: Double,
     )
 
     /**
@@ -163,7 +230,7 @@ class RewardEngine(
 
         val reward = markToMarketPnl - transactionCost - fundingCost
 
-        val dsr = differentialSharpe(reward)
+        val (dsr, dsrGradient) = differentialSharpeAndGradient(reward)
         updateMoments(reward)
 
         return RewardBreakdown(
@@ -172,16 +239,32 @@ class RewardEngine(
             transactionCost = transactionCost,
             fundingCost = fundingCost,
             differentialSharpe = dsr,
+            differentialSharpeGradientWrtReward = dsrGradient,
         )
     }
 
-    /** `dsr_t`, computed from [r] and the moments as they stood *before* this bar - see class doc. */
-    private fun differentialSharpe(r: Double): Double {
+    /**
+     * `dsr_t` and `d(dsr_t)/d(r_t)`, both computed from [r] and the moments
+     * as they stood *before* this bar - see class doc and
+     * [RewardBreakdown.differentialSharpeGradientWrtReward]. Both share the
+     * same `variance = b_{t-1} - a_{t-1}^2` denominator and the same
+     * "no prior variance estimate yet" warm-up convention (0.0 for both),
+     * so they're computed together rather than as two separate passes that
+     * could drift out of sync on the warm-up special case.
+     */
+    private fun differentialSharpeAndGradient(r: Double): Pair<Double, Double> {
         val variance = b - a * a
-        if (variance <= VARIANCE_FLOOR) return 0.0
+        if (variance <= VARIANCE_FLOOR) return 0.0 to 0.0
         val deltaA = r - a
         val deltaB = r * r - b
-        return (b * deltaA - 0.5 * a * deltaB) / variance.pow(1.5)
+        val denom = variance.pow(1.5)
+        val dsr = (b * deltaA - 0.5 * a * deltaB) / denom
+        // d(dsr)/dr = (b_{t-1} - a_{t-1}*r) / (b_{t-1} - a_{t-1}^2)^{3/2},
+        // per the derivative of the numerator above w.r.t. r alone -
+        // b*(dDeltaA/dr) - 0.5*a*(dDeltaB/dr) = b*1 - 0.5*a*2r = b - a*r -
+        // over the same (already-computed) denominator.
+        val dsrGradient = (b - a * r) / denom
+        return dsr to dsrGradient
     }
 
     /** Folds [r] into the EWMA moments `a_t`/`b_t` for the next [step] call. */
