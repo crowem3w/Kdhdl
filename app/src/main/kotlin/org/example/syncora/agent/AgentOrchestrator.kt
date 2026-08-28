@@ -11,7 +11,7 @@ import kotlin.math.sqrt
  * history (see the reference architecture diagram / `docs/agent-design-
  * contract.md` and `ESN_RRL_Agent_Task_Prompts.md` Prompt 6).
  *
- * ### Zero live or paper orders - still true through Prompt 7b
+ * ### Zero live or paper orders - true through Prompt 7b, and still true after 7c
  * Neither [runBacktest] nor [processLiveBar] depends anywhere in this file
  * on [org.example.syncora.bitget.LiveTradingRepository],
  * [org.example.syncora.bitget.PaperTradingRepository],
@@ -20,11 +20,14 @@ import kotlin.math.sqrt
  * [org.example.syncora.bitget.BitgetLiveCredentialsStore] - so there is no
  * code path anywhere in this class that could place a live or paper order.
  * "Zero live or paper orders" is a property of what this file does *not*
- * import, not a runtime switch that could be flipped. Order emission is
- * explicitly Prompt 7c's job - taking [processLiveBar]'s returned
- * [DecisionLog].position and handing it to
- * [org.example.syncora.ui.PaperTradePanel] - extending this same class,
- * not something this phase does early.
+ * import, not a runtime switch that could be flipped. Order emission
+ * (Prompt 7c) is deliberately kept in its own class, [PositionOrderEmitter]
+ * - not folded into this one - specifically so this invariant keeps
+ * holding for [AgentOrchestrator] itself: a caller wires
+ * `orchestrator.processLiveBar(...).position` into
+ * [PositionOrderEmitter.onTargetPosition] from *outside* this class, and
+ * that wiring, not anything in this file, is where an order can first be
+ * placed.
  *
  * ### Live-mode wiring, one small piece at a time (Prompt 7a onward)
  * [LiveBarCloseSubscriber] is Prompt 7a's deliverable: the event-driven
@@ -354,7 +357,8 @@ class AgentOrchestrator(
      * Order emission, checkpoint persistence, and the status UI are
      * explicitly out of scope here (Prompts 7c-7g) - this method's only
      * job is to return the [DecisionLog] a caller further up the stack
-     * (a future order-emitting Prompt 7c wrapper) will act on.
+     * (Prompt 7c's [PositionOrderEmitter], reading `.position`) will act
+     * on.
      *
      * @param liveBarClose One bar-close event from [LiveBarCloseSubscriber.collect]/`onSnapshot`.
      * @param state This live session's [LiveInferenceState] - construct exactly one per live trading session and pass the *same* instance to every [processLiveBar] call in that session, so `state.prevBarStart`/`prevMid`/`previousReservoirState` correctly carry forward bar to bar, mirroring [runBacktest]'s own loop-local state across an entire replay.
