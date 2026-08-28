@@ -15,6 +15,10 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
+        // Instrumented tests only exist for on-device benchmarks that must
+        // run on real hardware (e.g. ReservoirEngineBenchmarkTest, which
+        // must be run on the MT6765G target device, never an emulator).
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -36,6 +40,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.security.crypto)
-
     testImplementation(libs.junit)
+    testImplementation(libs.org.json)
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }

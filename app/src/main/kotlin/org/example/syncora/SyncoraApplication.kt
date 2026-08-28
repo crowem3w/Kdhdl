@@ -1,21 +1,15 @@
 package org.example.syncora
 
 import android.app.Application
-import org.example.syncora.bitget.AgenticExecutionEngine
 import org.example.syncora.bitget.BitgetFeeRateClient
 import org.example.syncora.bitget.BitgetFundingRateClient
 import org.example.syncora.bitget.BitgetLiveCredentialsStore
 import org.example.syncora.bitget.BitgetTradeSocket
 import org.example.syncora.bitget.DepthPipeline
-import org.example.syncora.bitget.DirectRLPositionPipeline
-import org.example.syncora.bitget.DirectRLReadout
-import org.example.syncora.bitget.EchoStateReservoir
-import org.example.syncora.bitget.FeatureAugmentationPipeline
 import org.example.syncora.bitget.FileKlineCacheStore
 import org.example.syncora.bitget.LiveTradingRepository
 import org.example.syncora.bitget.LocalPaperTradingStore
 import org.example.syncora.bitget.PaperTradingRepository
-import org.example.syncora.bitget.RLFeatureVectorPipeline
 import org.example.syncora.bitget.RiskSettingsStore
 import org.example.syncora.bitget.StopLossGuard
 import org.example.syncora.bitget.Timeframe
@@ -103,59 +97,6 @@ class SyncoraApplication : Application() {
         LiveTradingRepository(credentialsStore = liveCredentialsStore, symbol = "BTCUSDT")
     }
 
-    // Supplies u_t, Δp_t, δ_t, κ_t, and ŷ_t (design doc §9 /
-    // recurrent-reinforcement-learning-crypto-agent.md Appendix A) off the
-    // same live pipelines above - no separate data path, so the RL agent's
-    // inputs never disagree with what the chart/paper-trading engine see.
-    // Defaults to reading funding/fee state off the paper trading engine;
-    // point [fundingRateProvider]/[feeRateProvider] at liveTradingRepository
-    // instead once live trading is the source of truth for a given
-    // deployment. [rawPositionProvider] is wired to
-    // [directRLPositionPipeline]'s own last gated position (Fix 2, Option
-    // A) - not to either trading repository's realized position - since
-    // Eq. 11's ŷ_t is the model's own past output.
-    val rlFeaturePipeline: RLFeatureVectorPipeline by lazy {
-        RLFeatureVectorPipeline(
-            chartPipeline = pipeline,
-            depthPipeline = depthPipeline,
-            tradeSocket = tradeSocket,
-            fundingRateProvider = { paperTradingRepository.currentFunding.value },
-            feeRateProvider = { paperTradingRepository.feeRates.value },
-            rawPositionProvider = { directRLPositionPipeline.lastGatedPosition.toFloat() },
-        )
-    }
-
-    // The direct-RL agent's model chain (audit fix plan, Fix 1) - the
-    // echo-state reservoir and readout that [rlFeaturePipeline]'s raw data
-    // feeds into. Sized/parameterised off the paper's §3.3 defaults
-    // (already [EchoStateReservoir]/[DirectRLReadout]'s own class
-    // defaults - nBack=10, nHidden=100, lambda=1e-5, beta=1, tau=0.999).
-    //
-    // IMPORTANT: this chain runs continuously once market data starts (see
-    // [ensureMarketDataStarted]), but [agenticExecutionEngine] - the only
-    // thing that consumes its output - is shadow/logging-only (see that
-    // class's kdoc). No order is placed from this chain. Do not point
-    // [agenticExecutionEngine] at a real execution repository, and do not
-    // surface an "Agentic" mode in `TradingModeDialog`, until the
-    // validation in the fix plan's §4 has been completed and signed off.
-    val reservoir: EchoStateReservoir by lazy { EchoStateReservoir() }
-
-    val featureAugmentationPipeline: FeatureAugmentationPipeline by lazy {
-        FeatureAugmentationPipeline(rlFeaturePipeline, reservoir)
-    }
-
-    val directRLReadout: DirectRLReadout by lazy { DirectRLReadout(reservoir) }
-
-    val directRLPositionPipeline: DirectRLPositionPipeline by lazy {
-        DirectRLPositionPipeline(featureAugmentationPipeline, directRLReadout)
-    }
-
-    // Shadow/logging-only consumer of [directRLPositionPipeline] - see
-    // [AgenticExecutionEngine]'s kdoc. Never sends orders anywhere.
-    val agenticExecutionEngine: AgenticExecutionEngine by lazy {
-        AgenticExecutionEngine(positionTarget = directRLPositionPipeline.positionTarget)
-    }
-
     val riskSettingsStore: RiskSettingsStore by lazy {
         RiskSettingsStore(applicationContext)
     }
@@ -187,16 +128,6 @@ class SyncoraApplication : Application() {
         tradeSocket.connect()
         liveTradingRepository.start()
         stopLossGuard.start(liveTradingRepository.positions)
-        rlFeaturePipeline.start()
-        // One lifecycle unit (Fix 1), mirroring how the chart/depth
-        // pipelines above are already sequenced: rlFeaturePipeline ->
-        // featureAugmentationPipeline -> directRLPositionPipeline ->
-        // agenticExecutionEngine. Started in dependency order so each
-        // stage's upstream StateFlow already has a live collector by the
-        // time the next stage starts observing it.
-        featureAugmentationPipeline.start()
-        directRLPositionPipeline.start()
-        agenticExecutionEngine.start()
     }
 
     /** Call only when the foreground service itself is being torn down, not on activity backgrounding. */
@@ -207,9 +138,5 @@ class SyncoraApplication : Application() {
         tradeSocket.disconnect()
         liveTradingRepository.stop()
         stopLossGuard.stop()
-        agenticExecutionEngine.stop()
-        directRLPositionPipeline.stop()
-        featureAugmentationPipeline.stop()
-        rlFeaturePipeline.stop()
     }
 }
