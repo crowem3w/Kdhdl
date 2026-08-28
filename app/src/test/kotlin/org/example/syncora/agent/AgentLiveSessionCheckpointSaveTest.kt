@@ -87,7 +87,7 @@ class AgentLiveSessionCheckpointSaveTest {
     }
 
     @Test
-    fun `stop saves a checkpoint with all four components matching in-memory state at the moment of the stop signal`() = runBlocking {
+    fun `stop saves a checkpoint with all four components matching in-memory state at the moment of the stop signal`() = runBlocking<Unit> {
         val bars = 50
         val klines = fixtureKlines(bars = bars, seed = 909090L)
         val fundingRateAt: (Long) -> Double = { 0.0 }
@@ -136,7 +136,7 @@ class AgentLiveSessionCheckpointSaveTest {
     }
 
     @Test
-    fun `stop is safe to call before any bar has been processed`() = runBlocking {
+    fun `stop is safe to call before any bar has been processed`() = runBlocking<Unit> {
         val orchestrator = newOrchestrator()
         val tmpDir = Files.createTempDirectory("agent-checkpoint-save-empty-test").toFile()
         val store = FileAgentCheckpointStore(File(tmpDir, "checkpoint.json"))
@@ -154,7 +154,7 @@ class AgentLiveSessionCheckpointSaveTest {
     }
 
     @Test
-    fun `a second stop call re-saves whatever the state is at that later moment`() = runBlocking {
+    fun `a second stop call re-saves whatever the state is at that later moment`() = runBlocking<Unit> {
         val klines = fixtureKlines(bars = 10, seed = 55555L)
         val orchestrator = newOrchestrator()
         val tmpDir = Files.createTempDirectory("agent-checkpoint-save-twice-test").toFile()
