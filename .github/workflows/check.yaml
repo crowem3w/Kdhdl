@@ -1,14 +1,16 @@
-name: Android CI & Verification Pipeline
+name: Agent Artifact Verification
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  # Allows you to trigger this workflow manually or from another agent dispatch
   workflow_dispatch:
 
 jobs:
-  verify-and-build:
-    name: Verify, Test & Build
+  verify:
+    name: Run Safety & Verification Pipeline
     runs-on: ubuntu-latest
 
     permissions:
@@ -27,23 +29,14 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-
+      
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run Verification & Tests
+      - name: Execute Verification
         run: ./gradlew check
 
-      - name: Assemble Debug APK
-        run: ./gradlew assembleDebug
-
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/*.apk
-
-      - name: Archive Reports & Logs
+      - name: Archive Verification & Test Reports
         if: always()
         uses: actions/upload-artifact@v4
         with:

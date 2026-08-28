@@ -1,5 +1,6 @@
 package org.example.syncora.agent
 
+import kotlinx.coroutines.flow.Flow
 import org.example.syncora.bitget.DepthSnapshot
 import org.example.syncora.bitget.FundingSchedule
 import org.example.syncora.bitget.Kline
@@ -25,6 +26,18 @@ import kotlin.math.sqrt
  * paper-trading order path) is explicitly Phase 6's job
  * (`ESN_RRL_Agent_Task_Prompts.md` Prompt 7) - extending this same class,
  * not something this phase does early.
+ *
+ * ### Live-mode wiring, one small piece at a time (Prompt 7a onward)
+ * [LiveBarCloseSubscriber] is Prompt 7a's entire deliverable: the
+ * event-driven bar-close *detector* that will eventually hand each closed
+ * bar to the Phase 1-5 chain above. It deliberately stops at detection -
+ * it does not call [FeatureAssembler], does not touch order emission,
+ * checkpointing, or UI (Prompts 7b-7g), and still places zero live or
+ * paper orders, same as [runBacktest]. It is nested here, not in its own
+ * file, because it is the live-mode counterpart to the bar-close loop
+ * inside [runBacktest] above - same class, same "which bar am I looking
+ * at" concern, different data source (a live [Flow] instead of a
+ * pre-fetched [List]).
  *
  * ### The chain, per bar
  * 1. [FeatureAssembler.assemble] -> `u_t` (Phase 1).
@@ -238,5 +251,155 @@ class AgentOrchestrator(
             maxDrawdown = maxDrawdown,
             stable = stable,
         )
+    }
+
+    /**
+     * One bar's live-mode close event - [LiveBarCloseSubscriber]'s sole
+     * output, and Prompt 7a's whole deliverable. Deliberately mirrors the
+     * per-bar inputs [runBacktest]'s loop builds internally (`kline`,
+     * `klinesSoFar`, a depth snapshot) so that wiring this into the
+     * Phase 1-5 chain in Prompt 7b is a direct substitution, not a
+     * redesign.
+     */
+    data class LiveBarClose(
+        val barIndex: Int,
+        val kline: Kline,
+        val klinesSoFar: List<Kline>,
+        val depth: DepthSnapshot,
+    )
+
+    /**
+     * Turns [org.example.syncora.bitget.TradingChartPipeline.klines]'s
+     * live stream - the *entire buffer snapshot*, re-emitted on every
+     * tick, whether that tick just mutated the still-forming bar in place
+     * or appended a brand-new one - into a stream of [LiveBarClose]
+     * events, exactly one per bar that actually closes, in order, with no
+     * duplicates and no gaps.
+     *
+     * ### Why "any bar before the last slot is closed" is safe
+     * [org.example.syncora.bitget.KlineBuffer.upsertLocked] only ever
+     * appends a new slot once a *strictly newer* `startTime` arrives, and
+     * never rewrites an older slot once a newer one exists (its `else`
+     * branch is dead in a well-formed live stream; `applyUpdates` also
+     * always hands ticks to `upsertLocked` in-order). So every element of
+     * a snapshot except the last one is final and will never be
+     * overwritten again - "closed" is a structural property of position
+     * in the list, not something that needs its own timer or heuristic.
+     * The last element is the only one still being mutated in place and
+     * is therefore never emitted until a later snapshot supersedes it.
+     *
+     * ### Robust to [kotlinx.coroutines.flow.StateFlow] conflation
+     * `TradingChartPipeline.klines` is a `StateFlow`: a slow collector can
+     * miss intermediate emissions entirely, only ever seeing the latest
+     * value. That is harmless here because every snapshot is inspected in
+     * full, not diffed against the previous one - a bar's *final* closed
+     * state is whatever slot `snapshot[i]` holds by the time this
+     * collector next runs, regardless of how many intermediate tick
+     * updates to that bar were conflated away in between. What must never
+     * be conflated away is which *bars* closed, and since a closed bar's
+     * slot is stable once superseded, no closed bar can vanish from the
+     * list - it can only scroll out once the buffer's capacity is
+     * exceeded, long after this collector had its chance to see it.
+     *
+     * ### No double-processing across the backtest -> live handoff
+     * [resumeAfterStartTime] is the `startTime` of the last bar some
+     * other source (typically [runBacktest]'s
+     * `BacktestResult.decisions.last().startTime`) already processed.
+     * Every bar at or before it is treated as already accounted for and
+     * is never re-emitted, no matter how many of them are still sitting
+     * in the live buffer snapshot the moment this subscriber starts
+     * collecting. Pass `null` (the default) when there was no prior
+     * backtest to hand off from; the *already-closed* bars in the first
+     * snapshot this subscriber sees (every slot except the still-forming
+     * last one) are then treated as the pre-existing baseline (cold-start
+     * buffer contents, not "new" live closes), while the bar that happens
+     * to be forming at subscribe time is left open to fire normally once
+     * it closes - so the very first live bar close is never dropped
+     * (including when subscribing catches a bar mid-formation), and
+     * nothing already-closed at subscribe time is replayed as if it were
+     * new.
+     *
+     * Not thread-safe by design: like any [Flow] collector, [collect] is
+     * meant to be driven by a single sequential coroutine (the same
+     * contract `TradingChartPipeline.klines` collectors already rely on),
+     * so no internal locking is needed or added.
+     */
+    class LiveBarCloseSubscriber(resumeAfterStartTime: Long? = null) {
+        private var lastEmittedStartTime: Long = resumeAfterStartTime ?: Long.MIN_VALUE
+        private var baselined: Boolean = resumeAfterStartTime != null
+        private var nextBarIndex: Int = 0
+
+        /** The `startTime` of the most recently emitted bar close, or null if none has fired yet. */
+        val lastEmittedBarStartTime: Long?
+            get() = if (baselined && lastEmittedStartTime != Long.MIN_VALUE) lastEmittedStartTime else null
+
+        /**
+         * Collects [klines] forever (until the flow itself completes or is
+         * cancelled), invoking [onBarClose] exactly once per closed bar in
+         * chronological order. [depthAt] is called synchronously at the
+         * moment each close is detected to attach that bar's depth
+         * snapshot - matching Prompt 7a's "subscribes to real-time
+         * bar-close events from `TradingChartPipeline` and `DepthMatrix`"
+         * requirement, since [org.example.syncora.bitget.DepthMatrix.snapshot]
+         * is itself synchronous, not a flow.
+         */
+        suspend fun collect(
+            klines: Flow<List<Kline>>,
+            depthAt: () -> DepthSnapshot,
+            onBarClose: suspend (LiveBarClose) -> Unit,
+        ) {
+            klines.collect { snapshot -> onSnapshot(snapshot, depthAt, onBarClose) }
+        }
+
+        /**
+         * Processes a single buffer snapshot. Exposed (not private) so a
+         * test harness can feed synthetic snapshots directly, one at a
+         * time, without needing a real [Flow] - see
+         * `LiveBarCloseSubscriberTest`.
+         */
+        suspend fun onSnapshot(
+            snapshot: List<Kline>,
+            depthAt: () -> DepthSnapshot,
+            onBarClose: suspend (LiveBarClose) -> Unit,
+        ) {
+            if (snapshot.isEmpty()) return
+
+            if (!baselined) {
+                // First snapshot ever seen with no explicit handoff point.
+                // Every slot except the last is already closed (cold-start
+                // buffer contents / whatever the pipeline primed before we
+                // started collecting) - pre-existing, not a newly-closed
+                // live bar, so baseline off the last *closed* one (index
+                // size-2). The last slot itself is still forming and must
+                // stay open to fire normally once it closes - baselining
+                // off it instead would silently drop the very first
+                // genuinely new close whenever subscription happens to
+                // start mid-bar.
+                if (snapshot.size >= 2) {
+                    lastEmittedStartTime = snapshot[snapshot.size - 2].startTime
+                }
+                baselined = true
+                return
+            }
+
+            // Every slot before the last one is closed by construction (see
+            // class doc); walk them in order so a snapshot that jumped
+            // forward by more than one bar (StateFlow conflation) still
+            // emits every intervening close, in order, not just the latest.
+            for (i in 0 until snapshot.size - 1) {
+                val bar = snapshot[i]
+                if (bar.startTime > lastEmittedStartTime) {
+                    lastEmittedStartTime = bar.startTime
+                    onBarClose(
+                        LiveBarClose(
+                            barIndex = nextBarIndex++,
+                            kline = bar,
+                            klinesSoFar = snapshot.subList(0, i + 1),
+                            depth = depthAt(),
+                        ),
+                    )
+                }
+            }
+        }
     }
 }
