@@ -384,6 +384,36 @@ class AgentOrchestrator(
     ).log
 
     /**
+     * Captures Prompt 7d's four required checkpoint components -
+     * [ReservoirEngine.currentState] (`x_t`), [ReadoutTrainer]'s `W_out`
+     * and RLS covariance (via [ReadoutTrainer.toCheckpoint]), and
+     * [PolicyEngine.weightsSnapshot] - as a single [AgentCheckpoint], ready
+     * to hand to an [AgentCheckpointStore].
+     *
+     * Reads directly off [reservoir]/[readoutTrainer]/[policyEngine]'s own
+     * live state rather than a caller-supplied [LiveInferenceState], so the
+     * result always reflects exactly what the most recent [processBar] call
+     * (via [runBacktest] or [processLiveBar]) left behind - "matching
+     * in-memory state at the moment of the stop signal" (Prompt 7d) is true
+     * by construction, not by the caller remembering to pass the right
+     * state object. Pure, synchronous, and allocation-light (three
+     * `copyOf()`s) by design: callers on an Android lifecycle callback
+     * (`onStop`/`onDestroy`, neither of which can suspend) need to capture
+     * this snapshot on the calling thread *before* handing it off to an
+     * async store write - see [AgentLiveSession.stop].
+     *
+     * @param savedAtMs Wall-clock capture time, epoch millis - diagnostic only.
+     */
+    fun currentCheckpoint(savedAtMs: Long = System.currentTimeMillis()): AgentCheckpoint = AgentCheckpoint(
+        savedAtMs = savedAtMs,
+        reservoirState = reservoir.currentState().copyOf(),
+        readout = readoutTrainer.toCheckpoint(),
+        policyWeights = policyEngine.weightsSnapshot(),
+        policyNHidden = policyEngine.nHidden,
+        policyNBack = policyEngine.nBack,
+    )
+
+    /**
      * Turns [org.example.syncora.bitget.TradingChartPipeline.klines]'s
      * live stream - the *entire buffer snapshot*, re-emitted on every
      * tick, whether that tick just mutated the still-forming bar in place
