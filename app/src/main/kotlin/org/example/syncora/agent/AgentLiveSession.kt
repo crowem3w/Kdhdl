@@ -44,12 +44,23 @@ import kotlinx.coroutines.launch
  * [org.example.syncora.bitget.TradingChartPipeline.stop]'s own internal
  * `scope.launch`.
  *
- * Checkpoint *loading* (restoring [orchestrator]'s state from a prior
- * session before the first live bar) is Prompt 7e's deliverable, not this
- * class's - [orchestrator] here is always constructed already
- * fresh-or-restored by the caller, same as
- * [AgentOrchestrator.processLiveBar]'s own doc already establishes for
- * [AgentOrchestrator.LiveInferenceState].
+ * ### Checkpoint load, on app start (Prompt 7e)
+ * [orchestrator] is always constructed already fresh-or-restored by the
+ * caller before it ever reaches this class's primary constructor - this
+ * class's own job is driving bars and triggering saves, never deciding what
+ * state a session starts from. [Companion.start] is the "on app start"
+ * counterpart to [stop]: it resolves that fresh-or-restored orchestrator via
+ * [AgentCheckpointStore.restoreOrFreshOrchestrator] - restoring
+ * [checkpointStore]'s most recent checkpoint if one exists, parses, and
+ * matches this run's configuration, falling back cleanly to a fresh
+ * orchestrator otherwise (see that function's doc for the three fallback
+ * cases) - *before* constructing the [AgentLiveSession] that will drive it,
+ * so the very first [processLiveBar] call already sees whatever state was
+ * restored, never a fresh orchestrator silently standing in for one that
+ * should have resumed. Callers that already have a suitably-restored
+ * [AgentOrchestrator] in hand (e.g. most of this class's own tests) can
+ * keep using the primary constructor directly - [Companion.start] is a
+ * convenience, not the only path in.
  *
  * @param orchestrator The Phase 1-5 chain this session drives, one bar at a time. Owns its own [ReservoirEngine]/[ReadoutTrainer]/[PolicyEngine] internally - see [AgentOrchestrator.currentCheckpoint].
  * @param orderEmitter Prompt 7c's order path - every [processLiveBar] call feeds that bar's resulting target position into [PositionOrderEmitter.onTargetPosition].
@@ -96,5 +107,54 @@ class AgentLiveSession(
     fun stop(): Job {
         val checkpoint = orchestrator.currentCheckpoint()
         return scope.launch { checkpointStore.save(checkpoint) }
+    }
+
+    companion object {
+        /**
+         * Prompt 7e's "on app start" entry point - see class doc's
+         * "Checkpoint load" section. Restores (or freshly initializes, on
+         * any of [AgentCheckpointStore.restoreOrFreshOrchestrator]'s
+         * fallback cases) an [AgentOrchestrator] from [checkpointStore]
+         * *before* this session is constructed, so [processLiveBar] never
+         * runs against a not-yet-restored orchestrator.
+         *
+         * [featureAssembler], [reservoirWeights], and [rewardEngine] are
+         * passed straight through to
+         * [AgentCheckpointStore.restoreOrFreshOrchestrator] - see that
+         * function's doc for why the checkpoint itself doesn't carry these.
+         * [policyNHidden]/[policyNBack]/[policyLearningRate]/[policyWeightClip]
+         * are the shape/hyperparameters a *fresh* [PolicyEngine] is built
+         * with if there's nothing to restore - ignored once a checkpoint is
+         * restored, whose own saved shape wins instead (same reasoning
+         * [ReadoutCheckpoint.toTrainer] already documents for the readout).
+         */
+        suspend fun start(
+            checkpointStore: AgentCheckpointStore,
+            featureAssembler: FeatureAssembler,
+            reservoirWeights: ReservoirWeights,
+            rewardEngine: RewardEngine,
+            orderEmitter: PositionOrderEmitter,
+            policyNHidden: Int = reservoirWeights.nHidden,
+            policyNBack: Int = PolicyEngine.DEFAULT_N_BACK,
+            policyLearningRate: Float = PolicyEngine.DEFAULT_LEARNING_RATE,
+            policyWeightClip: Float = PolicyEngine.DEFAULT_WEIGHT_CLIP,
+            scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        ): AgentLiveSession {
+            val orchestrator = checkpointStore.restoreOrFreshOrchestrator(
+                featureAssembler = featureAssembler,
+                reservoirWeights = reservoirWeights,
+                rewardEngine = rewardEngine,
+                policyNHidden = policyNHidden,
+                policyNBack = policyNBack,
+                policyLearningRate = policyLearningRate,
+                policyWeightClip = policyWeightClip,
+            )
+            return AgentLiveSession(
+                orchestrator = orchestrator,
+                orderEmitter = orderEmitter,
+                checkpointStore = checkpointStore,
+                scope = scope,
+            )
+        }
     }
 }

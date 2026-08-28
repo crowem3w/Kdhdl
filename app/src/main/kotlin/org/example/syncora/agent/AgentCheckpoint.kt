@@ -78,6 +78,68 @@ data class AgentCheckpoint(
     }
 }
 
+/**
+ * Prompt 7e's load path - the counterpart to [AgentOrchestrator.currentCheckpoint]
+ * (Prompt 7d's save path). Builds a *brand-new* [AgentOrchestrator] whose
+ * reservoir state, `W_out`/RLS covariance, and policy weights are restored
+ * from this checkpoint rather than freshly initialized.
+ *
+ * [featureAssembler], [reservoirWeights], and [rewardEngine] are supplied by
+ * the caller, not the checkpoint, for the same reason [ReadoutCheckpoint]
+ * doesn't carry the reservoir's own weights alongside `W_out`: none of the
+ * three hold any state a checkpoint would ever need to reproduce -
+ * [ReservoirWeights] are fixed at construction and never trained, and
+ * [FeatureAssembler]/[RewardEngine] are stateless per-bar transforms. Only
+ * `x_t`, `W_out`/`P`, and the policy's trained weights are ever mutated
+ * after construction ([AgentCheckpoint]'s own class doc), so those are the
+ * only three components this restores.
+ *
+ * @throws IllegalArgumentException if [reservoirWeights]' shape doesn't
+ *   match what this checkpoint was saved against - the same "a checkpoint
+ *   loaded into a trainer built with a different shape would silently
+ *   misinterpret the flat arrays' indexing" hazard [ReadoutCheckpoint]'s own
+ *   kdoc already calls out, extended here to the reservoir/policy shapes
+ *   too, rather than assuming the caller's current configuration still
+ *   matches whatever was true when this checkpoint was saved. Callers that
+ *   want a clean fallback instead of a crash on a stale/mismatched
+ *   checkpoint should use [AgentCheckpointStore.restoreOrFreshOrchestrator],
+ *   which catches exactly this.
+ */
+fun AgentCheckpoint.toOrchestrator(
+    featureAssembler: FeatureAssembler,
+    reservoirWeights: ReservoirWeights,
+    rewardEngine: RewardEngine,
+    policyLearningRate: Float = PolicyEngine.DEFAULT_LEARNING_RATE,
+    policyWeightClip: Float = PolicyEngine.DEFAULT_WEIGHT_CLIP,
+): AgentOrchestrator {
+    require(reservoirWeights.nHidden == reservoirState.size) {
+        "reservoirWeights.nHidden ${reservoirWeights.nHidden} != checkpoint reservoirState size ${reservoirState.size}"
+    }
+    require(reservoirWeights.nHidden == readout.nHidden) {
+        "reservoirWeights.nHidden ${reservoirWeights.nHidden} != checkpoint readout.nHidden ${readout.nHidden}"
+    }
+    require(reservoirWeights.nHidden == policyNHidden) {
+        "reservoirWeights.nHidden ${reservoirWeights.nHidden} != checkpoint policyNHidden $policyNHidden"
+    }
+
+    val reservoir = ReservoirEngine(reservoirWeights, initialState = reservoirState)
+    val readoutTrainer = readout.toTrainer()
+    val policy = PolicyEngine(
+        nHidden = policyNHidden,
+        nBack = policyNBack,
+        learningRate = policyLearningRate,
+        weightClip = policyWeightClip,
+        initialWeights = policyWeights,
+    )
+    return AgentOrchestrator(
+        featureAssembler = featureAssembler,
+        reservoir = reservoir,
+        readoutTrainer = readoutTrainer,
+        rewardEngine = rewardEngine,
+        policyEngine = policy,
+    )
+}
+
 interface AgentCheckpointStore {
     suspend fun load(): AgentCheckpoint?
 
@@ -87,6 +149,74 @@ interface AgentCheckpointStore {
 object NoopAgentCheckpointStore : AgentCheckpointStore {
     override suspend fun load(): AgentCheckpoint? = null
     override suspend fun save(checkpoint: AgentCheckpoint) = Unit
+}
+
+/**
+ * Prompt 7e's "on app start" entry point: loads this store's most recent
+ * checkpoint and restores it into a fresh [AgentOrchestrator] via
+ * [AgentCheckpoint.toOrchestrator] - or, on any of the three ways that can
+ * fail to produce a usable checkpoint, falls back to a fresh orchestrator
+ * with default-initialized reservoir state, `W_out`/covariance, and policy
+ * weights (the same fresh state [AgentOrchestrator]'s own constructor
+ * already produces when nothing is passed in):
+ *
+ * 1. **No checkpoint exists** - [load] returns `null` (e.g. first-ever run).
+ * 2. **The checkpoint file fails to parse** - [FileAgentCheckpointStore.load]
+ *    already catches that and also returns `null` (see
+ *    `AgentCheckpointStoreTest`'s corrupt-file case), so this looks
+ *    identical to case 1 from here.
+ * 3. **The checkpoint parses fine but doesn't match this run's
+ *    configuration** - e.g. [reservoirWeights]/[policyNHidden] changed since
+ *    the checkpoint was saved (a reservoir-size config change, say).
+ *    [AgentCheckpoint.toOrchestrator] throws [IllegalArgumentException] for
+ *    exactly this rather than silently misinterpreting the flat arrays -
+ *    caught here and treated the same as a missing checkpoint, never
+ *    propagated to crash the caller.
+ *
+ * Meant to be called once, before the first live bar of a session - the
+ * agent's-state counterpart to
+ * [org.example.syncora.bitget.TradingChartPipeline.start]'s "load cache,
+ * then start streaming" shape.
+ */
+suspend fun AgentCheckpointStore.restoreOrFreshOrchestrator(
+    featureAssembler: FeatureAssembler,
+    reservoirWeights: ReservoirWeights,
+    rewardEngine: RewardEngine,
+    policyNHidden: Int = reservoirWeights.nHidden,
+    policyNBack: Int = PolicyEngine.DEFAULT_N_BACK,
+    policyLearningRate: Float = PolicyEngine.DEFAULT_LEARNING_RATE,
+    policyWeightClip: Float = PolicyEngine.DEFAULT_WEIGHT_CLIP,
+): AgentOrchestrator {
+    val restored = load()?.let { checkpoint ->
+        try {
+            checkpoint.toOrchestrator(
+                featureAssembler = featureAssembler,
+                reservoirWeights = reservoirWeights,
+                rewardEngine = rewardEngine,
+                policyLearningRate = policyLearningRate,
+                policyWeightClip = policyWeightClip,
+            )
+        } catch (e: IllegalArgumentException) {
+            Log.w(
+                "AgentCheckpointStore",
+                "Checkpoint shape didn't match this run's configuration; starting fresh: ${e.message}",
+            )
+            null
+        }
+    }
+
+    return restored ?: AgentOrchestrator(
+        featureAssembler = featureAssembler,
+        reservoir = ReservoirEngine(reservoirWeights),
+        readoutTrainer = ReadoutTrainer(nHidden = reservoirWeights.nHidden),
+        rewardEngine = rewardEngine,
+        policyEngine = PolicyEngine(
+            nHidden = policyNHidden,
+            nBack = policyNBack,
+            learningRate = policyLearningRate,
+            weightClip = policyWeightClip,
+        ),
+    )
 }
 
 /**
