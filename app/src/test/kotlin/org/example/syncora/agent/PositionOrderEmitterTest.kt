@@ -179,7 +179,7 @@ class PositionOrderEmitterTest {
     // ---- Input validation ----
 
     @Test(expected = IllegalArgumentException::class)
-    fun `targetPosition outside [-1, 1] is rejected`() {
+    fun `targetPosition outside -1 to 1 range is rejected`() {
         newEmitter(StubPaperTradingAccount()).onTargetPosition(1.5f)
     }
 
