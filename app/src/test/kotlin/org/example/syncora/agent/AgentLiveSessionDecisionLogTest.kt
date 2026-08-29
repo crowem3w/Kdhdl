@@ -38,7 +38,10 @@ import java.util.Collections
  */
 class AgentLiveSessionDecisionLogTest {
 
-    private val nHidden = 40
+    // Must fall within ReservoirEngine.MIN_N_HIDDEN..MAX_N_HIDDEN (50..150,
+    // per Phase 2's design) - ReservoirWeights.randomWeights rejects
+    // anything outside that range.
+    private val nHidden = 50
 
     private fun fixtureKlines(bars: Int, seed: Long): List<Kline> {
         var price = 50_000.0
