@@ -4,6 +4,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -62,6 +65,24 @@ import kotlinx.coroutines.launch
  * keep using the primary constructor directly - [Companion.start] is a
  * convenience, not the only path in.
  *
+ * ### Status/log panel, pushed rather than polled (Prompt 7f)
+ * [decisionLog] is Prompt 7f's "orchestrator-emitted decision-log stream":
+ * every [processLiveBar] call, after order emission, condenses that bar's
+ * [AgentOrchestrator.DecisionLog] via [AgentDecisionLogEntry.fromDecisionLog]
+ * and pushes it here. A status panel (e.g.
+ * [org.example.syncora.ui.AgentStatusLogPanel]) subscribes to this
+ * [SharedFlow] and appends a row per emission - it never polls this
+ * session or the orchestrator for "what happened last bar", so a panel
+ * that starts collecting late simply sees nothing before it subscribed
+ * rather than a stale poll racing a live update.
+ *
+ * Emission uses [MutableSharedFlow.tryEmit] rather than a suspending
+ * `emit`, since [processLiveBar] itself is not a suspend function (it runs
+ * on whatever thread the live bar-close subscriber's collector is on, same
+ * as [AgentOrchestrator.processLiveBar] always has) - see
+ * [DECISION_LOG_BUFFER_CAPACITY]'s doc for why this is a non-issue in
+ * practice.
+ *
  * @param orchestrator The Phase 1-5 chain this session drives, one bar at a time. Owns its own [ReservoirEngine]/[ReadoutTrainer]/[PolicyEngine] internally - see [AgentOrchestrator.currentCheckpoint].
  * @param orderEmitter Prompt 7c's order path - every [processLiveBar] call feeds that bar's resulting target position into [PositionOrderEmitter.onTargetPosition].
  * @param checkpointStore Where [stop] persists the checkpoint - defaults to [NoopAgentCheckpointStore] so constructing a session in a context that doesn't care about persistence (e.g. a lightweight test) doesn't require wiring one up.
@@ -76,10 +97,23 @@ class AgentLiveSession(
     /** This session's [AgentOrchestrator.LiveInferenceState] - constructed once and reused for every [processLiveBar] call for the life of this session, per that class's own contract. */
     private val liveState = AgentOrchestrator.LiveInferenceState()
 
+    private val mutableDecisionLog = MutableSharedFlow<AgentDecisionLogEntry>(
+        replay = 0,
+        extraBufferCapacity = DECISION_LOG_BUFFER_CAPACITY,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** Prompt 7f's decision-log stream - see class doc's "Status/log panel" section. */
+    val decisionLog: SharedFlow<AgentDecisionLogEntry> = mutableDecisionLog
+
     /**
-     * Drives one live bar-close through [AgentOrchestrator.processLiveBar]
-     * and immediately feeds the resulting target position into
-     * [orderEmitter] - Prompt 7c's live loop, end to end, one call.
+     * Drives one live bar-close through [AgentOrchestrator.processLiveBar],
+     * immediately feeds the resulting target position into [orderEmitter]
+     * (Prompt 7c's live loop, end to end, one call), and pushes a
+     * condensed [AgentDecisionLogEntry] onto [decisionLog] (Prompt 7f) -
+     * in that order, so a panel reacting to [decisionLog] always sees a
+     * bar's order already reflected in whatever [orderEmitter]'s backing
+     * store exposes.
      */
     fun processLiveBar(
         liveBarClose: AgentOrchestrator.LiveBarClose,
@@ -93,6 +127,7 @@ class AgentLiveSession(
             feeRate = feeRate,
         )
         orderEmitter.onTargetPosition(decision.position)
+        mutableDecisionLog.tryEmit(AgentDecisionLogEntry.fromDecisionLog(decision))
         return decision
     }
 
@@ -110,6 +145,20 @@ class AgentLiveSession(
     }
 
     companion object {
+        /**
+         * Headroom for [decisionLog]'s buffer, in bars. One bar close is
+         * at minimum tens of seconds apart in any real trading session
+         * (see [org.example.syncora.bitget.Granularity]'s shortest
+         * interval) and a collecting panel drains its buffer on every
+         * emission (see [org.example.syncora.ui.AgentStatusLogPanel]) - so
+         * in practice the buffer never holds more than one or two entries
+         * at a time. This capacity exists only to guarantee `tryEmit`
+         * never has to drop or block a bar's [processLiveBar] call even if
+         * a panel subscribes a little late or a collector briefly stalls,
+         * not because a real backlog of this size is expected.
+         */
+        private const val DECISION_LOG_BUFFER_CAPACITY = 256
+
         /**
          * Prompt 7e's "on app start" entry point - see class doc's
          * "Checkpoint load" section. Restores (or freshly initializes, on
