@@ -210,16 +210,10 @@ class PositionOrderEmitterTest {
         val emitter = newEmitter(account, maxSize = 1.0, price = 50_100.0, maxNotionalUsdt = 50_000.0)
 
         emitter.onTargetPosition(1.0f)
-        // PositionOrderEmitter.formatSize deliberately rounds the clipped
-        // size to 8 decimal places (satoshi-scale fixed-point, per its own
-        // kdoc) before handing it to PaperOrderSink, so what the stub
-        // records back is that *rounded* value, not the raw division
-        // result. 50_000.0 / 50_100.0 = 0.998003992015968... rounds to
-        // 0.99800399, a difference of ~2.0e-9 from the unrounded value -
-        // more than a 1e-9 delta allows for, but well within the ~5e-9
-        // (half a unit in the 8th decimal place) that 8-decimal rounding
-        // can introduce. 1e-8 asserts against that actual, intentional
-        // precision instead of an unrealistically tight one.
+        // 50_000/50_100 is non-terminating, so the value necessarily loses some precision
+        // going through formatSize's %.8f round-trip; 1e-8 matches that real resolution
+        // (same order as sizeEpsilonBaseCoin's default) rather than the tighter 1e-9 used
+        // for the other, exactly-representable boundary cases in this file.
         assertEquals(50_000.0 / 50_100.0, account.snapshot()!!.total, 1e-8)
     }
 
