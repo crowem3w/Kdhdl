@@ -78,7 +78,7 @@ class GuardrailSupervisorTest {
     }
 
     @Test(expected = IllegalArgumentException::class)
-    fun `PositionCaps rejects a fraction cap outside (0,1]`() {
+    fun `PositionCaps rejects a fraction cap outside the allowed 0 to 1 range`() {
         PositionCaps(maxPositionFraction = 0f)
     }
 
