@@ -47,13 +47,28 @@ interface PaperOrderSink {
  * ### Sizing convention
  * `f_t` is a *fraction* of [maxPositionSizeBaseCoin] - `f_t = 1.0` means
  * the maximum long size this emitter is configured to place,
- * `f_t = -1.0` the maximum short, `f_t = 0.0` flat. [maxPositionSizeBaseCoin]
- * and [leverage] are this emitter's own configuration, not something the
- * policy or reward engine decides - Phase 7's hard position/notional caps
- * (`docs/agent-design-contract.md`, "a third, orchestrator-level layer")
- * are the durable enforcement of a size ceiling; this constructor
- * parameter is Phase 6's provisional stand-in so paper trading has *some*
- * concrete sizing before that hardening exists.
+ * `f_t = -1.0` the maximum short, `f_t = 0.0` flat. [maxPositionSizeBaseCoin],
+ * [maxNotionalUsdt], and [leverage] are this emitter's own configuration,
+ * not something the policy or reward engine decides.
+ *
+ * ### Phase 7 hard caps (Prompt 8a - `docs/agent-design-contract.md`, "a
+ * third, orchestrator-level layer")
+ * Two independent ceilings are enforced on every call, and the tighter of
+ * the two wins:
+ * - [maxPositionSizeBaseCoin] bounds the order size in base-coin terms -
+ *   this was Phase 6's provisional stand-in and remains the first cap.
+ * - [maxNotionalUsdt] additionally bounds the order in quote-currency
+ *   (USDT) notional terms, computed against [referencePrice] at the moment
+ *   of the call - a cap [maxPositionSizeBaseCoin] alone cannot express,
+ *   since a fixed base-coin size corresponds to a different dollar
+ *   exposure at every price. Both caps apply regardless of what
+ *   [PolicyEngine] emits: a policy bug producing an in-range `f_t` at a
+ *   spiked [referencePrice] is still clipped down to [maxNotionalUsdt],
+ *   the same as a deliberately large `f_t` would be. If [referencePrice]
+ *   is not currently finite/positive (no valid price signal), the
+ *   notional cap is skipped for that call and only the base-coin cap
+ *   applies - malformed/stale price-feed handling beyond that is Prompt
+ *   8d's failure-mode hardening, not this prompt's scope.
  *
  * ### No redundant no-op orders, no dropped or coalesced genuine changes
  * [onTargetPosition] compares the *target* implied by `f_t` against
@@ -83,6 +98,8 @@ interface PaperOrderSink {
  * @param orderSink Where opens/closes are actually placed - see class doc.
  * @param currentPosition Supplies the account's current net position on this symbol right now, or null if flat. Called once per [onTargetPosition] invocation; the caller is responsible for this reflecting the effect of any order this class just emitted before the *next* call (true automatically when backed by a live repository/store, since [PaperOrderSink]'s calls mutate that same state).
  * @param maxPositionSizeBaseCoin The base-coin size `f_t = ±1.0` corresponds to - must be `> 0`. See "Sizing convention" above.
+ * @param maxNotionalUsdt The hard USDT-notional ceiling on any single order this emitter places - must be `> 0`. Independent of [maxPositionSizeBaseCoin]; see "Phase 7 hard caps" above. Required (no default) so every call site makes a deliberate choice rather than inheriting an accidental one.
+ * @param referencePrice Supplies the current reference/mark price used to convert a base-coin size into USDT notional for the [maxNotionalUsdt] check - called once per [onTargetPosition] invocation, same contract as [currentPosition]. Not used for anything else (order sizing itself stays in base-coin terms, per [maxPositionSizeBaseCoin]/`f_t`).
  * @param leverage Applied to every [PaperOrderSink.openPosition] call this emitter makes - constant, not something `f_t` varies. Must be `>= 1`.
  * @param sizeEpsilonBaseCoin Sizes within this of each other are treated as unchanged - guards against float noise around an unchanged `f_t` producing a spurious tiny add-on/reduce order. Defaults to a small fraction of a satoshi-scale unit, far below any real order size.
  */
@@ -90,11 +107,14 @@ class PositionOrderEmitter(
     private val orderSink: PaperOrderSink,
     private val currentPosition: () -> PaperPosition?,
     private val maxPositionSizeBaseCoin: Double,
+    private val maxNotionalUsdt: Double,
+    private val referencePrice: () -> Double,
     private val leverage: Int = 1,
     private val sizeEpsilonBaseCoin: Double = 1e-8,
 ) {
     init {
         require(maxPositionSizeBaseCoin > 0.0) { "maxPositionSizeBaseCoin must be > 0, was $maxPositionSizeBaseCoin" }
+        require(maxNotionalUsdt > 0.0) { "maxNotionalUsdt must be > 0, was $maxNotionalUsdt" }
         require(leverage >= 1) { "leverage must be >= 1, was $leverage" }
         require(sizeEpsilonBaseCoin >= 0.0) { "sizeEpsilonBaseCoin must be >= 0, was $sizeEpsilonBaseCoin" }
     }
@@ -112,7 +132,7 @@ class PositionOrderEmitter(
     fun onTargetPosition(targetPosition: Float) {
         require(targetPosition in -1f..1f) { "targetPosition must be in [-1, 1], was $targetPosition" }
 
-        val targetSize = abs(targetPosition.toDouble()) * maxPositionSizeBaseCoin
+        val targetSize = cappedTargetSize(targetPosition)
         val targetSide: PositionSide? = when {
             targetSize <= sizeEpsilonBaseCoin -> null
             targetPosition > 0f -> PositionSide.LONG
@@ -159,6 +179,31 @@ class PositionOrderEmitter(
             orderSink.closePosition(existing)
             orderSink.openPosition(targetSide, formatSize(targetSize), leverage)
         }
+    }
+
+    /**
+     * Prompt 8a's hard-cap enforcement: [targetPosition]'s magnitude scaled
+     * to a base-coin size by [maxPositionSizeBaseCoin] (cap #1), then
+     * additionally clipped so the resulting order's USDT notional never
+     * exceeds [maxNotionalUsdt] (cap #2) at the current [referencePrice] -
+     * whichever cap is tighter wins, and both are enforced on every call
+     * regardless of what produced [targetPosition]. See "Phase 7 hard
+     * caps" in the class doc.
+     */
+    private fun cappedTargetSize(targetPosition: Float): Double {
+        val baseCoinCappedSize = abs(targetPosition.toDouble()) * maxPositionSizeBaseCoin
+
+        val price = referencePrice()
+        if (!price.isFinite() || price <= 0.0) {
+            // No valid price signal to check notional against this call -
+            // the base-coin cap above still holds on its own. A malformed
+            // or stale price feed is Prompt 8d's failure-mode territory,
+            // not this cap's job to detect.
+            return baseCoinCappedSize
+        }
+
+        val notionalCappedSize = maxNotionalUsdt / price
+        return minOf(baseCoinCappedSize, notionalCappedSize)
     }
 
     /** Formats a base-coin size the way [PaperOrderSink.openPosition] expects - fixed-point, never scientific notation, locale-independent. */

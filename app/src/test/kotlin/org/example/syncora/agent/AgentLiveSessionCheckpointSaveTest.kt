@@ -82,6 +82,8 @@ class AgentLiveSessionCheckpointSaveTest {
             orderSink = NoopOrderSink(),
             currentPosition = { null },
             maxPositionSizeBaseCoin = 1.0,
+            maxNotionalUsdt = 1_000_000.0, // generous - this test isn't exercising Prompt 8a's caps
+            referencePrice = { 50_000.0 },
         )
         return AgentLiveSession(orchestrator = orchestrator, orderEmitter = orderEmitter, checkpointStore = store)
     }

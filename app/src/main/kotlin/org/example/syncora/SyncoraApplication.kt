@@ -1,10 +1,12 @@
 package org.example.syncora
 
 import android.app.Application
+import org.example.syncora.bitget.BitgetEnvironment
 import org.example.syncora.bitget.BitgetFeeRateClient
 import org.example.syncora.bitget.BitgetFundingRateClient
 import org.example.syncora.bitget.BitgetLiveCredentialsStore
 import org.example.syncora.bitget.BitgetTradeSocket
+import org.example.syncora.bitget.BitgetTradingRestClient
 import org.example.syncora.bitget.DepthPipeline
 import org.example.syncora.bitget.FileKlineCacheStore
 import org.example.syncora.bitget.LiveTradingRepository
@@ -108,7 +110,16 @@ class SyncoraApplication : Application() {
     // liveTradingRepository, since it has nothing useful to watch until that
     // repository is polling positions.
     val stopLossGuard: StopLossGuard by lazy {
-        StopLossGuard(credentialsStore = liveCredentialsStore, riskSettingsStore = riskSettingsStore)
+        StopLossGuard(
+            // A dedicated client, independent of liveTradingRepository's own
+            // - see StopLossGuard's class doc: it must keep working even if
+            // that repository's polling is torn down first during shutdown.
+            client = BitgetTradingRestClient(
+                environment = { BitgetEnvironment.LIVE },
+                credentialsProvider = { liveCredentialsStore.load() },
+            ),
+            riskSettingsStore = riskSettingsStore,
+        )
     }
 
     private var marketDataStarted = false

@@ -61,11 +61,19 @@ class PositionOrderEmitterTest {
         fun snapshot(): PaperPosition? = position
     }
 
-    private fun newEmitter(account: StubPaperTradingAccount, maxSize: Double = 1.0, leverage: Int = 5): PositionOrderEmitter =
+    private fun newEmitter(
+        account: StubPaperTradingAccount,
+        maxSize: Double = 1.0,
+        leverage: Int = 5,
+        maxNotionalUsdt: Double = 1_000_000.0, // generous - unrelated tests shouldn't hit this cap
+        price: Double = 50_000.0, // matches StubPaperTradingAccount's own markPrice/entryPrice convention
+    ): PositionOrderEmitter =
         PositionOrderEmitter(
             orderSink = account,
             currentPosition = account::snapshot,
             maxPositionSizeBaseCoin = maxSize,
+            maxNotionalUsdt = maxNotionalUsdt,
+            referencePrice = { price },
             leverage = leverage,
         )
 
@@ -176,6 +184,92 @@ class PositionOrderEmitterTest {
         assertEquals(0.5, account.snapshot()!!.total, 1e-6)
     }
 
+    // ---- Prompt 8a: hard position/notional caps (Phase 7 - `ESN_RRL_Agent_Task_Prompts.md`) ----
+    // maxPositionSizeBaseCoin (cap #1, base-coin) is already exercised by every case above,
+    // since f_t is a fraction of it by construction. These cases exercise the second,
+    // independent ceiling: maxNotionalUsdt (cap #2, USDT), which can bind even when f_t and
+    // the base-coin size are both well within maxPositionSizeBaseCoin - purely because
+    // referencePrice moved. Boundary cases per Prompt 8a: exactly-at-cap, just-over-cap,
+    // far-over-cap.
+
+    @Test
+    fun `notional cap exactly at the boundary passes through unclipped`() {
+        val account = StubPaperTradingAccount()
+        // f_t=1.0 * maxSize=1.0 = 1.0 base-coin @ price 50_000 = exactly 50_000 USDT notional.
+        val emitter = newEmitter(account, maxSize = 1.0, price = 50_000.0, maxNotionalUsdt = 50_000.0)
+
+        emitter.onTargetPosition(1.0f)
+        assertEquals(1.0, account.snapshot()!!.total, 1e-6)
+    }
+
+    @Test
+    fun `notional cap just over the boundary clips size down to the cap`() {
+        val account = StubPaperTradingAccount()
+        // Same as above, but price ticked up just enough that the un-clipped 1.0 base-coin
+        // size would be 50_100 USDT notional - just over a 50_000 cap.
+        val emitter = newEmitter(account, maxSize = 1.0, price = 50_100.0, maxNotionalUsdt = 50_000.0)
+
+        emitter.onTargetPosition(1.0f)
+        assertEquals(50_000.0 / 50_100.0, account.snapshot()!!.total, 1e-9)
+    }
+
+    @Test
+    fun `notional cap far over the boundary still clips down to exactly the cap, not partway`() {
+        val account = StubPaperTradingAccount()
+        // A price spike (e.g. 10x) with an otherwise well-behaved, in-range f_t: the
+        // base-coin cap alone would let this through at maxSize; the notional cap must
+        // still catch it and clip all the way down to what maxNotionalUsdt actually buys
+        // at this price - "far over" is not treated any more leniently than "just over".
+        val emitter = newEmitter(account, maxSize = 1.0, price = 500_000.0, maxNotionalUsdt = 50_000.0)
+
+        emitter.onTargetPosition(1.0f)
+        assertEquals(0.1, account.snapshot()!!.total, 1e-9) // 50_000 / 500_000
+        assertEquals(0.1 * 500_000.0, account.snapshot()!!.total * 500_000.0, 1e-6) // resulting notional == the cap, not below it
+    }
+
+    @Test
+    fun `whichever of the two caps is tighter wins`() {
+        // Cap #1 (base-coin) tighter: a tiny maxPositionSizeBaseCoin binds well before the
+        // generous notional cap would.
+        val baseCoinBinds = StubPaperTradingAccount()
+        newEmitter(baseCoinBinds, maxSize = 0.2, price = 50_000.0, maxNotionalUsdt = 1_000_000.0)
+            .onTargetPosition(1.0f)
+        assertEquals(0.2, baseCoinBinds.snapshot()!!.total, 1e-9)
+
+        // Cap #2 (notional) tighter: a generous maxPositionSizeBaseCoin would allow far
+        // more size than a modest USDT notional cap permits at this price.
+        val notionalBinds = StubPaperTradingAccount()
+        newEmitter(notionalBinds, maxSize = 10.0, price = 50_000.0, maxNotionalUsdt = 25_000.0)
+            .onTargetPosition(1.0f)
+        assertEquals(0.5, notionalBinds.snapshot()!!.total, 1e-9) // 25_000 / 50_000, not 10.0
+    }
+
+    @Test
+    fun `an existing position is shrunk to the notional cap once price moves it over, even with an unchanged f_t`() {
+        val account = StubPaperTradingAccount()
+        var price = 50_000.0
+        val emitter = PositionOrderEmitter(
+            orderSink = account,
+            currentPosition = account::snapshot,
+            maxPositionSizeBaseCoin = 1.0,
+            maxNotionalUsdt = 50_000.0,
+            referencePrice = { price },
+        )
+
+        emitter.onTargetPosition(1.0f) // opens LONG 1.0 @ 50_000 = exactly at the notional cap
+        assertEquals(1.0, account.snapshot()!!.total, 1e-9)
+
+        price = 100_000.0 // price doubles between bar closes; f_t is unchanged
+        account.calls.clear()
+        emitter.onTargetPosition(1.0f) // same f_t, but now the notional cap re-evaluates against the new price
+
+        // The existing 1.0-size position is now 100_000 USDT notional - over the 50_000 cap -
+        // so this call must shrink it back down to what the cap allows at the new price,
+        // purely because a hard cap is being re-checked every call, not because f_t moved.
+        assertEquals(listOf("close", "open"), account.calls.map { it.type })
+        assertEquals(0.5, account.snapshot()!!.total, 1e-9) // 50_000 / 100_000
+    }
+
     // ---- Input validation ----
 
     @Test(expected = IllegalArgumentException::class)
@@ -186,5 +280,37 @@ class PositionOrderEmitterTest {
     @Test(expected = IllegalArgumentException::class)
     fun `non-positive maxPositionSizeBaseCoin is rejected at construction`() {
         newEmitter(StubPaperTradingAccount(), maxSize = 0.0)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `non-positive maxNotionalUsdt is rejected at construction`() {
+        newEmitter(StubPaperTradingAccount(), maxNotionalUsdt = 0.0)
+    }
+
+    @Test
+    fun `a non-finite or non-positive referencePrice falls back to the base-coin cap alone, never throws`() {
+        // Prompt 8a scope is finite-but-excessive f_t/price values; a malformed price feed
+        // (NaN, zero, negative) is explicitly Prompt 8d's failure-mode territory. This test
+        // only pins down that, until 8d hardens it further, this cap layer degrades to
+        // "base-coin cap only" rather than crashing or silently allowing an uncapped order.
+        val nanPriceAccount = StubPaperTradingAccount()
+        PositionOrderEmitter(
+            orderSink = nanPriceAccount,
+            currentPosition = nanPriceAccount::snapshot,
+            maxPositionSizeBaseCoin = 0.4,
+            maxNotionalUsdt = 1.0, // deliberately tiny - would clip hard if it were applied
+            referencePrice = { Double.NaN },
+        ).onTargetPosition(1.0f)
+        assertEquals(0.4, nanPriceAccount.snapshot()!!.total, 1e-9) // base-coin cap, notional cap skipped
+
+        val zeroPriceAccount = StubPaperTradingAccount()
+        PositionOrderEmitter(
+            orderSink = zeroPriceAccount,
+            currentPosition = zeroPriceAccount::snapshot,
+            maxPositionSizeBaseCoin = 0.4,
+            maxNotionalUsdt = 1.0,
+            referencePrice = { 0.0 },
+        ).onTargetPosition(1.0f)
+        assertEquals(0.4, zeroPriceAccount.snapshot()!!.total, 1e-9)
     }
 }
