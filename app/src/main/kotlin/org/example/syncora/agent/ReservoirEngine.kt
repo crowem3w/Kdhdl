@@ -9,41 +9,36 @@ import kotlin.random.Random
 
 /**
  * The fixed, randomly-initialized dynamic reservoir of an echo state
- * network (see the reference architecture diagram / `docs/agent-design-
- * contract.md` and Borrageiro, Firoozye & Barucca 2022, subsection III-B1).
+ * network, per Borrageiro, Firoozye & Barucca (2022) subsection III-B1,
+ * eq. 5.
  *
- * This is Phase 2: only [ReservoirWeights.wInput] / [ReservoirWeights.wHidden]
- * and the `tanh`-activated state update exist here. There is no readout
- * (`w_out`, Phase 3), no feedback path `W_back` from the policy's past
- * outputs (that arrives with `PolicyEngine` in Phase 5), and nothing here
- * is trained - the reservoir weights are drawn once at construction and
- * never change afterwards. Only the state `x_t` evolves.
+ * ### Redesign note (aligning to the paper)
+ * The previous version of this class omitted `W_back` entirely and left
+ * the reservoir purely feedforward-in-time; own-output feedback was
+ * instead wired only into the policy's linear regressor. That is a
+ * different network from the one the paper describes. The paper is
+ * explicit that what makes *this* echo state network recurrent - as
+ * opposed to the plain Jaeger formulation it says it deviates from - is
+ * exactly this feedback path: the agent's own past `n_back` positions
+ * `ŷ_t` are wired back into the *reservoir's own state update* via a
+ * third fixed weight matrix `W_back`, not just appended to the policy's
+ * regressor after the fact:
+ * ```
+ * x_t = tanh(W_input·u_t + W_hidden·x_{t-1} + W_back·ŷ_t)
+ * ```
+ * `W_back` is drawn once, from a standard normal, and - like `W_input`
+ * and `W_hidden` - never trained. Only the downstream policy's `w_out`
+ * (see `RrlAgent`) is learned.
  *
- * ### Why this matters: the echo state property
- * Per Jaeger's Definition 2 (quoted in the source paper), if two copies of
- * the *same* network are started from different initial states `x_0`,
- * `x̃_0` and driven by the same input sequence, their state trajectories
- * must converge. This only holds if the hidden weight matrix `W_hidden` is
- * contractive, i.e. its spectral radius `ρ(W_hidden) < 1`. [ReservoirWeights.randomWeights]
- * follows the Yildiz et al. procedure the paper cites: draw a
- * *non-negative* random matrix, scale it (via power iteration, see
- * [PowerIteration]) so its spectral radius sits at the configured target,
- * *then* flip signs and sparsify. Because the spectral radius of a matrix
- * is always bounded by the spectral radius of its entrywise absolute
- * value (Perron-Frobenius), sign-flipping and zeroing entries afterward
- * can only ever shrink `ρ(W_hidden)` relative to the scaled non-negative
- * matrix - never grow it back above the target. So the echo state property
- * is guaranteed by construction, not just hoped for.
- *
- * ### Performance
- * Everything is a flat, row-major `FloatArray` - no boxed `Double`, no
- * `Array<FloatArray>` object graphs, no per-step allocation beyond what is
- * created once in the constructor. [step] mutates an internal scratch
- * buffer and copies it back into the live state; it returns a reference to
- * the engine's own state array (not a fresh copy) precisely so repeated
- * calls on the MT6765G's A55 cores don't feed the GC. Callers that need a
- * stable snapshot (e.g. for logging) should copy it themselves via
- * `currentState().copyOf()`.
+ * ### Echo state property
+ * Unchanged from before: `W_hidden` is built via the Yildiz et al.
+ * procedure (draw non-negative, scale to a target spectral radius via
+ * power iteration, sign-flip, sparsify) so `ρ(W_hidden) < 1` is guaranteed
+ * by construction. `W_back` does not participate in that guarantee and
+ * doesn't need to - Jaeger's echo state property is a statement about
+ * `W_hidden` alone for a *given* (here: agent-supplied) input stream, and
+ * `ŷ_t` is just another bounded (`[-1,1]`) input stream from the reservoir's
+ * point of view, no different in kind from `u_t`.
  */
 class ReservoirEngine(
     val weights: ReservoirWeights,
@@ -51,9 +46,8 @@ class ReservoirEngine(
 ) {
     val nInput: Int get() = weights.nInput
     val nHidden: Int get() = weights.nHidden
+    val nBack: Int get() = weights.nBack
 
-    // Hot-path state: x_{t-1} going in, x_t coming out of every step(). The
-    // only two Float arrays this engine ever mutates after construction.
     private val state: FloatArray = if (initialState != null) {
         require(initialState.size == weights.nHidden) {
             "initialState size ${initialState.size} != nHidden ${weights.nHidden}"
@@ -66,21 +60,28 @@ class ReservoirEngine(
 
     /**
      * Advances the reservoir by one bar-close step:
-     * `x_t = tanh(W_input * u_t + W_hidden * x_{t-1})`.
+     * `x_t = tanh(W_input·u_t + W_hidden·x_{t-1} + W_back·ŷ_t)`.
      *
-     * [u] must be exactly [FeatureAssembler.FEATURE_WIDTH]-shaped, i.e.
-     * [nInput]-shaped - this is [FeatureAssembler]'s output `u_t` unmodified.
-     * The only allocation anywhere in this method is zero: the returned
-     * array *is* the engine's internal state buffer.
+     * @param u [FeatureAssembler]'s output, [nInput]-shaped.
+     * @param yHat the agent's own last [nBack] positions, `[f_{t-1}, ...,
+     *   f_{t-nBack}]` - same array [RrlAgent] threads into its own
+     *   regressor as `ŷ_t`, so the *same* feedback the policy sees is also
+     *   what the reservoir sees, per eq. 5. Pass an `nBack`-length zero
+     *   array before any position has been taken.
      */
-    fun step(u: FloatArray): FloatArray {
+    fun step(u: FloatArray, yHat: FloatArray): FloatArray {
         require(u.size == weights.nInput) {
             "input size ${u.size} != nInput ${weights.nInput}"
         }
+        require(yHat.size == weights.nBack) {
+            "yHat size ${yHat.size} != nBack ${weights.nBack}"
+        }
         val wInput = weights.wInput
         val wHidden = weights.wHidden
+        val wBack = weights.wBack
         val nIn = weights.nInput
         val nHid = weights.nHidden
+        val nBk = weights.nBack
 
         var h = 0
         while (h < nHid) {
@@ -100,6 +101,13 @@ class ReservoirEngine(
                 j++
             }
 
+            val backBase = h * nBk
+            var k = 0
+            while (k < nBk) {
+                acc += wBack[backBase + k] * yHat[k]
+                k++
+            }
+
             nextStateScratch[h] = tanh(acc.toDouble()).toFloat()
             h++
         }
@@ -110,11 +118,6 @@ class ReservoirEngine(
     /** Read-only view of the current hidden state `x_t`. Do not mutate. */
     fun currentState(): FloatArray = state
 
-    /**
-     * Resets the live state to [newState] (or the zero vector if `null`).
-     * Weights are untouched - only ever the state resets, e.g. when
-     * `AgentOrchestrator` (Phase 6) restarts a session.
-     */
     fun resetState(newState: FloatArray? = null) {
         if (newState != null) {
             require(newState.size == weights.nHidden) {
@@ -128,62 +131,36 @@ class ReservoirEngine(
 }
 
 /**
- * The two fixed weight matrices of a reservoir: `W_input` (n_hidden x
- * n_input, drawn from a standard normal) and `W_hidden` (n_hidden x
- * n_hidden, built per the Yildiz et al. procedure so `ρ(W_hidden)` sits at
- * the configured spectral radius target). Both are flat, row-major `FloatArray`s:
- * `wInput[h * nInput + i]` is the weight from input `i` to hidden unit `h`;
- * `wHidden[h * nHidden + j]` is the weight from hidden unit `j` to hidden
- * unit `h`.
- *
- * Split out from [ReservoirEngine] so the *same* weights can back two
- * engines with two different initial states - exactly what the echo state
- * property test needs (Definition 2 requires the *same* network, only the
- * starting state differs).
+ * The three fixed weight matrices of a reservoir: `W_input` (n_hidden x
+ * n_input), `W_hidden` (n_hidden x n_hidden, scaled to the target spectral
+ * radius), and `W_back` (n_hidden x n_back, the own-output feedback path -
+ * new in this redesign, see [ReservoirEngine]'s class doc). All three are
+ * flat, row-major `FloatArray`s and none of them are ever trained.
  */
 class ReservoirWeights private constructor(
     val nInput: Int,
     val nHidden: Int,
+    val nBack: Int,
     val wInput: FloatArray,
     val wHidden: FloatArray,
-    /** `ρ(W_hidden)` as actually estimated on the final (signed, sparsified) matrix. */
+    val wBack: FloatArray,
     val spectralRadiusAchieved: Float,
 ) {
     companion object {
         const val DEFAULT_N_HIDDEN = 100
+        /** `n_back = 10` per the paper's own experiment design (subsection III-C), not the previous redesign's `5`. */
+        const val DEFAULT_N_BACK = 10
         const val DEFAULT_SPECTRAL_RADIUS_TARGET = 0.9f
         const val DEFAULT_SIGN_FLIP_PROBABILITY = 0.5f
-
-        /** Fraction of `W_hidden` entries zeroed; `α = 0.75` per the source paper's own configuration. */
         const val DEFAULT_SPARSITY = 0.75f
 
         const val MIN_N_HIDDEN = 50
         const val MAX_N_HIDDEN = 150
 
-        /**
-         * Draws a fresh, fixed reservoir weight pair. Follows the Yildiz et
-         * al. procedure cited by the source paper, in order:
-         *
-         * 1. Draw `W_hidden` with every entry non-negative (`|N(0,1)|`).
-         * 2. Scale it via [PowerIteration.estimateSpectralRadius] so
-         *    `ρ(W_hidden) == spectralRadiusTarget`.
-         * 3. Flip the sign of each entry independently with probability
-         *    [signFlipProbability].
-         * 4. Sparsify: zero each entry independently with probability
-         *    [sparsity].
-         *
-         * Steps 3-4 can only shrink `ρ(W_hidden)` further (see the
-         * Perron-Frobenius argument in [ReservoirEngine]'s class doc), so
-         * the echo state property holds for the returned weights
-         * regardless of which entries got flipped or zeroed.
-         *
-         * `W_input` is drawn independently, entries from a plain standard
-         * normal (no non-negativity or scaling step - only `W_hidden` needs
-         * to be contractive).
-         */
         fun randomWeights(
             nInput: Int,
             nHidden: Int = DEFAULT_N_HIDDEN,
+            nBack: Int = DEFAULT_N_BACK,
             spectralRadiusTarget: Float = DEFAULT_SPECTRAL_RADIUS_TARGET,
             signFlipProbability: Float = DEFAULT_SIGN_FLIP_PROBABILITY,
             sparsity: Float = DEFAULT_SPARSITY,
@@ -191,10 +168,11 @@ class ReservoirWeights private constructor(
         ): ReservoirWeights {
             require(nInput >= 1) { "nInput must be >= 1, was $nInput" }
             require(nHidden in MIN_N_HIDDEN..MAX_N_HIDDEN) {
-                "nHidden must be in [$MIN_N_HIDDEN, $MAX_N_HIDDEN] per Phase 2's design, was $nHidden"
+                "nHidden must be in [$MIN_N_HIDDEN, $MAX_N_HIDDEN], was $nHidden"
             }
+            require(nBack >= 0) { "nBack must be >= 0, was $nBack" }
             require(spectralRadiusTarget > 0f && spectralRadiusTarget < 1f) {
-                "spectralRadiusTarget must be in (0, 1) to guarantee the echo state property, was $spectralRadiusTarget"
+                "spectralRadiusTarget must be in (0, 1), was $spectralRadiusTarget"
             }
             require(signFlipProbability in 0f..1f)
             require(sparsity in 0f..1f)
@@ -203,6 +181,11 @@ class ReservoirWeights private constructor(
             val gaussians = GaussianSource(rng)
 
             val wInput = FloatArray(nHidden * nInput) { gaussians.next() }
+            // W_back: drawn from a standard normal, same as W_input - the
+            // paper places no non-negativity/scaling requirement on it,
+            // only on W_hidden (echo state property is a W_hidden-only
+            // condition).
+            val wBack = FloatArray(nHidden * nBack) { gaussians.next() }
 
             val wHidden = FloatArray(nHidden * nHidden) { abs(gaussians.next()) }
             val rawRho = PowerIteration.estimateSpectralRadius(wHidden, nHidden, rng)
@@ -219,19 +202,13 @@ class ReservoirWeights private constructor(
 
             val achievedRho = PowerIteration.estimateSpectralRadius(wHidden, nHidden, rng)
 
-            return ReservoirWeights(nInput, nHidden, wInput, wHidden, achievedRho)
+            return ReservoirWeights(nInput, nHidden, nBack, wInput, wHidden, wBack, achievedRho)
         }
 
         private const val POWER_ITERATION_EPS = 1e-9f
     }
 }
 
-/**
- * Box-Muller standard normal sampler built on [kotlin.random.Random] - the
- * paper only requires "a draw from a standard normal would suffice" for
- * `W_input` and the pre-sign-flip magnitudes of `W_hidden`; no external
- * distribution/statistics library is needed for that.
- */
 private class GaussianSource(private val rng: Random) {
     private var spare: Float? = null
 
@@ -251,24 +228,6 @@ private class GaussianSource(private val rng: Random) {
     }
 }
 
-/**
- * Power iteration for estimating a square matrix's spectral radius
- * `ρ(M) = max(|eigenvalue|)`, written from scratch since at `n_hidden` in
- * `[50, 150]` a full eigendecomposition needs no external linear-algebra
- * dependency to avoid - a plain iterative estimate is both sufficient and
- * simpler.
- *
- * Standard power iteration (repeatedly apply `M`, renormalize) only
- * converges *directionally* when the dominant eigenvalue is real and
- * simple. For a matrix like the sign-flipped `W_hidden`, the dominant
- * eigenvalue can be a complex-conjugate pair, in which case the iterate's
- * *direction* rotates and never settles - but its *norm growth rate*
- * still converges to `ρ(M)` regardless (the norm of `M^k v` grows like
- * `ρ(M)^k` for almost any starting `v`, independent of whether the
- * dominant eigenvalue is real). So this estimates `ρ(M)` via the norm
- * ratio `||M v_k|| / ||v_k||` on a unit-renormalized iterate, which is
- * robust to that rotation.
- */
 object PowerIteration {
     const val DEFAULT_ITERATIONS = 300
     private const val NORM_FLOOR = 1e-12f

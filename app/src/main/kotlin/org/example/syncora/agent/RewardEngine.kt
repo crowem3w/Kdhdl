@@ -5,18 +5,30 @@ import kotlin.math.abs
 import kotlin.math.pow
 
 /**
- * Computes the per-bar reward `r_t` the RRL agent is trained against, and
- * the differential Sharpe ratio `dsr_t` derived from it (see the reference
- * architecture diagram / `docs/agent-design-contract.md` §1, and
- * Borrageiro, Firoozye & Barucca 2022 eq. 8, itself an extension of Moody
- * et al.'s reward).
+ * Computes the per-bar reward `r_t` [RrlAgent] is trained against, the
+ * quadratic utility `υ_t` (eq. 6) derived from it, and the (monitoring-only)
+ * differential Sharpe ratio `dsr_t` (see the reference architecture diagram
+ * / `docs/agent-design-contract.md` §1, and Borrageiro, Firoozye & Barucca
+ * 2022 eq. 6/7/8).
  *
- * This is Phase 4: it sits downstream of nothing built so far (it is a pure
- * function of price, position and cost/funding inputs the caller supplies -
- * bar close by bar close) and it is what [org.example.syncora.agent.PolicyEngine]
- * (Phase 5) will eventually perform gradient ascent against, via [dsr_t],
+ * This sits downstream of nothing built so far (it is a pure function of
+ * price, position and cost/funding inputs the caller supplies - bar close
+ * by bar close) and it is what [RrlAgent.update] performs the extended
+ * Kalman filter step against, via [RewardBreakdown.quadraticUtilityGradientWrtReward],
  * not `r_t` directly. Nothing here decides a position; `f_t`/`f_{t-1}` are
- * inputs, always sourced from the policy, never computed by this class.
+ * inputs, always sourced from the agent, never computed by this class.
+ *
+ * ### Redesign note (quadratic utility replaces dsr as the training signal)
+ * The previous version of this class computed only `dsr_t` and trained
+ * `PolicyEngine` against it. The paper's own crypto-agent experiment does
+ * not do that: `dsr_t` is the training signal for the *unrelated* Moody &
+ * Saffell scheme the paper only discusses in its literature review
+ * (§II-C1), not the scheme its own experiment runs. What actually drives
+ * training (eq. 6, eq. 12, via [RrlAgent]'s EKF) is the quadratic utility
+ * `υ_t = µ_t − (λ/2)σ_t²`. `dsr_t` is kept - it's a genuine monitoring
+ * signal the paper's own experiment design bullet uses ("Monitor equation
+ * 7, the expected net reward... trade freely if µt >= 0") - but it is no
+ * longer what training is driven by.
  *
  * ### The reward
  * `docs/agent-design-contract.md` §1 fixes:
@@ -53,13 +65,24 @@ import kotlin.math.pow
  * design doc §3's "no drift between the two" requirement. No other formula
  * for funding P&L is used anywhere in this class.
  *
- * ### Differential Sharpe ratio
+ * ### Quadratic utility
  * `a_t`/`b_t` are exponentially-weighted first/second moments of the
  * reward stream (Moody et al., also reproduced in the source paper's
  * eq. 5/eq. 2):
  * ```
  * a_t = a_{t-1} + τ(r_t − a_{t-1})
  * b_t = b_{t-1} + τ(r_t² − b_{t-1})
+ * σ_t² = b_{t-1} − a_{t-1}²
+ * υ_t = µ_t − (λ/2)σ_t²                          (eq. 6, µ_t == a_{t-1})
+ * dυ_t/dr_t = (1 − τ)·[1 − λ·(r_t − µ_t)]         (eq. 12)
+ * ```
+ * `λ` is [riskAppetite]; `τ` is [sharpeAdaptationRate], reused as the same
+ * EWMA decay for both the utility's moments and the monitoring-only dsr -
+ * one reward-moments estimate, not two that could drift out of sync
+ * (design doc §1).
+ *
+ * ### Differential Sharpe ratio (monitoring only)
+ * ```
  * dsr_t = (b_{t-1}Δa_t − 0.5·a_{t-1}Δb_t) / (b_{t-1} − a_{t-1}²)^(3/2)
  * ```
  * The source paper's eq. 5 prints this denominator as `(a_{t-1} −
@@ -76,16 +99,29 @@ import kotlin.math.pow
  * ### Performance
  * Two `Double` fields (`a`, `b`) are the only state this class carries;
  * [step] does a fixed, small number of scalar operations - no allocation,
- * no `FloatArray`, since (unlike Phases 2/3) there is no per-bar vector
- * here, just scalars, so there is nothing to gain from Phase 2/3's
- * flat-array discipline.
+ * no `FloatArray`, since there is no per-bar vector here, just scalars, so
+ * there is nothing to gain from the reservoir/agent's flat-array
+ * discipline.
  */
 class RewardEngine(
     private val sharpeAdaptationRate: Double = DEFAULT_SHARPE_ADAPTATION_RATE,
+    /**
+     * `λ` in eq. 6, `υ_t = µ_t − (λ/2)σ_t²` - the risk appetite constant.
+     * Paper's experiment design (subsection III-C): "Set the risk appetite
+     * constant λ = 0.00001 for quadratic utility equation 6." The paper
+     * also notes (§III-B2) that λ could instead be set adaptively as
+     * `ir_t / σ_t`, but the experiment that produced the paper's reported
+     * 350% / 1.46 IR result used the fixed constant, so that's the default
+     * here too - adaptive λ is a documented option, not silently swapped in.
+     */
+    private val riskAppetite: Double = DEFAULT_RISK_APPETITE,
 ) {
     companion object {
         /** Moody et al.'s `τ` - how quickly the EWMA moments track the live reward stream. */
         const val DEFAULT_SHARPE_ADAPTATION_RATE = 0.01
+
+        /** `λ = 0.00001` per the paper's experiment design. */
+        const val DEFAULT_RISK_APPETITE = 0.00001
 
         // Numerical safety net, same spirit as ReadoutTrainer's DENOM_EPS:
         // the EWMA variance b_{t-1} - a_{t-1}^2 is >= 0 by construction
@@ -98,15 +134,15 @@ class RewardEngine(
         /**
          * `d(r_t)/d(f_t)` - the sensitivity of this bar's reward to the
          * *current* position `f_t`, holding `f_{t-1}` fixed. This is the
-         * other half [PolicyEngine] (Phase 5) needs for gradient ascent on
-         * `dsr_t` (the other half being [RewardBreakdown.differentialSharpeGradientWrtReward]);
-         * chaining the two via `d(dsr_t)/d(f_t) = d(dsr_t)/d(r_t) *
-         * d(r_t)/d(f_t)` is the chain rule Moody & Saffell's own RRL
-         * derivation uses, restricted here to `r_t`'s *immediate*
-         * dependence on `f_t` (the transaction-cost and funding terms) -
-         * not `r_{t+1}`'s dependence on `f_t` via next bar's
-         * mark-to-market term, which would require differentiating through
-         * a reward that hasn't happened yet. This one-bar-lookback-only
+         * other half [RrlAgent.update] needs to form `∇υ_t` for its EKF
+         * step (the other half being
+         * [RewardBreakdown.quadraticUtilityGradientWrtReward]); chaining
+         * the two via `d(υ_t)/d(f_t) = d(υ_t)/d(r_t) * d(r_t)/d(f_t)` is
+         * the same chain rule the paper's eq. 12 uses, restricted here to
+         * `r_t`'s *immediate* dependence on `f_t` (the transaction-cost and
+         * funding terms) - not `r_{t+1}`'s dependence on `f_t` via next
+         * bar's mark-to-market term, which would require differentiating
+         * through a reward that hasn't happened yet. This one-bar-lookback-only
          * gradient is the "RTRL-lite" simplification
          * `ESN_RRL_Agent_Task_Prompts.md` Prompt 6 calls for.
          *
@@ -156,13 +192,16 @@ class RewardEngine(
         }
     }
 
-    // EWMA first/second moments of the reward stream (a_t, b_t) - see the
-    // class doc's "Differential Sharpe ratio" section. Both start at 0:
-    // there is no prior reward history for a freshly constructed engine.
+    // a_t = µ_t (eq. 7's first moment), b_t used to derive σ_t² = b_t - a_t².
+    // Reused for both the (monitoring-only) dsr and the (training) quadratic
+    // utility - both are the same EWMA moments, per design doc §1: this
+    // class owns exactly one reward-moments estimate, not two that could
+    // drift out of sync. Both start at 0: there is no prior reward history
+    // for a freshly constructed engine.
     private var a: Double = 0.0
     private var b: Double = 0.0
 
-    /** One bar's reward, broken into its components, plus the differential Sharpe computed from it. */
+    /** One bar's reward, broken into its components, plus the quadratic utility and (monitoring-only) differential Sharpe computed from it. */
     data class RewardBreakdown(
         /** `r_t` - the full per-bar reward, `markToMarketPnl - transactionCost - fundingCost`. */
         val reward: Double,
@@ -172,30 +211,38 @@ class RewardEngine(
         val transactionCost: Double,
         /** `f_t · p_t · fundingRate_t · (barSpanMs / FundingSchedule.INTERVAL_MS)` - this bar's funding accrual (design doc §3). */
         val fundingCost: Double,
-        /** `dsr_t` - the differential Sharpe ratio, computed from `r_t` and the moments *before* this step folded it in. */
-        val differentialSharpe: Double,
+        /** `µ_t` - EWMA mean of the reward stream, pre-this-step (eq. 7). */
+        val expectedReturn: Double,
+        /** `σ_t²` - EWMA variance of the reward stream, pre-this-step (eq. 7). */
+        val variance: Double,
         /**
-         * `d(dsr_t)/d(r_t)`, evaluated at the same pre-step moments
-         * `a_{t-1}`/`b_{t-1}` used for [differentialSharpe] itself - the
-         * closed form `(b_{t-1} - a_{t-1}*r_t) / (b_{t-1}-a_{t-1}^2)^{3/2}`
-         * (Moody & Saffell 1998). [PolicyEngine] (Phase 5) is the only
-         * consumer: it needs this to perform gradient ascent on `dsr_t`
-         * without differentiating through `RewardEngine`'s internals
-         * itself, and it must be read from *this* call's breakdown - by
-         * the next [step] call, `a`/`b` have already advanced to
-         * `a_t`/`b_t` and this value would no longer correspond to
-         * [differentialSharpe] above.
+         * `υ_t = µ_t − (λ/2)σ_t²` (eq. 6) - the quadratic utility. This,
+         * not [differentialSharpe], is what [RrlAgent] is trained to
+         * maximise, via [quadraticUtilityGradientWrtReward].
          */
-        val differentialSharpeGradientWrtReward: Double,
+        val quadraticUtility: Double,
+        /**
+         * `dυ_t/dr_t = (1 − τ)·[1 − λ·(r_t − µ_t)]`, the derivative given
+         * directly under eq. 12 in the paper (with `τ` the same EWMA decay
+         * used for eq. 7's moments - the paper prints `η` there, which is
+         * a transcription slip for the `τ` defined two paragraphs earlier
+         * in the same subsection). [RrlAgent.update] multiplies this by
+         * [RewardEngine.positionGradient] (`dr_t/df_t`) and its own trace
+         * (`d f_t/d w_i`) to form `∇υ_t` for the EKF step.
+         */
+        val quadraticUtilityGradientWrtReward: Double,
+        /** `dsr_t` - kept for monitoring only (paper's own "trade freely if µt >= 0" rule) - not a training signal. */
+        val differentialSharpe: Double,
     )
 
     /**
-     * Computes one bar's reward and differential Sharpe ratio, and folds
-     * `r_t` into the internal `a_t`/`b_t` moments for the next call.
+     * Computes one bar's reward, quadratic utility, and (monitoring-only)
+     * differential Sharpe ratio, and folds `r_t` into the internal
+     * `a_t`/`b_t` moments for the next call.
      *
      * @param prevMidPrice reference (mid) price going into this bar, `p_{t-1}`.
      * @param currMidPrice reference (mid) price at this bar's close, `p_t`.
-     * @param prevPosition position held going into this bar, `f_{t-1}` (bounded `[-1, 1]` by [org.example.syncora.agent.PolicyEngine]; long positive, short negative).
+     * @param prevPosition position held going into this bar, `f_{t-1}` (bounded `[-1, 1]` by [RrlAgent]; long positive, short negative).
      * @param currPosition position held at this bar's close, `f_t`.
      * @param bid this bar's best bid, used for `δ_t`.
      * @param ask this bar's best ask, used for `δ_t`; must be `>= bid`.
@@ -230,7 +277,15 @@ class RewardEngine(
 
         val reward = markToMarketPnl - transactionCost - fundingCost
 
-        val (dsr, dsrGradient) = differentialSharpeAndGradient(reward)
+        // Pre-step moments (a_{t-1}, b_{t-1}) are what both the utility
+        // and its gradient are evaluated against, per eq. 6/7 and eq. 12.
+        val muPrev = a
+        val variancePrev = (b - a * a).coerceAtLeast(0.0)
+        val quadraticUtility = muPrev - 0.5 * riskAppetite * variancePrev
+        val quadraticUtilityGradient =
+            (1.0 - sharpeAdaptationRate) * (1.0 - riskAppetite * (reward - muPrev))
+
+        val dsr = differentialSharpe(reward)
         updateMoments(reward)
 
         return RewardBreakdown(
@@ -238,33 +293,27 @@ class RewardEngine(
             markToMarketPnl = markToMarketPnl,
             transactionCost = transactionCost,
             fundingCost = fundingCost,
+            expectedReturn = muPrev,
+            variance = variancePrev,
+            quadraticUtility = quadraticUtility,
+            quadraticUtilityGradientWrtReward = quadraticUtilityGradient,
             differentialSharpe = dsr,
-            differentialSharpeGradientWrtReward = dsrGradient,
         )
     }
 
     /**
-     * `dsr_t` and `d(dsr_t)/d(r_t)`, both computed from [r] and the moments
-     * as they stood *before* this bar - see class doc and
-     * [RewardBreakdown.differentialSharpeGradientWrtReward]. Both share the
-     * same `variance = b_{t-1} - a_{t-1}^2` denominator and the same
-     * "no prior variance estimate yet" warm-up convention (0.0 for both),
-     * so they're computed together rather than as two separate passes that
-     * could drift out of sync on the warm-up special case.
+     * `dsr_t`, computed from [r] and the moments as they stood *before*
+     * this bar - see class doc's "Differential Sharpe ratio" section.
+     * Monitoring-only: nothing downstream trains against this value
+     * anymore (see the class doc's redesign note).
      */
-    private fun differentialSharpeAndGradient(r: Double): Pair<Double, Double> {
+    private fun differentialSharpe(r: Double): Double {
         val variance = b - a * a
-        if (variance <= VARIANCE_FLOOR) return 0.0 to 0.0
+        if (variance <= VARIANCE_FLOOR) return 0.0
         val deltaA = r - a
         val deltaB = r * r - b
         val denom = variance.pow(1.5)
-        val dsr = (b * deltaA - 0.5 * a * deltaB) / denom
-        // d(dsr)/dr = (b_{t-1} - a_{t-1}*r) / (b_{t-1} - a_{t-1}^2)^{3/2},
-        // per the derivative of the numerator above w.r.t. r alone -
-        // b*(dDeltaA/dr) - 0.5*a*(dDeltaB/dr) = b*1 - 0.5*a*2r = b - a*r -
-        // over the same (already-computed) denominator.
-        val dsrGradient = (b - a * r) / denom
-        return dsr to dsrGradient
+        return (b * deltaA - 0.5 * a * deltaB) / denom
     }
 
     /** Folds [r] into the EWMA moments `a_t`/`b_t` for the next [step] call. */
