@@ -38,10 +38,11 @@ class TradingModeDialog(
     private val paperAccountContent: PaperTradingAccountPanel,
     private val paperHistoryContent: View,
     private val liveTradingContent: View,
+    private val agentContent: View,
     private val onExportReport: () -> Unit,
 ) : Dialog(context, R.style.TradingModalTheme) {
 
-    private enum class Screen { OPTIONS, PAPER_ACCOUNT, PAPER_HISTORY, LIVE }
+    private enum class Screen { OPTIONS, PAPER_ACCOUNT, PAPER_HISTORY, LIVE, AGENT }
 
     private companion object {
         // Android has no native 0-100% "blurriness" scale, so these two
@@ -237,6 +238,11 @@ class TradingModeDialog(
         showScreen(Screen.LIVE)
     }
 
+    /** Opens the dialog straight to the agent status/log screen, skipping the mode picker. */
+    fun showAgentScreen() {
+        showScreen(Screen.AGENT)
+    }
+
     private var currentScreen: Screen = Screen.OPTIONS
 
     /** Where the back chevron returns to from each screen - a shallow, one-level-deep back stack. */
@@ -268,6 +274,11 @@ class TradingModeDialog(
                 titleText.text = "Live Trading"
                 backButton.visibility = View.VISIBLE
                 contentContainer.addView(scrollableCopy(liveTradingContent))
+            }
+            Screen.AGENT -> {
+                titleText.text = "Agent"
+                backButton.visibility = View.VISIBLE
+                contentContainer.addView(scrollableCopy(agentContent))
             }
         }
     }
@@ -304,10 +315,19 @@ class TradingModeDialog(
             tintIcon = true,
             onClick = { showScreen(Screen.LIVE) },
         )
+        val agentRow = buildOptionRow(
+            title = "Agent",
+            subtitle = "Live ESN/RRL agent status and decision log",
+            iconRes = R.drawable.ic_mode_agentic,
+            tintIcon = true,
+            onClick = { showScreen(Screen.AGENT) },
+        )
 
         container.addView(paperRow)
         container.addView(divider())
         container.addView(liveRow)
+        container.addView(divider())
+        container.addView(agentRow)
         return container
     }
 

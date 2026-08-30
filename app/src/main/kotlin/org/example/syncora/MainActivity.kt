@@ -48,6 +48,7 @@ import org.example.syncora.chart.DrawingTool
 import org.example.syncora.onboarding.OnboardingActivity
 import org.example.syncora.onboarding.OnboardingPreferences
 import org.example.syncora.perf.PerformanceMonitor
+import org.example.syncora.ui.AgentStatusLogPanel
 import org.example.syncora.ui.DrawingContextToolbar
 import org.example.syncora.ui.DrawingToolsPanel
 import org.example.syncora.ui.HistoricalDataDialog
@@ -118,6 +119,7 @@ class MainActivity : AppCompatActivity() {
     private val paperTradingAccountPanel by lazy { PaperTradingAccountPanel(this) }
     private val paperTradingHistoryPanel by lazy { PaperTradingHistoryPanel(this) }
     private val liveTradePanel by lazy { LiveTradePanel(this) }
+    private val agentStatusLogPanel by lazy { AgentStatusLogPanel(this) }
     private lateinit var paragraphButton: RoundedIconButton
     private lateinit var connectivityBanner: LinearLayout
     private lateinit var connectivityBannerText: TextView
@@ -216,6 +218,7 @@ class MainActivity : AppCompatActivity() {
                 paperAccountContent = paperTradingAccountPanel,
                 paperHistoryContent = paperTradingHistoryPanel,
                 liveTradingContent = liveTradePanel,
+                agentContent = agentStatusLogPanel,
                 onExportReport = { exportPaperTradingReport() },
             ).show()
         }
@@ -344,6 +347,17 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 launch { watchConnectivity() }
+
+                // Prompt 7f's status/log panel: pushed, not polled - see
+                // AgentStatusLogPanel's own class doc. Scoped to STARTED
+                // like every other collector here, so it stops updating
+                // (and its Job is cancelled) while the activity isn't
+                // visible, then resumes cleanly on the next onStart();
+                // the underlying agent session itself keeps running at
+                // application scope regardless (see SyncoraApplication).
+                launch {
+                    agentStatusLogPanel.collectFrom(app.agentSessionController.decisionLog, this)
+                }
             }
         }
     }

@@ -1,6 +1,7 @@
 package org.example.syncora
 
 import android.app.Application
+import org.example.syncora.agent.AgentSessionController
 import org.example.syncora.bitget.BitgetFeeRateClient
 import org.example.syncora.bitget.BitgetFundingRateClient
 import org.example.syncora.bitget.BitgetLiveCredentialsStore
@@ -101,6 +102,24 @@ class SyncoraApplication : Application() {
         RiskSettingsStore(applicationContext)
     }
 
+    // The ESN/RRL agent (docs/agent-design-contract.md): drives its own
+    // guardrail-gated live session off the same kline/depth pipelines the
+    // chart renders from, and trades through paperTradingRepository's
+    // existing order path (see AgentSessionController's own doc). Lazy for
+    // the same reason every other field here is - constructing it touches
+    // no network and does at most one small on-disk checkpoint read, but
+    // there is no reason to pay even that before the agent panel is first
+    // shown.
+    val agentSessionController: AgentSessionController by lazy {
+        AgentSessionController(
+            context = applicationContext,
+            klines = pipeline.klines,
+            depthAt = { depthPipeline.depth.value },
+            barIntervalMsProvider = { pipeline.barDurationMillis.value },
+            paperTradingRepository = paperTradingRepository,
+        )
+    }
+
     // The exchange-side dead-man's-switch (design doc §2.2/§5): keeps a
     // resting stop-loss on Bitget's own book for any open live position, so
     // the position stays protected even if this process (and the foreground
@@ -128,6 +147,7 @@ class SyncoraApplication : Application() {
         tradeSocket.connect()
         liveTradingRepository.start()
         stopLossGuard.start(liveTradingRepository.positions)
+        agentSessionController.start()
     }
 
     /** Call only when the foreground service itself is being torn down, not on activity backgrounding. */
@@ -138,5 +158,6 @@ class SyncoraApplication : Application() {
         tradeSocket.disconnect()
         liveTradingRepository.stop()
         stopLossGuard.stop()
+        agentSessionController.stop()
     }
 }
