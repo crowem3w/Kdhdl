@@ -68,7 +68,7 @@ class BitgetTradingRestClient(
     private val credentialsProvider: () -> BitgetCredentials?,
     private val productType: String = "USDT-FUTURES",
     private val httpClient: OkHttpClient = OkHttpClient(),
-) : StopLossOrderClient {
+) {
     private companion object {
         const val TAG = "BitgetTradingRest"
         const val BASE_URL = "https://api.bitget.com"
@@ -206,7 +206,7 @@ class BitgetTradingRestClient(
      * avoiding slippage. `triggerType = "mark_price"` avoids false triggers
      * from a brief wick in the last-traded price.
      */
-    override suspend fun placeStopLoss(
+    suspend fun placeStopLoss(
         symbol: String,
         holdSide: PositionSide,
         triggerPrice: String,
@@ -235,7 +235,7 @@ class BitgetTradingRestClient(
      * exchange-side stop before placing another one (Bitget doesn't dedupe
      * these for you - placing twice results in two resting stops).
      */
-    override suspend fun fetchPendingStopLossOrders(symbol: String): List<StopLossOrder> {
+    suspend fun fetchPendingStopLossOrders(symbol: String): List<StopLossOrder> {
         val path = "/api/v2/mix/order/orders-plan-pending"
         val query = "symbol=$symbol&productType=$productType&planType=loss_plan"
         val json = get(path, query)
@@ -262,7 +262,7 @@ class BitgetTradingRestClient(
     }
 
     /** Cancels a resting stop-loss trigger order - `/api/v2/mix/order/cancel-plan-order`. */
-    override suspend fun cancelStopLoss(symbol: String, orderId: String) {
+    suspend fun cancelStopLoss(symbol: String, orderId: String) {
         val body = JSONObject().apply {
             put("marginCoin", "USDT")
             put("productType", productType)

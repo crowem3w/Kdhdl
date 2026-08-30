@@ -27,33 +27,10 @@ import kotlin.math.abs
  * continuously alongside it - most ticks are a no-op (the cached
  * known-good state below skips re-verifying a position that hasn't grown,
  * shrunk, or flipped side since it was last confirmed protected).
- *
- * ### Independence from the RRL agent (Prompt 8b, `docs/agent-design-
- * contract.md` §2)
- * Nothing in this class - its constructor, [start]'s input, or [reconcile]/
- * [ensureProtected] - reads anything produced by
- * [org.example.syncora.agent.AgentOrchestrator],
- * [org.example.syncora.agent.PolicyEngine], or
- * [org.example.syncora.agent.PositionOrderEmitter]. [start] is fed
- * [LiveTradingRepository.positions] - the exchange's own reported position
- * state - not any agent decision stream, so this guard places its stop for
- * *whatever* position is actually open, however it got opened (agent,
- * manual trade, or otherwise), regardless of whether the agent is running,
- * healthy, or has an opinion at all. [client] and [riskSettingsStore] are
- * taken as the small interfaces [StopLossOrderClient]/[StopLossPercentSource]
- * rather than concrete Bitget/Android types specifically so this
- * independence is exercisable in a plain unit test (see
- * `ExchangeStopIndependenceTest`) without a network call or a real
- * [android.content.Context].
- *
- * @param client Where the resting stop is actually placed/inspected/cancelled - see [StopLossOrderClient]. Production callers pass a [BitgetTradingRestClient] pinned to [BitgetEnvironment.LIVE]; see [org.example.syncora.SyncoraApplication.stopLossGuard] for the exact wiring.
- * @param riskSettingsStore Supplies [StopLossPercentSource.stopLossPercent] - see that property's doc.
- * @param scope Where [start]'s collector runs - defaults to a fresh guard-owned `Dispatchers.IO` scope for production use, same shape every other long-lived `scope` field in this codebase uses (e.g. [org.example.syncora.agent.AgentLiveSession]). Overridable so a test can inject a [kotlinx.coroutines.test.TestScope] and drive [start]'s collection deterministically instead of racing a real background dispatcher.
  */
 class StopLossGuard(
-    private val client: StopLossOrderClient,
-    private val riskSettingsStore: StopLossPercentSource,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    private val credentialsStore: BitgetLiveCredentialsStore,
+    private val riskSettingsStore: RiskSettingsStore,
 ) {
     private companion object {
         const val TAG = "StopLossGuard"
@@ -70,6 +47,18 @@ class StopLossGuard(
         const val SIZE_DRIFT_TOLERANCE = 0.0005
     }
 
+    // Independent client/credentials read from the same encrypted store as
+    // LiveTradingRepository, but this guard does not depend on
+    // LiveTradingRepository being the one running - it only needs read
+    // access to positions (via [start]'s StateFlow) and its own ability to
+    // place/cancel orders, so it keeps working even if that repository's
+    // polling is torn down first during a shutdown sequence.
+    private val client = BitgetTradingRestClient(
+        environment = { BitgetEnvironment.LIVE },
+        credentialsProvider = { credentialsStore.load() },
+    )
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
 
     private data class GuardedState(val sizeInBaseCoin: Double, val verifiedAtMs: Long)

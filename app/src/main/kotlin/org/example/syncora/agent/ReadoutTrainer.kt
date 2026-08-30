@@ -230,4 +230,30 @@ class ReadoutTrainer(
         for (p in covariance) if (!p.isFinite()) return false
         return true
     }
+
+    /**
+     * The largest absolute value anywhere in the RLS covariance matrix `P`.
+     * Phase 7's guardrail hardening (`ESN_RRL_Agent_Task_Prompts.md`
+     * Prompt 8, "RLS divergence (e.g. covariance blow-up)") needs this as a
+     * *magnitude* check, not just [isStable]'s finiteness check: `P` can
+     * grow unboundedly large while every entry stays finite right up until
+     * the step it overflows, and a covariance that has already grown to,
+     * say, `1e30` is diverging in every practical sense even though
+     * [isStable] would still report `true` for it. `P` starts at
+     * `initialCovarianceScale * I` (see class doc) and a healthy RLS run
+     * keeps it bounded near that scale or shrinking as the forgetting
+     * factor discounts old information, so a caller-supplied ceiling a few
+     * orders of magnitude above `initialCovarianceScale` is a meaningful,
+     * cheap-to-check early-warning signal that fires well before
+     * [isStable] would.
+     */
+    fun covarianceMagnitude(): Float {
+        var maxAbs = 0f
+        for (p in covariance) {
+            if (!p.isFinite()) return Float.POSITIVE_INFINITY // non-finite is "more diverged than any finite ceiling", never silently masked by a stale max
+            val a = kotlin.math.abs(p)
+            if (a > maxAbs) maxAbs = a
+        }
+        return maxAbs
+    }
 }

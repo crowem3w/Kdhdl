@@ -119,12 +119,6 @@ class AgentSoakTest {
                     orderSink = ledger,
                     currentPosition = { ledger.currentPosition() },
                     maxPositionSizeBaseCoin = maxPositionSizeBaseCoin,
-                    // Generous relative to fixtureKlines' ~50_000 starting price and its
-                    // bounded per-bar drift - Prompt 8a's caps aren't what this soak is
-                    // exercising, so sized so as not to bind here (see PositionOrderEmitterTest
-                    // for the caps' own dedicated coverage).
-                    maxNotionalUsdt = maxPositionSizeBaseCoin * 50_000.0 * 10.0,
-                    referencePrice = { ledger.currentMidPrice },
                     leverage = 3,
                 )
             },
@@ -321,8 +315,6 @@ class AgentSoakTest {
                     orderSink = ledger,
                     currentPosition = { ledger.currentPosition() },
                     maxPositionSizeBaseCoin = 0.01,
-                    maxNotionalUsdt = 0.01 * 50_000.0 * 10.0, // generous - see the other call site's comment
-                    referencePrice = { ledger.currentMidPrice },
                 )
             },
             policyNHidden = nHidden,

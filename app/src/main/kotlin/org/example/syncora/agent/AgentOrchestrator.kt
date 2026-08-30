@@ -404,6 +404,29 @@ class AgentOrchestrator(
      *
      * @param savedAtMs Wall-clock capture time, epoch millis - diagnostic only.
      */
+    /**
+     * True iff [readoutTrainer] and [policyEngine]'s own internal state is
+     * finite right now - Phase 7's guardrail hardening (`ESN_RRL_Agent_Task_Prompts.md`
+     * Prompt 8) checks this after every live bar, in addition to the
+     * per-bar [BarStepResult.stable] already folded into [runBacktest]'s
+     * aggregate [BacktestResult.stable], because [processLiveBar] (unlike
+     * [runBacktest]) has no aggregate result to report it through - a
+     * guardrail supervisor sitting outside this class needs its own way to
+     * ask "is the chain still healthy" after each individual live bar.
+     */
+    fun isStable(): Boolean = readoutTrainer.isStable() && policyEngine.isStable()
+
+    /**
+     * Passthrough to [ReadoutTrainer.covarianceMagnitude] - Phase 7's
+     * "RLS divergence (e.g. covariance blow-up)" failure mode is detected
+     * by a guardrail supervisor reading this after each live bar, the same
+     * way [isStable] is. Kept as a passthrough rather than folded into
+     * [isStable] itself because a magnitude *ceiling* is a policy decision
+     * (how much growth is still healthy) that belongs to the guardrail
+     * layer, not to this class or [ReadoutTrainer].
+     */
+    fun readoutCovarianceMagnitude(): Float = readoutTrainer.covarianceMagnitude()
+
     fun currentCheckpoint(savedAtMs: Long = System.currentTimeMillis()): AgentCheckpoint = AgentCheckpoint(
         savedAtMs = savedAtMs,
         reservoirState = reservoir.currentState().copyOf(),
