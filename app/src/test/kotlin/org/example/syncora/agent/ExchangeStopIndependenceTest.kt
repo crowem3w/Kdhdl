@@ -55,7 +55,9 @@ import kotlin.math.abs
  */
 class ExchangeStopIndependenceTest {
 
-    private val nHidden = 40
+    // Must be >= ReservoirWeights.MIN_N_HIDDEN (50, per Phase 2's design -
+    // ReservoirEngine.kt) or ReservoirWeights.randomWeights throws.
+    private val nHidden = 50
 
     // ---- Fakes for Prompt 8b's own new interfaces (StopLossOrderClient / StopLossPercentSource) ----
 

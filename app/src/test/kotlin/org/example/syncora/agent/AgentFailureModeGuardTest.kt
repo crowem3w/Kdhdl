@@ -23,7 +23,9 @@ import org.junit.Test
  */
 class AgentFailureModeGuardTest {
 
-    private val nHidden = 30
+    // Must be >= ReservoirWeights.MIN_N_HIDDEN (50, per Phase 2's design -
+    // ReservoirEngine.kt) or ReservoirWeights.randomWeights throws.
+    private val nHidden = 50
 
     /** Same shape as `AgentKillSwitchTest`'s stub - records calls and tracks the resulting position. */
     private class StubPaperTradingAccount : PaperOrderSink {

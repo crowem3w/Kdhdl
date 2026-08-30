@@ -40,7 +40,9 @@ import java.util.concurrent.TimeUnit
  */
 class AgentKillSwitchTest {
 
-    private val nHidden = 30
+    // Must be >= ReservoirWeights.MIN_N_HIDDEN (50, per Phase 2's design -
+    // ReservoirEngine.kt) or ReservoirWeights.randomWeights throws.
+    private val nHidden = 50
 
     /** Same shape as `PositionOrderEmitterTest`'s stub - records calls and tracks the resulting position so a flatten's effect is directly observable. */
     private class StubPaperTradingAccount : PaperOrderSink {
