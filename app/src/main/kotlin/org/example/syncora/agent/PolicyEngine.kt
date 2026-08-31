@@ -97,6 +97,7 @@ class PolicyEngine(
     val beta: Float = EkfWeightUpdater.DEFAULT_BETA,
     val tau: Float = EkfWeightUpdater.DEFAULT_TAU,
     val weightClip: Float = DEFAULT_WEIGHT_CLIP,
+    val feedbackL1Margin: Float = DEFAULT_FEEDBACK_L1_MARGIN,
     initialWeights: FloatArray? = null,
     seed: Long = 0L,
 ) {
@@ -108,6 +109,29 @@ class PolicyEngine(
         const val DEFAULT_MAX_WEIGHT_DELTA = 0.5f
         /** Initial weights are drawn uniformly from `[-INIT_SCALE, INIT_SCALE]` - small, to start near `f_t ≈ 0` (flat) rather than pinned at ±1 from the first bar. */
         const val DEFAULT_INIT_SCALE = 0.05f
+
+        /**
+         * Upper bound on `Σ_k |w_backK|` (the trained weights on the own-
+         * output feedback slots `f_{t-1}, ..., f_{t-nBack}` - not to be
+         * confused with [ReservoirEngine]'s fixed, untrained `W_back`).
+         * This is the BIBO-stability margin for the RTRL trace recursion
+         * `d(f_t)/d(w_i) = dtanh * (regressor_i + Σ_k w_backK * d(f_{t-1-k})/d(w_i))`:
+         * treating the recursion as a linear time-varying IIR filter with
+         * per-step gain `dtanh_t ∈ [0, 1]`, the worst case (`dtanh_t ≡ 1`,
+         * unsaturated `f_t`) is BIBO-stable iff `Σ_k |w_backK| < 1`. Kept
+         * strictly below `1` (not just clipped to it) as margin against the
+         * `dtanh_t ≈ 1` worst case actually being hit repeatedly in a row.
+         * [DEFAULT_WEIGHT_CLIP] alone (`5f`) does not enforce this - it
+         * bounds each weight individually, not their sum - and the EKF's
+         * large early-training gain (small `beta`, so a large initial `P`)
+         * can walk `w_backK` past this threshold within a handful of bars,
+         * which blows the trace up geometrically every subsequent step
+         * until `f_t` saturates at `±1` (`dtanh_t → 0`) and the policy goes
+         * permanently dead: gradients vanish, so it can never train its way
+         * back out. See [update]'s feedback-projection step, which this
+         * constant bounds.
+         */
+        const val DEFAULT_FEEDBACK_L1_MARGIN = 0.95f
     }
 
     /** Regressor width: reservoir state (`nHidden`) + own-output feedback (`nBack`) + bias (1). No readout-forecast slot - see the class doc's gap-closure #2 note. */
@@ -123,6 +147,9 @@ class PolicyEngine(
         require(nHidden >= 1) { "nHidden must be >= 1, was $nHidden" }
         require(nBack >= 0) { "nBack must be >= 0, was $nBack" }
         require(weightClip > 0f) { "weightClip must be > 0, was $weightClip" }
+        require(feedbackL1Margin > 0f && feedbackL1Margin < 1f) {
+            "feedbackL1Margin must be in (0, 1) to guarantee RTRL trace stability, was $feedbackL1Margin"
+        }
         // beta/tau are validated by EkfWeightUpdater's own init block below.
     }
 
@@ -260,6 +287,38 @@ class PolicyEngine(
             val updated = (weights[i] + d).coerceIn(-weightClip, weightClip)
             weights[i] = updated
             i++
+        }
+
+        projectFeedbackWeights()
+    }
+
+    /**
+     * Rescales the own-output feedback weights (`weights[feedbackBase]`
+     * through `weights[feedbackBase + nBack - 1]`) back onto the L1 ball of
+     * radius [feedbackL1Margin] whenever the EKF step above has walked
+     * their sum-of-magnitudes past it. [DEFAULT_WEIGHT_CLIP] bounds each
+     * weight individually and does nothing to stop their *sum* from
+     * exceeding the RTRL trace recursion's stability threshold - see
+     * [DEFAULT_FEEDBACK_L1_MARGIN]'s doc. Rescaling (not independently
+     * re-clipping each entry) preserves the EKF's chosen *direction* for
+     * this update, only shrinking its magnitude, and is a no-op on the
+     * (overwhelmingly common) steps where the sum is already under the
+     * margin.
+     */
+    private fun projectFeedbackWeights() {
+        if (nBack == 0) return
+        var sumAbs = 0f
+        var k = 0
+        while (k < nBack) {
+            sumAbs += kotlin.math.abs(weights[feedbackBase + k])
+            k++
+        }
+        if (sumAbs <= feedbackL1Margin || sumAbs <= 0f) return
+        val scale = feedbackL1Margin / sumAbs
+        k = 0
+        while (k < nBack) {
+            weights[feedbackBase + k] *= scale
+            k++
         }
     }
 

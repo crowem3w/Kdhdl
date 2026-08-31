@@ -47,6 +47,7 @@ class EkfWeightUpdater(
     val nWeights: Int,
     val beta: Float = DEFAULT_BETA,
     val tau: Float = DEFAULT_TAU,
+    val maxCovarianceMagnitude: Float = DEFAULT_MAX_COVARIANCE_MAGNITUDE,
 ) {
     companion object {
         /** Ridge penalty - `P` is initialized to `I / beta`, same large-prior-covariance spirit as [ReadoutTrainer.DEFAULT_INITIAL_COVARIANCE_SCALE] (there, `P_0 = initialCovarianceScale * I`; here it's the reciprocal, per the paper's `β` convention). */
@@ -54,6 +55,37 @@ class EkfWeightUpdater(
 
         /** Exponential decay - analogous role to [ReadoutTrainer.DEFAULT_FORGETTING_FACTOR], but appears differently in this recursion's algebra (dividing/multiplying `P` rather than a single `lambda` blend), per the paper's EKF formulation. */
         const val DEFAULT_TAU = 0.995f
+
+        /**
+         * Ceiling on the largest absolute entry of `P`, checked (and, if
+         * exceeded, rescaled back down to) after every [computeDelta] call
+         * *and* at construction. Necessary because this recursion has no
+         * mechanism that shrinks `P` in a direction that never gets excited
+         * - unlike a textbook forgetting-factor RLS, this class's "variance
+         * stabilization" step (see the class doc) exactly cancels `P`'s
+         * natural `1/τ` growth, so an unexcited direction's entry simply
+         * *stays* at its initial `1/β` value forever rather than growing OR
+         * shrinking. A small `β` (the paper's own default is `0.01`, i.e.
+         * `P_0` entries of `100`) then means any later, even tiny, signal
+         * that leaks into that direction - real market signal or plain
+         * float rounding - gets multiplied by that stale `100`, producing a
+         * single wildly oversized weight update, which promptly corrupts
+         * every other direction's covariance too through the rank-one
+         * downdate below. This is not a precision artifact fixable by using
+         * `Double`: the same cascade reproduces at `Double` precision too
+         * (just after more steps, since it takes longer for a smaller
+         * rounding floor to compound through repeated ~100x amplification)
+         * - it is the recursion's actual numerical behavior for any
+         * regressor with a persistently unexcited or near-degenerate
+         * direction, which realistic feature vectors can absolutely
+         * contain. Capping `P` bounds the worst-case single-step
+         * amplification directly, independent of how small `β` is asked to
+         * be. `5f` matches [PolicyEngine.DEFAULT_WEIGHT_CLIP]'s scale - a
+         * covariance entry meaningfully larger than the weight range it's
+         * estimating uncertainty for isn't a useful prior, it's already in
+         * the regime that produces this failure mode.
+         */
+        const val DEFAULT_MAX_COVARIANCE_MAGNITUDE = 5f
 
         // Guards q: mathematically q = 1 + gradᵀ P grad / tau >= 1 whenever P
         // is positive semi-definite (which it is by construction - diagonal
@@ -67,12 +99,16 @@ class EkfWeightUpdater(
         require(nWeights >= 1) { "nWeights must be >= 1, was $nWeights" }
         require(beta > 0f) { "beta must be > 0, was $beta" }
         require(tau > 0f) { "tau must be > 0, was $tau" }
+        require(maxCovarianceMagnitude > 0f) { "maxCovarianceMagnitude must be > 0, was $maxCovarianceMagnitude" }
     }
 
     // P is nWeights x nWeights, flat row-major, symmetric - same discipline
-    // as ReadoutTrainer's RLS covariance matrix.
+    // as ReadoutTrainer's RLS covariance matrix. Initial diagonal is
+    // min(1/beta, maxCovarianceMagnitude) - see DEFAULT_MAX_COVARIANCE_MAGNITUDE's
+    // doc for why an uncapped 1/beta is itself the seed of the instability,
+    // not just something the per-step cap below needs to correct for later.
     private val covariance: FloatArray = FloatArray(nWeights * nWeights).also { p ->
-        val diag = 1f / beta
+        val diag = minOf(1f / beta, maxCovarianceMagnitude)
         var i = 0
         while (i < nWeights) {
             p[i * nWeights + i] = diag
@@ -152,7 +188,28 @@ class EkfWeightUpdater(
             i++
         }
 
+        clampCovarianceMagnitude()
+
         return kScratch
+    }
+
+    /**
+     * Rescales the entire covariance matrix down (preserving its direction/
+     * shape, only shrinking its overall scale) whenever its largest-magnitude
+     * entry exceeds [maxCovarianceMagnitude] - see that constant's doc for
+     * why this is necessary every step, not just at construction. A no-op
+     * on the (overwhelmingly common) steps where every entry is already
+     * under the cap.
+     */
+    private fun clampCovarianceMagnitude() {
+        var maxAbs = 0f
+        for (p in covariance) {
+            val a = kotlin.math.abs(p)
+            if (a > maxAbs) maxAbs = a
+        }
+        if (maxAbs <= maxCovarianceMagnitude || maxAbs <= 0f) return
+        val scale = maxCovarianceMagnitude / maxAbs
+        for (idx in covariance.indices) covariance[idx] *= scale
     }
 
     /** Dot product of `row` (a length-[nWeights] slice of a flat matrix starting at [base]) with [x]. */
