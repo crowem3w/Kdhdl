@@ -50,25 +50,40 @@ import kotlin.math.sqrt
  * ### The chain, per bar
  * 1. [FeatureAssembler.assemble] -> `u_t` (Phase 1).
  * 2. [ReservoirEngine.step] -> `x_t` (Phase 2).
- * 3. [ReadoutTrainer.predict] against `x_t` -> a one-step-ahead forecast of
- *    the *next* bar's return, made with no look-ahead (Phase 3) - used
- *    both as [PolicyEngine]'s forecast input for this bar's decision and,
- *    one bar later, as the supervised target [ReadoutTrainer.update]
- *    trains against once that forecast's actual outcome is known (the same
- *    predict-then-update-next-bar ordering `ReadoutBacktestTest`
- *    establishes for Phase 3).
- * 4. [PolicyEngine.step] against `x_t` and that forecast -> `f_t`,
- *    this bar's bounded position (Phase 5).
- * 5. [RewardEngine.step] against `f_{t-1}`/`f_t` and this bar's
+ * 3. [PolicyEngine.step] against `x_t` alone -> `f_t`, this bar's bounded
+ *    position (Phase 5). Per gap-closure #2, [ReadoutTrainer] has no role
+ *    in this decision - see the "Readout: diagnostics only" note below.
+ * 4. [RewardEngine.step] against `f_{t-1}`/`f_t` and this bar's
  *    price/cost/funding inputs -> `r_t` and `dsr_t` (Phase 4).
- * 6. [PolicyEngine.update], via [RewardEngine.RewardBreakdown.differentialSharpeGradientWrtReward]
+ * 5. [PolicyEngine.update], via [RewardEngine.RewardBreakdown.differentialSharpeGradientWrtReward]
  *    and [RewardEngine.positionGradient] - closes the loop, training the
  *    policy online against the bar it just decided.
  *
- * Every one of those six numbers, per bar, is captured in [DecisionLog] -
+ * Every one of those numbers, per bar, is captured in [DecisionLog] -
  * "logging every feature vector, reservoir state, position decision, and
  * reward for later audit" (Prompt 6) - so a full run is reconstructable
  * after the fact without rerunning it.
+ *
+ * ### Readout: diagnostics only (gap-closure #2)
+ * [ReadoutTrainer] trains `W_out` via RLS against next-bar return, per
+ * Phase 3. The source paper (§III-B1) is explicit that no such regression
+ * layer belongs in the decision path: "No such regression layer is
+ * trained - the augmented state `z_t` is passed straight into the
+ * reinforcement learning agent." Accordingly, [readoutTrainer]'s forecast
+ * is **never** passed to [PolicyEngine.step] - [PolicyEngine] takes only
+ * the reservoir state. [readoutTrainer] is retained solely as an optional,
+ * clearly-labeled diagnostic: when [diagnosticsOnly] is `true` (the
+ * default), this class still calls [ReadoutTrainer.predict]/[ReadoutTrainer.update]
+ * every bar purely so [DecisionLog.readoutForecast] and
+ * [readoutCovarianceMagnitude]/[AgentGuardrails]'s RLS-divergence check
+ * keep working for offline analysis of "would a supervised proxy have
+ * helped" - but nothing computed there feeds back into `f_t`. When
+ * [diagnosticsOnly] is `false`, this class never calls a [ReadoutTrainer]
+ * method at all (see `AgentOrchestratorBacktestTest`'s regression test),
+ * [DecisionLog.readoutForecast] is reported as `Float.NaN` for that run,
+ * and [readoutCovarianceMagnitude] reads whatever stale covariance
+ * [readoutTrainer] was constructed with (typically its untouched initial
+ * value) since it is never updated.
  */
 class AgentOrchestrator(
     private val featureAssembler: FeatureAssembler,
@@ -76,6 +91,16 @@ class AgentOrchestrator(
     private val readoutTrainer: ReadoutTrainer,
     private val rewardEngine: RewardEngine,
     private val policyEngine: PolicyEngine,
+    /**
+     * Gates whether [readoutTrainer] is exercised at all - see the class
+     * doc's "Readout: diagnostics only" section. `true` (the default)
+     * preserves the pre-gap-closure-#2 observable behavior of
+     * [DecisionLog.readoutForecast]/[readoutCovarianceMagnitude] for
+     * callers relying on them, while still guaranteeing [readoutTrainer]
+     * never influences [PolicyEngine]. `false` removes [ReadoutTrainer]
+     * from the per-bar loop entirely.
+     */
+    private val diagnosticsOnly: Boolean = true,
 ) {
     /** Everything about one bar's decision, kept for audit - see class doc. */
     data class DecisionLog(
@@ -83,6 +108,13 @@ class AgentOrchestrator(
         val startTime: Long,
         val features: FloatArray,
         val reservoirState: FloatArray,
+        /**
+         * [ReadoutTrainer.predict]'s forecast for this bar, purely
+         * diagnostic (gap-closure #2 - see the class doc) - `Float.NaN`
+         * when [diagnosticsOnly] is `false` for this orchestrator, since
+         * the readout is never invoked in that mode. Never fed into
+         * [PolicyEngine.step] regardless of [diagnosticsOnly].
+         */
         val readoutForecast: Float,
         val previousPosition: Float,
         val position: Float,
@@ -243,11 +275,11 @@ class AgentOrchestrator(
     )
 
     /**
-     * One bar's full Phase 1-5 chain - [FeatureAssembler] ->
-     * [ReservoirEngine] -> [ReadoutTrainer] -> [RewardEngine] ->
-     * [PolicyEngine] - exactly as the class doc's six-step list describes,
-     * threading [state] forward exactly the way [runBacktest]'s own
-     * for-loop used to inline.
+     * One bar's full chain - [FeatureAssembler] -> [ReservoirEngine] ->
+     * [PolicyEngine] -> [RewardEngine], with [ReadoutTrainer] running
+     * alongside as a diagnostics-only signal (gap-closure #2) - exactly as
+     * the class doc's step list describes, threading [state] forward
+     * exactly the way [runBacktest]'s own for-loop used to inline.
      *
      * This is the *single* implementation of that chain in this class.
      * [runBacktest] and [processLiveBar] both call it and nothing else -
@@ -271,19 +303,27 @@ class AgentOrchestrator(
         val u = featureAssembler.assemble(klinesSoFar, depth, nowMs)
         val reservoirState = reservoir.step(u).copyOf() // copy: this bar's audit log must survive the next step() call reusing the buffer
 
-        // Complete last bar's forecast now that this bar's actual return is known.
-        val prior = state.previousReservoirState
-        if (prior != null) {
-            val actualReturn = u[FeatureAssembler.RETURN_INDEX]
-            readoutTrainer.update(prior, floatArrayOf(actualReturn))
+        // Readout: diagnostics only (gap-closure #2 - see the class doc).
+        // Never gates or feeds PolicyEngine.step below, whether or not
+        // diagnosticsOnly is enabled.
+        val forecast = if (diagnosticsOnly) {
+            // Complete last bar's forecast now that this bar's actual return is known.
+            val prior = state.previousReservoirState
+            if (prior != null) {
+                val actualReturn = u[FeatureAssembler.RETURN_INDEX]
+                readoutTrainer.update(prior, floatArrayOf(actualReturn))
+            }
+
+            // Forecast the *next* bar's return from this bar's state - no
+            // look-ahead. Logged for offline analysis only; PolicyEngine
+            // never sees it.
+            readoutTrainer.predict(reservoirState)[0]
+        } else {
+            Float.NaN
         }
 
-        // Forecast the *next* bar's return from this bar's state - no
-        // look-ahead, and what PolicyEngine decides f_t from.
-        val forecast = readoutTrainer.predict(reservoirState)[0]
-
         val prevPosition = policyEngine.currentPosition()
-        val currPosition = policyEngine.step(reservoirState, forecast)
+        val currPosition = policyEngine.step(reservoirState)
 
         val bids = depth.bids
         val asks = depth.asks
@@ -318,7 +358,7 @@ class AgentOrchestrator(
         )
         policyEngine.update(breakdown.differentialSharpeGradientWrtReward, dRewardDPosition)
 
-        val stable = readoutTrainer.isStable() && policyEngine.isStable() && breakdown.reward.isFinite()
+        val stable = (!diagnosticsOnly || readoutTrainer.isStable()) && policyEngine.isStable() && breakdown.reward.isFinite()
         val traded = kotlin.math.abs(currPosition - prevPosition) > tradeThreshold
 
         val log = DecisionLog(
@@ -346,12 +386,13 @@ class AgentOrchestrator(
 
     /**
      * Prompt 7b's live inference loop. Wires one live bar-close event -
-     * [LiveBarCloseSubscriber]'s output (Prompt 7a) - into the full
-     * Phase 1-5 chain via [processBar], the exact same call [runBacktest]
-     * makes for every offline bar: same [FeatureAssembler.assemble] ->
-     * [ReservoirEngine.step] -> [ReadoutTrainer.predict]/`update` ->
-     * [RewardEngine.step] -> [PolicyEngine.step]/`update` sequence,
-     * producing a fresh reservoir state, an online-RLS-updated `W_out`,
+     * [LiveBarCloseSubscriber]'s output (Prompt 7a) - into the full chain
+     * via [processBar], the exact same call [runBacktest] makes for every
+     * offline bar: same [FeatureAssembler.assemble] -> [ReservoirEngine.step]
+     * -> [PolicyEngine.step]/`update` -> [RewardEngine.step] sequence
+     * (with [ReadoutTrainer.predict]/`update` alongside it purely as a
+     * diagnostics-only signal when [diagnosticsOnly] is `true` - see the
+     * class doc's gap-closure #2 note), producing a fresh reservoir state
      * and a new target position `f_t` for this bar.
      *
      * Order emission, checkpoint persistence, and the status UI are
@@ -413,8 +454,15 @@ class AgentOrchestrator(
      * [runBacktest]) has no aggregate result to report it through - a
      * guardrail supervisor sitting outside this class needs its own way to
      * ask "is the chain still healthy" after each individual live bar.
+     *
+     * When [diagnosticsOnly] is `false`, [readoutTrainer] is never updated
+     * by [processBar] (see the class doc's gap-closure #2 note), so its own
+     * [ReadoutTrainer.isStable] trivially stays `true` on its untouched
+     * initial state - this method's result then reduces to
+     * [PolicyEngine.isStable], which is the only thing gap-closure #2's
+     * decision path can actually make unstable.
      */
-    fun isStable(): Boolean = readoutTrainer.isStable() && policyEngine.isStable()
+    fun isStable(): Boolean = (!diagnosticsOnly || readoutTrainer.isStable()) && policyEngine.isStable()
 
     /**
      * Passthrough to [ReadoutTrainer.covarianceMagnitude] - Phase 7's
@@ -424,6 +472,12 @@ class AgentOrchestrator(
      * [isStable] itself because a magnitude *ceiling* is a policy decision
      * (how much growth is still healthy) that belongs to the guardrail
      * layer, not to this class or [ReadoutTrainer].
+     *
+     * When [diagnosticsOnly] is `false`, [readoutTrainer] is never updated
+     * (gap-closure #2), so this reads whatever covariance it was
+     * constructed with (typically its untouched `initialCovarianceScale * I`)
+     * for the lifetime of this orchestrator - a divergence check against a
+     * readout that isn't running is a no-op by construction, not a bug.
      */
     fun readoutCovarianceMagnitude(): Float = readoutTrainer.covarianceMagnitude()
 

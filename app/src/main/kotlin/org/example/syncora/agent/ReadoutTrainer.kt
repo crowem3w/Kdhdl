@@ -17,6 +17,20 @@ package org.example.syncora.agent
  * until Phase 4. Nothing here is a trading decision; `W_out` is purely a
  * regression readout.
  *
+ * ### Gap-closure #2: diagnostics only, not part of the decision path
+ * Per the source paper (§III-B1), no trained readout belongs between the
+ * reservoir and the policy - "the augmented state `z_t` is passed straight
+ * into the reinforcement learning agent." [org.example.syncora.agent.AgentOrchestrator]
+ * therefore never passes this class's [predict] output to
+ * [org.example.syncora.agent.PolicyEngine.step]; it is retained purely as
+ * an optional, explicitly-labeled `diagnosticsOnly` signal (see
+ * [org.example.syncora.agent.AgentOrchestrator]'s class doc) for offline
+ * analysis of whether a supervised proxy would have helped, and for the
+ * RLS-covariance-divergence guardrail check. Nothing in this class changed
+ * to make that true - it was always just a regression readout - what
+ * changed is that its caller no longer wires its output into a trading
+ * decision.
+ *
  * ### The RLS update
  * Given the augmented regressor `x_t` (the reservoir state, plus a
  * trailing bias entry if [includeBias]) and observed target `y_t`:

@@ -7,21 +7,31 @@ import kotlin.random.Random
  * The Recurrent Reinforcement Learning (RRL) trading policy (see the
  * reference architecture diagram / `docs/agent-design-contract.md` and
  * Borrageiro, Firoozye & Barucca 2022, subsection III-B2). This is Phase 5:
- * it sits on top of three fixed building blocks -
- * [ReservoirEngine]'s hidden state `x_t` (Phase 2), [ReadoutTrainer]'s
- * one-step-ahead return forecast `ŷ_t` (Phase 3), and [RewardEngine]'s
- * `dsr_t` utility signal and its gradient helpers (Phase 4) - and produces
- * a single bounded position `f_t ∈ [-1, 1]`.
+ * it sits on top of two fixed building blocks - [ReservoirEngine]'s hidden
+ * state `x_t` (Phase 2) and [RewardEngine]'s `dsr_t` utility signal and its
+ * gradient helpers (Phase 4) - and produces a single bounded position
+ * `f_t ∈ [-1, 1]`.
+ *
+ * ### Gap-closure #2: no trained readout in the regressor
+ * Earlier revisions of this class also took [ReadoutTrainer]'s one-step-
+ * ahead return forecast `ŷ_t` as a regressor input. Per the source paper
+ * (§III-B1): "No such regression layer is trained - the augmented state
+ * `z_t` is passed straight into the reinforcement learning agent." This
+ * class no longer has any parameter, slot, or trace term for a readout
+ * forecast - [ReadoutTrainer] has no role in the online decision loop, full
+ * stop. (It may still run purely as an optional diagnostic/backtest signal
+ * upstream, gated behind a `diagnosticsOnly` flag - see
+ * [AgentOrchestrator] - but nothing it produces reaches this class.)
  *
  * ### Architecture: reservoir state + the diagram's own-output feedback path
  * The reference diagram feeds a network's own recent outputs `{ŷ_j}` for
  * `j` from `t-n_back` to `t-1` back into the reservoir via `W_back`. This
  * class reuses exactly that pattern, but applied to the *policy's own*
  * output stream: `f_t` is a `tanh`-squashed linear combination of the
- * reservoir state `x_t`, the readout's forecast `ŷ_t`, and the policy's
- * own last `nBack` positions `f_{t-1}, ..., f_{t-nBack}` -
+ * reservoir state `x_t` and the policy's own last `nBack` positions
+ * `f_{t-1}, ..., f_{t-nBack}` -
  * ```
- * z_t = w · [x_t, ŷ_t, f_{t-1}, ..., f_{t-nBack}, 1]
+ * z_t = w · [x_t, f_{t-1}, ..., f_{t-nBack}, 1]
  * f_t = tanh(z_t)
  * ```
  * `tanh` is what makes `f_t ∈ [-1, 1]` a hard guarantee, not a clamp -
@@ -39,7 +49,7 @@ import kotlin.random.Random
  * `f_t`, not `r_{t+1}`'s). The third factor, `d(f_t)/d(w_i)`, is what this
  * class computes itself via **real-time recurrent learning restricted to
  * the feedback path**: because `f_t` depends on `w` both directly (through
- * `x_t`/`ŷ_t`/bias) and indirectly through `f_{t-1}, ..., f_{t-nBack}`
+ * `x_t`/bias) and indirectly through `f_{t-1}, ..., f_{t-nBack}`
  * (which are themselves functions of `w` from earlier steps), the total
  * derivative needs the chain rule through that recurrence:
  * ```
@@ -52,11 +62,10 @@ import kotlin.random.Random
  * there, and that is precisely what keeps "RTRL" cheap enough to call
  * "-lite" here. Full RTRL through an `n`-unit *reservoir* would be
  * `O(n_regressors² · n)` per step; this is `O(n_regressors · nBack)` per
- * step - trivial next to [ReadoutTrainer]'s `O(n_regressors²)` RLS update,
- * which [ReservoirEngineBenchmarkTest] already showed has enormous
- * headroom inside the bar-close budget (Phase 2's on-device benchmark
- * budgets a single reservoir step at under 1% of even the shortest, 60s,
- * bar interval).
+ * step - trivial next to the on-device reservoir-step budget
+ * [ReservoirEngineBenchmarkTest] already showed has enormous headroom
+ * (Phase 2's on-device benchmark budgets a single reservoir step at under
+ * 1% of even the shortest, 60s, bar interval).
  *
  * ### Performance
  * Flat `FloatArray`s throughout, no boxed `Double`, no object graphs,
@@ -84,17 +93,14 @@ class PolicyEngine(
         const val DEFAULT_INIT_SCALE = 0.05f
     }
 
-    /** Regressor width: reservoir state (`nHidden`) + readout forecast (1) + own-output feedback (`nBack`) + bias (1). */
-    val nRegressors: Int = nHidden + 1 + nBack + 1
-
-    /** Index of the readout forecast `ŷ_t` slot in the regressor. */
-    private val readoutIndex: Int = nHidden
+    /** Regressor width: reservoir state (`nHidden`) + own-output feedback (`nBack`) + bias (1). No readout-forecast slot - see the class doc's gap-closure #2 note. */
+    val nRegressors: Int = nHidden + nBack + 1
 
     /** Base index of the `nBack` feedback slots (`f_{t-1}` at `feedbackBase`, ..., `f_{t-nBack}` at `feedbackBase+nBack-1`). */
-    private val feedbackBase: Int = nHidden + 1
+    private val feedbackBase: Int = nHidden
 
     /** Index of the trailing bias slot. */
-    private val biasIndex: Int = nHidden + 1 + nBack
+    private val biasIndex: Int = nHidden + nBack
 
     init {
         require(nHidden >= 1) { "nHidden must be >= 1, was $nHidden" }
@@ -139,19 +145,19 @@ class PolicyEngine(
 
     /**
      * Advances the policy by one bar-close step, producing `f_t` from the
-     * reservoir's current hidden state and the readout's forecast. Must be
+     * reservoir's current hidden state alone (plus the policy's own
+     * feedback/bias slots - see the class doc's gap-closure #2 note). Must be
      * called exactly once per bar, and (when training online) followed by
      * exactly one [update] call before the next [step] - [update] reads
      * [lastTrace], which this method overwrites every call.
      *
-     * @param reservoirState [ReservoirEngine.step] / [ReservoirEngine.currentState]'s `x_t`, `nHidden`-shaped.
-     * @param readoutForecast [ReadoutTrainer.predict]'s one-step-ahead forecast `ŷ_t`, made from `x_t` - i.e. a forecast of the *next* bar's return, not this one's (see [ReadoutTrainer.predict]'s own doc on call ordering). No look-ahead: it is computed from information already available at this bar's close.
+     * @param reservoirState [ReservoirEngine.step] / [ReservoirEngine.currentState]'s `x_t`, `nHidden`-shaped. Per gap-closure #2, this is the *only* external signal in the regressor besides the policy's own feedback and bias - there is no readout-forecast parameter.
      */
-    fun step(reservoirState: FloatArray, readoutForecast: Float): Float {
+    fun step(reservoirState: FloatArray): Float {
         require(reservoirState.size == nHidden) {
             "reservoirState size ${reservoirState.size} != nHidden $nHidden"
         }
-        buildRegressor(reservoirState, readoutForecast)
+        buildRegressor(reservoirState)
 
         var z = 0f
         var i = 0
@@ -224,9 +230,8 @@ class PolicyEngine(
         }
     }
 
-    private fun buildRegressor(reservoirState: FloatArray, readoutForecast: Float) {
+    private fun buildRegressor(reservoirState: FloatArray) {
         System.arraycopy(reservoirState, 0, regressorScratch, 0, nHidden)
-        regressorScratch[readoutIndex] = readoutForecast
         var k = 0
         while (k < nBack) {
             regressorScratch[feedbackBase + k] = pastPositions[k]

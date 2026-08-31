@@ -8,9 +8,10 @@ import org.junit.Test
 
 /**
  * Phase 5's end-to-end backtest (`ESN_RRL_Agent_Task_Prompts.md` Prompt 6):
- * replays the full Phase 1 -> 2 -> 3 -> 4 -> 5 chain
- * ([FeatureAssembler] -> [ReservoirEngine] -> [ReadoutTrainer] ->
- * [RewardEngine] -> [PolicyEngine]) via [AgentOrchestrator] over a
+ * replays the full chain ([FeatureAssembler] -> [ReservoirEngine] ->
+ * [PolicyEngine] -> [RewardEngine], with [ReadoutTrainer] running
+ * alongside as a diagnostics-only signal per gap-closure #2 - see
+ * [AgentOrchestrator]'s class doc) via [AgentOrchestrator] over a
  * deterministic fixture history (same reproducible-fixture approach
  * `ReadoutBacktestTest` uses for Phase 3 - no I/O, no network, fully
  * reproducible across runs), and checks the two things this phase is
@@ -148,5 +149,93 @@ class AgentOrchestratorBacktestTest {
 
         assertTrue(result.stable)
         assertTrue(result.decisions.size == bars)
+    }
+
+    // ---- gap-closure #2: readout is never part of the decision path ----
+
+    @Test
+    fun `AgentOrchestrator never calls ReadoutTrainer predict or update when diagnosticsOnly is false`() {
+        // ReadoutTrainer itself has no call-counting hook, so this test
+        // proves the point the way that matters for gap-closure #2: run a
+        // full backtest with diagnosticsOnly = false and confirm every
+        // DecisionLog.readoutForecast is NaN (the sentinel this class's doc
+        // promises when the readout is never invoked) and that the
+        // readout's own state (W_out, covariance) never moves from its
+        // untouched construction-time value - the only way that can happen
+        // is if predict()/update() were genuinely never called.
+        val bars = 200
+        val klines = fixtureKlines(bars = bars, seed = 424242L)
+
+        val assembler = FeatureAssembler()
+        val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, seed = 8L)
+        val reservoir = ReservoirEngine(weights)
+        val readout = ReadoutTrainer(nHidden = nHidden)
+        val untouchedWOut = readout.wOutSnapshot()
+        val untouchedCovariance = readout.covarianceSnapshot()
+        val reward = RewardEngine()
+        val policy = PolicyEngine(nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L)
+
+        val orchestrator = AgentOrchestrator(assembler, reservoir, readout, reward, policy, diagnosticsOnly = false)
+        val result = orchestrator.runBacktest(
+            klines = klines,
+            depthAt = { t, k -> depthFor(k.close, seed = t.toLong()) },
+        )
+
+        assertTrue("run should still be stable with the readout disabled", result.stable)
+        for (d in result.decisions) {
+            assertTrue(
+                "readoutForecast should be NaN at bar ${d.barIndex} when diagnosticsOnly = false",
+                d.readoutForecast.isNaN(),
+            )
+            assertTrue("position should still be well-formed without the readout", d.position in -1f..1f)
+        }
+        assertTrue(
+            "W_out must be untouched (never updated) when diagnosticsOnly = false",
+            readout.wOutSnapshot().toList() == untouchedWOut.toList(),
+        )
+        assertTrue(
+            "RLS covariance must be untouched (never updated) when diagnosticsOnly = false",
+            readout.covarianceSnapshot().toList() == untouchedCovariance.toList(),
+        )
+    }
+
+    @Test
+    fun `PolicyEngine decision is identical whether or not a readout is wired in, given the same reservoir`() {
+        // Structural proof that the readout cannot influence f_t: two
+        // orchestrators sharing the same reservoir weights/seed and policy
+        // seed, one with diagnosticsOnly = true (readout runs and is
+        // logged) and one with diagnosticsOnly = false (readout never
+        // runs), must produce bit-identical positions bar for bar - the
+        // only way that could fail is if the forecast were leaking into
+        // PolicyEngine somehow.
+        val bars = 150
+        val klines = fixtureKlines(bars = bars, seed = 13131L)
+        fun freshChain(diagnosticsOnly: Boolean): AgentOrchestrator {
+            val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, seed = 8L)
+            return AgentOrchestrator(
+                featureAssembler = FeatureAssembler(),
+                reservoir = ReservoirEngine(weights),
+                readoutTrainer = ReadoutTrainer(nHidden = nHidden),
+                rewardEngine = RewardEngine(),
+                policyEngine = PolicyEngine(nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L),
+                diagnosticsOnly = diagnosticsOnly,
+            )
+        }
+
+        val withDiagnostics = freshChain(diagnosticsOnly = true).runBacktest(
+            klines = klines,
+            depthAt = { t, k -> depthFor(k.close, seed = t.toLong()) },
+        )
+        val withoutDiagnostics = freshChain(diagnosticsOnly = false).runBacktest(
+            klines = klines,
+            depthAt = { t, k -> depthFor(k.close, seed = t.toLong()) },
+        )
+
+        for (i in withDiagnostics.decisions.indices) {
+            assertTrue(
+                "position at bar $i must match regardless of diagnosticsOnly - the readout must not influence f_t",
+                withDiagnostics.decisions[i].position == withoutDiagnostics.decisions[i].position,
+            )
+        }
     }
 }

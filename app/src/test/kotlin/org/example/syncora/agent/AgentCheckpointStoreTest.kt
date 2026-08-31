@@ -25,7 +25,8 @@ class AgentCheckpointStoreTest {
                 wOut = FloatArray(nHidden + 1) { rng.nextFloat() * 2f - 1f },
                 covariance = FloatArray((nHidden + 1) * (nHidden + 1)) { rng.nextFloat() },
             ),
-            policyWeights = FloatArray(nHidden + 1 + 5 + 1) { rng.nextFloat() * 2f - 1f },
+            // nHidden + nBack(5) + bias(1) - no readout-forecast slot (gap-closure #2).
+            policyWeights = FloatArray(nHidden + 5 + 1) { rng.nextFloat() * 2f - 1f },
             policyNHidden = nHidden,
             policyNBack = 5,
         )
