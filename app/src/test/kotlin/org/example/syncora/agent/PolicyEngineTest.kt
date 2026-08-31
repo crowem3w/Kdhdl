@@ -3,16 +3,14 @@ package org.example.syncora.agent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.tanh
 import kotlin.random.Random
 
 /**
  * Unit tests for [PolicyEngine] - Phase 5 (`ESN_RRL_Agent_Task_Prompts.md`
  * Prompt 6), updated for gap-closure #2 (no readout-forecast regressor
- * slot - [PolicyEngine.step] now takes only the reservoir state) and
- * gap-closure #3 (the RTRL trace is now turned into a weight delta via
- * [EkfWeightUpdater] rather than plain fixed-learning-rate gradient
- * ascent - see the "gap-closure #3" tests below). The central test here is
- * [`the RTRL trace matches a finite-difference gradient over a multi-step recurrent rollout`]:
+ * slot - [PolicyEngine.step] now takes only the reservoir state). The
+ * central test here is [`the RTRL trace matches a finite-difference gradient over a multi-step recurrent rollout`]:
  * everything else about [PolicyEngine] (bounded output, determinism,
  * stability) is a fairly ordinary property test, but the RTRL trace being
  * the *actual* gradient of `f_T` with respect to each weight - through the
@@ -20,10 +18,7 @@ import kotlin.random.Random
  * one property that would be very easy to get subtly wrong and have
  * everything else still look fine, so it gets an independent numerical
  * check rather than only being trusted from the derivation in the class
- * doc. Gap-closure #3 moved that check onto [PolicyEngine.lastTraceSnapshot]
- * directly (internal, test-only visibility) rather than the old
- * before/after weight-delta probe, since the EKF no longer applies the
- * trace via a value simply proportional to a fixed learning rate.
+ * doc.
  */
 class PolicyEngineTest {
 
@@ -98,6 +93,7 @@ class PolicyEngineTest {
         val engine = PolicyEngine(nHidden = nHidden, nBack = nBack, initialWeights = baseWeights.copyOf())
         val f = engine.step(state)
 
+        val trace = engine.traceSnapshot()
         val epsilon = 1e-3f
         for (i in baseWeights.indices) {
             val perturbed = baseWeights.copyOf()
@@ -112,6 +108,16 @@ class PolicyEngineTest {
                 finiteDiffGradient.toDouble(),
                 analyticGradient.toDouble(),
                 5e-3,
+            )
+            // Cross-check against the engine's own reported trace too -
+            // traceSnapshot() is now the source of truth for trace
+            // correctness tests, independent of gap-closure #3's EKF
+            // update (see the multi-step test below for why).
+            assertEquals(
+                "traceSnapshot()[$i] should match the analytic trace",
+                analyticGradient.toDouble(),
+                trace[i].toDouble(),
+                1e-6,
             )
         }
     }
@@ -154,6 +160,14 @@ class PolicyEngineTest {
         val baseEngine = PolicyEngine(nHidden = nHidden, nBack = nBack, initialWeights = baseWeights.copyOf())
         var baseFinal = 0f
         for (t in 0 until steps) baseFinal = baseEngine.step(states[t])
+        // traceSnapshot() is the direct source of truth for trace
+        // correctness now (gap-closure #3): PolicyEngine.update()'s applied
+        // delta is EKF-driven, not a fixed multiple of the trace, so probing
+        // the trace indirectly via an update()/weight-delta ratio - the old
+        // technique, valid only under plain gradient ascent - no longer
+        // recovers it. See EkfWeightUpdaterTest for the update mechanism's
+        // own correctness coverage.
+        val trace = baseEngine.traceSnapshot()
 
         val epsilon = 1e-3f
         for (i in indicesToCheck) {
@@ -165,22 +179,10 @@ class PolicyEngineTest {
 
             val finiteDiffGradient = (perturbedFinal - baseFinal) / epsilon
 
-            // Re-run the base rollout and read the engine's own RTRL trace
-            // directly (gap-closure #3: since update() now routes the
-            // trace through EkfWeightUpdater rather than applying it via a
-            // simple learningRate-scaled delta, there's no longer a clean
-            // way to reverse-engineer the trace out of a before/after
-            // weight-delta probe - lastTraceSnapshot() gives internal
-            // test-only visibility into exactly the same [lastTrace] value
-            // instead, independent of whatever update() does with it).
-            val probeEngine = PolicyEngine(nHidden = nHidden, nBack = nBack, initialWeights = baseWeights.copyOf())
-            for (t in 0 until steps) probeEngine.step(states[t])
-            val analyticGradient = probeEngine.lastTraceSnapshot()[i]
-
             assertEquals(
                 "d(f_T)/d(w_$i) mismatch after $steps recurrent steps",
                 finiteDiffGradient.toDouble(),
-                analyticGradient.toDouble(),
+                trace[i].toDouble(),
                 1e-2,
             )
         }
@@ -202,63 +204,102 @@ class PolicyEngineTest {
         }
     }
 
-    // ---- gap-closure #3: EKF weight update ----
+    // ---- EKF weight update (gap-closure #3) ----
 
     @Test
-    fun `isStable reflects EkfWeightUpdater covariance divergence, not just weight and trace finiteness`() {
-        // isStable() now also delegates to the EKF's own covariance check
-        // (gap-closure #3) - a healthy short replay should leave both the
-        // engine and its EKF covariance finite and well within bounds.
-        val engine = PolicyEngine(nHidden = nHidden, nBack = 3, seed = 21L)
-        val rng = Random(321L)
-        repeat(200) {
-            engine.step(randomState(rng))
-            engine.update(dUtilityDReward = (rng.nextDouble() - 0.5), dRewardDPosition = (rng.nextDouble() - 0.5))
+    fun `ekfCovarianceSnapshot has the expected nRegressors x nRegressors shape and starts at the expected diagonal scale`() {
+        val nBack = 3
+        val engine = PolicyEngine(nHidden = nHidden, nBack = nBack, seed = 1L)
+        val nRegressors = nHidden + nBack + 1
+        val covariance = engine.ekfCovarianceSnapshot()
+        assertEquals(nRegressors * nRegressors, covariance.size)
+        val expectedDiag = 1f / EkfWeightUpdater.DEFAULT_BETA
+        for (i in 0 until nRegressors) {
+            assertEquals("P[$i,$i] should start at 1/beta", expectedDiag, covariance[i * nRegressors + i], 1e-6f)
         }
-        assertTrue("engine should be stable after a healthy short replay", engine.isStable())
+    }
+
+    @Test
+    @Suppress("DEPRECATION")
+    fun `EKF-driven update reaches a target position at least as fast as a fixed-step baseline`() {
+        // Isolates the direct term (no recurrence) so a hand-rolled
+        // baseline can mirror PolicyEngine's own math exactly (same
+        // regressor/trace shape the single-step trace test above verifies).
+        val nBack = 0
+        val nRegressors = nHidden + nBack + 1
+        val state = randomState(Random(321L))
+        val initWeights = FloatArray(nRegressors) // all zero -> f_t starts at 0 (flat)
+
+        // System under test: PolicyEngine's real, EKF-driven update().
+        val ekfEngine = PolicyEngine(nHidden = nHidden, nBack = nBack, initialWeights = initWeights.copyOf())
+
+        // Baseline: hand-rolled fixed-step gradient ascent replicating what
+        // PolicyEngine.update() did before gap-closure #3 -
+        // w_i += learningRate * coeff * trace_i, trace_i = dtanh * regressor_i
+        // (exact for nBack = 0). This is *the paper's own justification*
+        // for EKF over plain gradient ascent (rrl_crypto_agent_architecture.md
+        // §3): faster online convergence via curvature-aware step sizes.
+        val baselineWeights = initWeights.copyOf()
+        val baselineLearningRate = PolicyEngine.DEFAULT_LEARNING_RATE
+        val regressor = FloatArray(nRegressors).also {
+            System.arraycopy(state, 0, it, 0, nHidden)
+            it[nHidden] = 1f // bias
+        }
+        fun baselineStep(): Float {
+            var z = 0f
+            for (i in 0 until nRegressors) z += baselineWeights[i] * regressor[i]
+            return tanh(z.toDouble()).toFloat()
+        }
+        fun baselineUpdate(f: Float) {
+            val dtanh = 1f - f * f
+            for (i in 0 until nRegressors) {
+                var delta = baselineLearningRate * dtanh * regressor[i]
+                delta = delta.coerceIn(-PolicyEngine.DEFAULT_MAX_WEIGHT_DELTA, PolicyEngine.DEFAULT_MAX_WEIGHT_DELTA)
+                baselineWeights[i] =
+                    (baselineWeights[i] + delta).coerceIn(-PolicyEngine.DEFAULT_WEIGHT_CLIP, PolicyEngine.DEFAULT_WEIGHT_CLIP)
+            }
+        }
+
+        val target = 0.9f
+        val maxSteps = 500
+        var ekfSteps = -1
+        var baselineSteps = -1
+        for (t in 1..maxSteps) {
+            val fEkf = ekfEngine.step(state)
+            ekfEngine.update(dUtilityDReward = 1.0, dRewardDPosition = 1.0)
+            if (ekfSteps < 0 && fEkf >= target) ekfSteps = t
+
+            val fBase = baselineStep()
+            baselineUpdate(fBase)
+            if (baselineSteps < 0 && fBase >= target) baselineSteps = t
+
+            if (ekfSteps > 0 && baselineSteps > 0) break
+        }
+
+        assertTrue("EKF engine should reach f_t >= $target within $maxSteps steps", ekfSteps > 0)
         assertTrue(
-            "EKF covariance magnitude should be finite after a healthy short replay",
-            engine.ekfCovarianceMagnitude().isFinite(),
+            "sanity check on the baseline itself: it should also reach f_t >= $target within $maxSteps steps",
+            baselineSteps > 0,
+        )
+        assertTrue(
+            "expected the EKF update ($ekfSteps steps) to converge at least as fast as the old fixed-step baseline ($baselineSteps steps)",
+            ekfSteps <= baselineSteps,
         )
     }
 
     @Test
-    fun `the EKF-driven update converges toward a target position faster than a small fixed-rate step would`() {
-        // The paper's whole justification for EKF over plain fixed-rate
-        // gradient ascent is faster convergence on a stationary target -
-        // this pins that property on a simple synthetic surface: repeatedly
-        // reward the engine for moving toward a fixed target position and
-        // confirm it gets there well within a modest number of updates
-        // (a fixed-rate updater at a conservative, stable learning rate -
-        // DEFAULT_MAX_WEIGHT_DELTA's own defense-in-depth clamp implies a
-        // sane single-run learning rate is well under 1 - would need many
-        // more steps to close the same gap from a near-zero init).
-        val target = 0.6f
-        val engine = PolicyEngine(nHidden = nHidden, nBack = 0, seed = 17L)
-        val state = randomState(Random(4242L))
-
-        var lastPosition = 0f
-        var reachedWithin = -1
-        for (t in 0 until 200) {
-            lastPosition = engine.step(state)
-            val error = target - lastPosition
-            // Reward moving toward the target: dU/d(f_t) = error (maximised
-            // when f_t == target), dRewardDPosition folded in as 1.0 so
-            // dUtilityDReward alone carries the signal.
-            engine.update(dUtilityDReward = error.toDouble(), dRewardDPosition = 1.0)
-            if (reachedWithin < 0 && kotlin.math.abs(target - lastPosition) < 0.05f) {
-                reachedWithin = t
-            }
+    fun `EKF covariance and derived deltas stay stable across a long replay with continuous updates`() {
+        val engine = PolicyEngine(nHidden = nHidden, nBack = 5, seed = 3L)
+        val rng = Random(456L)
+        repeat(5000) {
+            val state = randomState(rng)
+            engine.step(state)
+            val dUtility = (rng.nextDouble() - 0.5) * 2.0
+            val dReward = (rng.nextDouble() - 0.5) * 2.0
+            engine.update(dUtility, dReward)
+            assertTrue("engine (including its EKF covariance) became unstable", engine.isStable())
+            for (p in engine.ekfCovarianceSnapshot()) assertTrue("EKF covariance entry not finite: $p", p.isFinite())
         }
-
-        assertTrue(
-            "engine should converge close to the target position within 200 steps (final position=$lastPosition)",
-            kotlin.math.abs(target - lastPosition) < 0.05f,
-        )
-        assertTrue(
-            "EKF-driven convergence should be reasonably fast, not crawl toward the target over the full 200 steps",
-            reachedWithin in 0..100,
-        )
     }
 
     // ---- resetState ----

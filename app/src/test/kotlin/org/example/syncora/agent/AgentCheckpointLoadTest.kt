@@ -69,7 +69,7 @@ class AgentCheckpointLoadTest {
         val reservoir = ReservoirEngine(reservoirWeights)
         val readout = ReadoutTrainer(nHidden = nHidden, forgettingFactor = 0.995f)
         val reward = RewardEngine()
-        val policy = PolicyEngine(nHidden = nHidden, nBack = 5, seed = 3L)
+        val policy = PolicyEngine(nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L)
         return AgentOrchestrator(assembler, reservoir, readout, reward, policy)
     }
 

@@ -1,114 +1,95 @@
 package org.example.syncora.agent
 
 /**
- * The Extended Kalman Filter (EKF) recursion `PolicyEngine` uses to turn a
- * per-weight utility gradient into a weight update (see
+ * Extended Kalman Filter (EKF) weight updater for [PolicyEngine] (see
  * `agent-architecture-gap-closure.md` Gap 3 and Borrageiro, Firoozye &
- * Barucca 2022, subsection III-B2). This replaces the plain fixed-
- * learning-rate gradient-ascent step [PolicyEngine.update] used before
- * gap-closure #3 - the RTRL trace computation in [PolicyEngine.step] that
- * produces the per-weight gradient `∇υ_t` is unchanged; only *how that
- * gradient is turned into a weight delta* moves here.
+ * Barucca 2022, subsection III-B2 / `rrl_crypto_agent_architecture.md`
+ * §3 "Online weight update").
  *
- * ### The recursion
- * With ridge penalty `β` and exponential decay `τ`:
- * ```
- * Initialize: P_0 = I / β
- * For each t:
- *   q   = 1 + ∇υ_tᵀ P_{t-1} ∇υ_t / τ
- *   k   = P_{t-1} ∇υ_t / (q · τ)
- *   Δw  = k                              (caller adds this to w_{t-1})
- *   P_t = (P_{t-1} / τ − k kᵀ q) · τ      (rank-one update, then the
- *                                          variance-stabilization rescale)
- * ```
- * `k` doubles as both the Kalman gain and the weight delta itself - unlike
- * [ReadoutTrainer]'s RLS, which scales its analogous gain by a scalar
- * innovation `(target - prediction)`, this recursion has no separate
- * innovation term because `∇υ_t` (the utility gradient) already *is* the
- * quantity being driven toward zero.
+ * ### What this replaces
+ * [PolicyEngine] used to update its weights via plain gradient ascent:
+ * `w_i += learningRate * gradUtility_i`, a fixed, isotropic step size for
+ * every weight. The paper instead treats the weight vector as the hidden
+ * state of an EKF and the utility gradient `∇υ_t` as (proportional to)
+ * an observation driving that state, giving each weight its own,
+ * curvature-aware adaptive step size via the filter's covariance `P` -
+ * the same second-order intuition as Newton's method, but built up
+ * recursively online instead of requiring a batch Hessian.
  *
- * ### Relationship to [ReadoutTrainer]'s RLS
- * Structurally the same shape as [ReadoutTrainer]'s covariance recursion -
- * same `P`-is-`nWeights x nWeights`-flat-row-major discipline, same
- * matrix-vector-product-then-rank-one-downdate cost profile - which is
- * deliberate: this class reuses that shape rather than inventing a new
- * one, per the gap-closure plan's own note to reuse [ReadoutTrainer]'s `P`
- * code shape.
+ * This class only replaces *how the RTRL trace becomes a weight delta*.
+ * The trace itself - `d(f_t)/d(w_i)`, computed via [PolicyEngine]'s own
+ * truncated RTRL through the feedback recurrence - is unchanged; see
+ * [PolicyEngine.update] for how the two compose:
+ * `gradUtility_i = dUtilityDReward * dRewardDPosition * trace_i`, and
+ * that product is what's passed into [computeDelta] here.
+ *
+ * ### The recursion (paper §III-B2 / doc §3)
+ * ```
+ * q     = 1 + ∇υ_tᵀ P_{t-1} ∇υ_t / tau
+ * k     = P_{t-1} ∇υ_t / (q * tau)
+ * w_t   = w_{t-1} + k
+ * P_t   = P_{t-1}/tau - k kᵀ q
+ * P_t   = P_t * tau                     (variance stabilization)
+ * ```
+ * `P` is initialized to `I / beta` (`beta` a ridge penalty - a small
+ * `beta` means a large initial `P`, i.e. very little prior confidence, so
+ * early updates move fast, the same role [ReadoutTrainer]'s
+ * `initialCovarianceScale` plays for its RLS `P`). `tau` is an
+ * exponential decay constant that both discounts older observations
+ * (paralleling [ReadoutTrainer.forgettingFactor]) and appears in the
+ * "stabilization" rescale that keeps `P` from drifting outside a sane
+ * numerical range over a long online session.
+ *
+ * `w_t = w_{t-1} + k` means `k` **is** the weight delta - [computeDelta]
+ * returns it directly rather than an updated weight vector, so the
+ * caller ([PolicyEngine.update]) applies its own clipping/`isFinite`
+ * guards on top: the EKF itself has no boundedness guarantee the way a
+ * clamped gradient-ascent step did, so the app keeps its existing
+ * defense-in-depth as an outer safety net around it - a deliberate,
+ * documented divergence from the paper, not an oversight.
  *
  * ### Performance
- * `O(nWeights^2)` per [computeDelta] call (the `P_{t-1} ∇υ_t` product and
- * the rank-one downdate) - same order as [ReadoutTrainer.update], which
- * the existing benchmark tests already show comfortably fits the bar-close
- * budget. Flat `FloatArray`s throughout, no boxed `Double`, no object
- * graphs. The three scratch buffers below are the only allocations this
- * class ever performs, all at construction time.
+ * Same shape and cost discipline as [ReadoutTrainer]'s RLS: `P` is a
+ * flat, row-major `FloatArray` (`nWeights x nWeights`), no boxed
+ * `Double`, no `Array<FloatArray>`. [computeDelta]'s two `O(nWeights^2)`
+ * passes (the `Pg = P * gradUtility` matrix-vector product and the `P`
+ * rank-one downdate) are the only per-step cost - the same order as the
+ * RLS update it structurally mirrors. Scratch buffers are allocated once,
+ * here in the constructor.
  */
 class EkfWeightUpdater(
     val nWeights: Int,
     val beta: Float = DEFAULT_BETA,
     val tau: Float = DEFAULT_TAU,
-    val maxCovarianceMagnitude: Float = DEFAULT_MAX_COVARIANCE_MAGNITUDE,
 ) {
     companion object {
-        /** Ridge penalty - `P` is initialized to `I / beta`, same large-prior-covariance spirit as [ReadoutTrainer.DEFAULT_INITIAL_COVARIANCE_SCALE] (there, `P_0 = initialCovarianceScale * I`; here it's the reciprocal, per the paper's `β` convention). */
+        /** Ridge penalty: `P` is initialized to `I / beta`. Small `beta` -> large initial `P` -> fast early adaptation, same role as [ReadoutTrainer.DEFAULT_INITIAL_COVARIANCE_SCALE] plays inversely. */
         const val DEFAULT_BETA = 0.01f
 
-        /** Exponential decay - analogous role to [ReadoutTrainer.DEFAULT_FORGETTING_FACTOR], but appears differently in this recursion's algebra (dividing/multiplying `P` rather than a single `lambda` blend), per the paper's EKF formulation. */
-        const val DEFAULT_TAU = 0.995f
+        /** Exponential decay constant, `(0, 1]`. `tau = 1` disables both the forgetting and the stabilization rescale (a pure, undiscounted EKF); slightly below 1 mirrors [ReadoutTrainer.DEFAULT_FORGETTING_FACTOR]'s role. */
+        const val DEFAULT_TAU = 0.999f
 
-        /**
-         * Ceiling on the largest absolute entry of `P`, checked (and, if
-         * exceeded, rescaled back down to) after every [computeDelta] call
-         * *and* at construction. Necessary because this recursion has no
-         * mechanism that shrinks `P` in a direction that never gets excited
-         * - unlike a textbook forgetting-factor RLS, this class's "variance
-         * stabilization" step (see the class doc) exactly cancels `P`'s
-         * natural `1/τ` growth, so an unexcited direction's entry simply
-         * *stays* at its initial `1/β` value forever rather than growing OR
-         * shrinking. A small `β` (the paper's own default is `0.01`, i.e.
-         * `P_0` entries of `100`) then means any later, even tiny, signal
-         * that leaks into that direction - real market signal or plain
-         * float rounding - gets multiplied by that stale `100`, producing a
-         * single wildly oversized weight update, which promptly corrupts
-         * every other direction's covariance too through the rank-one
-         * downdate below. This is not a precision artifact fixable by using
-         * `Double`: the same cascade reproduces at `Double` precision too
-         * (just after more steps, since it takes longer for a smaller
-         * rounding floor to compound through repeated ~100x amplification)
-         * - it is the recursion's actual numerical behavior for any
-         * regressor with a persistently unexcited or near-degenerate
-         * direction, which realistic feature vectors can absolutely
-         * contain. Capping `P` bounds the worst-case single-step
-         * amplification directly, independent of how small `β` is asked to
-         * be. `5f` matches [PolicyEngine.DEFAULT_WEIGHT_CLIP]'s scale - a
-         * covariance entry meaningfully larger than the weight range it's
-         * estimating uncertainty for isn't a useful prior, it's already in
-         * the regime that produces this failure mode.
-         */
-        const val DEFAULT_MAX_COVARIANCE_MAGNITUDE = 5f
-
-        // Guards q: mathematically q = 1 + gradᵀ P grad / tau >= 1 whenever P
-        // is positive semi-definite (which it is by construction - diagonal
-        // init, and the downdate below preserves PSD-ness up to float
-        // rounding) and tau > 0. This is a numerical safety net against that
-        // rounding, not the expected path - see [computeDelta].
-        private const val Q_EPS = 1e-8f
+        // Guards q * tau against underflow/near-zero the same way
+        // ReadoutTrainer.DENOM_EPS guards its RLS denominator: q = 1 +
+        // (nonnegative quadratic form)/tau >= 1 whenever P is PSD (true by
+        // construction - diagonal init, and the downdate below preserves
+        // PSD-ness up to float rounding) and tau > 0, so q*tau >= tau > 0
+        // in exact arithmetic. This is a numerical safety net against
+        // float rounding, not the expected path.
+        private const val DENOM_EPS = 1e-8f
     }
 
     init {
         require(nWeights >= 1) { "nWeights must be >= 1, was $nWeights" }
         require(beta > 0f) { "beta must be > 0, was $beta" }
         require(tau > 0f) { "tau must be > 0, was $tau" }
-        require(maxCovarianceMagnitude > 0f) { "maxCovarianceMagnitude must be > 0, was $maxCovarianceMagnitude" }
     }
 
-    // P is nWeights x nWeights, flat row-major, symmetric - same discipline
-    // as ReadoutTrainer's RLS covariance matrix. Initial diagonal is
-    // min(1/beta, maxCovarianceMagnitude) - see DEFAULT_MAX_COVARIANCE_MAGNITUDE's
-    // doc for why an uncapped 1/beta is itself the seed of the instability,
-    // not just something the per-step cap below needs to correct for later.
+    // P, nWeights x nWeights, flat row-major, symmetric - same discipline
+    // as ReadoutTrainer's RLS covariance. This is the only state this
+    // class mutates; PolicyEngine owns the weight vector itself.
     private val covariance: FloatArray = FloatArray(nWeights * nWeights).also { p ->
-        val diag = minOf(1f / beta, maxCovarianceMagnitude)
+        val diag = 1f / beta
         var i = 0
         while (i < nWeights) {
             p[i * nWeights + i] = diag
@@ -116,26 +97,27 @@ class EkfWeightUpdater(
         }
     }
 
-    // Scratch buffers reused by every computeDelta() call - the only
-    // allocations beyond `covariance` itself, and those only happen once,
-    // here in the constructor.
+    // Scratch buffers, allocated once - the only allocations this class
+    // ever performs beyond the covariance matrix itself.
     private val pgScratch = FloatArray(nWeights)
     private val kScratch = FloatArray(nWeights)
 
     /**
      * One EKF step: turns the per-weight utility gradient [gradUtility]
-     * (`∇υ_t` - in [PolicyEngine], `(dUtilityDReward * dRewardDPosition) *
-     * trace_i` for each weight `i`, i.e. exactly what the old gradient-
-     * ascent step applied directly, scaled by `learningRate`) into a
-     * weight delta via the class doc's recursion, and updates the internal
-     * covariance `P` in place.
+     * into a weight delta `k`, and updates the internal covariance `P` in
+     * place. See the class doc for the recursion; `O(nWeights^2)`, no
+     * allocation.
      *
-     * @return `k`, the delta to add to each weight (`w_i += result[i]`).
-     *   The caller still owns clipping / `isFinite` guards on the result
-     *   and on the resulting weights - same defense-in-depth posture the
-     *   app already applies around [ReadoutTrainer]'s RLS, kept
-     *   deliberately since the paper's EKF recursion is not itself
-     *   guaranteed bounded.
+     * @param gradUtility `∇υ_t` - `dUtilityDReward * dRewardDPosition *
+     *   trace_i` per weight, i.e. exactly what [PolicyEngine.update] used
+     *   to apply directly as a gradient-ascent step before this gap.
+     * @return the weight delta `k` to add - `w_t = w_{t-1} + k`. Returns
+     *   [kScratch], the engine's own scratch buffer (same convention as
+     *   [ReservoirEngine.step]/[ReadoutTrainer.predict]) - copy it if a
+     *   stable snapshot is needed past the caller's immediate use. If the
+     *   update denominator degenerates (guarded by [DENOM_EPS], mirroring
+     *   [ReadoutTrainer]'s own guard), returns an all-zero delta and
+     *   leaves `P` untouched rather than risking a corrupting step.
      */
     fun computeDelta(gradUtility: FloatArray): FloatArray {
         require(gradUtility.size == nWeights) {
@@ -149,84 +131,65 @@ class EkfWeightUpdater(
             i++
         }
 
-        // q = 1 + gradUtilityᵀ Pg / tau
-        var gPg = 0f
+        // q = 1 + gradUtility^T Pg / tau
+        var quad = 0f
         i = 0
         while (i < nWeights) {
-            gPg += gradUtility[i] * pgScratch[i]
+            quad += gradUtility[i] * pgScratch[i]
             i++
         }
-        val q = 1f + gPg / tau
-        if (!q.isFinite() || q < Q_EPS) {
-            // Degenerate/ill-conditioned step: leave P untouched and return
-            // a zero delta rather than risk corrupting the covariance with
-            // a division by a near-zero/non-finite q.
+        val q = 1f + quad / tau
+        val denom = q * tau
+        if (!denom.isFinite() || kotlin.math.abs(denom) < DENOM_EPS) {
             kScratch.fill(0f)
             return kScratch
         }
 
         // k = Pg / (q * tau)
-        val denom = q * tau
         i = 0
         while (i < nWeights) {
             kScratch[i] = pgScratch[i] / denom
             i++
         }
 
-        // P_t = (P_{t-1} / tau - k kᵀ q) * tau
-        //     = P_{t-1} - k kᵀ q tau
-        val kkScale = q * tau
+        // P_t = P_{t-1}/tau - k k^T q, then *= tau (stabilization),
+        // algebraically combined into one pass: P_t = P_{t-1} - k k^T (q * tau)
+        val kqTau = q * tau
         i = 0
         while (i < nWeights) {
             val rowBase = i * nWeights
-            val kI = kScratch[i]
+            val ki = kScratch[i]
             var j = 0
             while (j < nWeights) {
-                covariance[rowBase + j] -= kI * kScratch[j] * kkScale
+                covariance[rowBase + j] -= ki * kScratch[j] * kqTau
                 j++
             }
             i++
         }
 
-        clampCovarianceMagnitude()
-
         return kScratch
     }
 
-    /**
-     * Rescales the entire covariance matrix down (preserving its direction/
-     * shape, only shrinking its overall scale) whenever its largest-magnitude
-     * entry exceeds [maxCovarianceMagnitude] - see that constant's doc for
-     * why this is necessary every step, not just at construction. A no-op
-     * on the (overwhelmingly common) steps where every entry is already
-     * under the cap.
-     */
-    private fun clampCovarianceMagnitude() {
-        var maxAbs = 0f
-        for (p in covariance) {
-            val a = kotlin.math.abs(p)
-            if (a > maxAbs) maxAbs = a
-        }
-        if (maxAbs <= maxCovarianceMagnitude || maxAbs <= 0f) return
-        val scale = maxCovarianceMagnitude / maxAbs
-        for (idx in covariance.indices) covariance[idx] *= scale
-    }
-
-    /** Dot product of `row` (a length-[nWeights] slice of a flat matrix starting at [base]) with [x]. */
-    private fun dot(flatMatrix: FloatArray, base: Int, x: FloatArray): Float {
+    /** Dot product of `row` (a length-[nWeights] slice of a flat matrix starting at [base]) with [gradUtility]. */
+    private fun dot(flatMatrix: FloatArray, base: Int, gradUtility: FloatArray): Float {
         var acc = 0f
         var k = 0
         while (k < nWeights) {
-            acc += flatMatrix[base + k] * x[k]
+            acc += flatMatrix[base + k] * gradUtility[k]
             k++
         }
         return acc
     }
 
-    /** Snapshot (fresh copy) of the EKF covariance matrix `P` - diagnostic/logging use only, not read on the hot path. */
+    /** Snapshot (fresh copy) of the EKF covariance matrix `P` - for logging/diagnostics/tests only, mirrors [ReadoutTrainer.covarianceSnapshot]. */
     fun covarianceSnapshot(): FloatArray = covariance.copyOf()
 
-    /** True iff every entry of `P` is finite - mirrors [ReadoutTrainer.isStable]'s role for the RLS covariance. */
+    /**
+     * True iff every entry of `P` is finite - mirrors
+     * [ReadoutTrainer.isStable]'s role for its own RLS covariance. A
+     * backtest/soak replay should assert this after every
+     * [PolicyEngine.update] call.
+     */
     fun isStable(): Boolean {
         for (p in covariance) if (!p.isFinite()) return false
         return true
@@ -234,10 +197,11 @@ class EkfWeightUpdater(
 
     /**
      * The largest absolute value anywhere in `P` - mirrors
-     * [ReadoutTrainer.covarianceMagnitude]'s role as an early-warning
-     * divergence signal that fires well before [isStable] would (`P` can
+     * [ReadoutTrainer.covarianceMagnitude]'s early-warning role: `P` can
      * grow unboundedly while every entry stays finite right up until the
-     * step it overflows).
+     * step it overflows, so a magnitude ceiling a few orders of magnitude
+     * above `1/beta` (`P`'s initial scale) is a cheap, meaningful
+     * divergence signal that fires before [isStable] would.
      */
     fun covarianceMagnitude(): Float {
         var maxAbs = 0f

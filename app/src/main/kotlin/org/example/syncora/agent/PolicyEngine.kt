@@ -38,11 +38,10 @@ import kotlin.random.Random
  * `+1` is max long, `-1` is max short, matching design doc §1's `f_{t-1}`
  * convention exactly.
  *
- * ### Training: RTRL trace + an Extended Kalman Filter weight update
- * The weights `w` are trained online against the utility signal supplied
- * by the caller, following Moody & Saffell's RRL scheme:
- * `dU/dw_i = d(dsr_t)/d(r_t) · d(r_t)/d(f_t) · d(f_t)/d(w_i)`. The first
- * two factors are supplied by the caller each [update] call (from
+ * ### Training: truncated RTRL trace, EKF weight update (gap-closure #3)
+ * The weights `w` are trained online against the utility gradient
+ * `dU/dw_i = d(υ_t)/d(r_t) · d(r_t)/d(f_t) · d(f_t)/d(w_i)`. The first two
+ * factors are supplied by the caller each [update] call (from
  * [RewardEngine.RewardBreakdown.differentialSharpeGradientWrtReward] and
  * [RewardEngine.positionGradient] respectively - see those docs for why
  * the reward gradient is truncated to `r_t`'s *immediate* dependence on
@@ -67,71 +66,59 @@ import kotlin.random.Random
  * (Phase 2's on-device benchmark budgets a single reservoir step at under
  * 1% of even the shortest, 60s, bar interval).
  *
- * ### Gap-closure #3: EKF replaces plain gradient ascent
- * Earlier revisions of [update] applied `dU/dw_i` directly, scaled by a
- * fixed `learningRate`, then clamped. Per the source paper (§III-B2), the
- * trace above (`∇υ_t` once combined with the caller's utility/reward
- * gradients) is instead fed through an Extended Kalman Filter -
- * [EkfWeightUpdater] - which adapts its effective step size per weight via
- * a `nRegressors x nRegressors` covariance `P`, rather than using one
- * fixed scalar learning rate for every weight for the whole run. The RTRL
- * trace computation in [step] is unchanged by this gap - only how [update]
- * turns that trace into a weight delta changed. See [EkfWeightUpdater]'s
- * own doc for the recursion. [DEFAULT_WEIGHT_CLIP]/[DEFAULT_MAX_WEIGHT_DELTA]
- * remain as an outer defense-in-depth bound around the EKF's output - the
- * paper's EKF is not itself guaranteed bounded, so this class keeps its
- * existing safety net rather than trusting the filter alone (a deliberate,
- * intentional divergence from the paper, in favor of a more conservative
- * posture - not an oversight).
+ * Gap-closure #3 (paper §III-B2) replaces *only the last step* - how that
+ * trace turns into a weight delta. Earlier revisions applied plain,
+ * fixed-step gradient ascent: `w_i += learningRate · gradUtility_i`. This
+ * class now delegates that to an [EkfWeightUpdater], which treats `w` as
+ * the hidden state of an Extended Kalman Filter and gives every weight
+ * its own curvature-aware step size via the filter's covariance - see
+ * that class's doc for the recursion. [DEFAULT_WEIGHT_CLIP] and
+ * [DEFAULT_MAX_WEIGHT_DELTA] remain as an outer defense-in-depth bound
+ * around the EKF's output, a deliberate divergence *in favor of* the
+ * app's more conservative posture (the EKF itself has no boundedness
+ * guarantee, unlike a clamped fixed-step update) - not a gap against the
+ * paper, so it's kept even though [update] no longer applies a naive
+ * gradient step.
  *
  * ### Performance
  * Flat `FloatArray`s throughout, no boxed `Double`, no object graphs,
  * consistent with every phase since 1. [step] and [update] together are
- * the only two allocation-free hot-path calls; [weightsSnapshot] is the
- * one exception (a fresh copy, for logging/checkpointing use only, mirrors
+ * the only two allocation-free hot-path calls ([EkfWeightUpdater] holds
+ * the same discipline internally); [weightsSnapshot] is the one
+ * exception (a fresh copy, for logging/checkpointing use only, mirrors
  * [ReadoutTrainer.wOutSnapshot]).
  */
 class PolicyEngine(
     val nHidden: Int,
     val nBack: Int = DEFAULT_N_BACK,
-    val beta: Float = EkfWeightUpdater.DEFAULT_BETA,
-    val tau: Float = EkfWeightUpdater.DEFAULT_TAU,
+    /**
+     * Deprecated as of gap-closure #3: [update] no longer applies a
+     * fixed-step gradient-ascent delta, so this has no effect on the
+     * weight update itself. Retained purely so existing call sites
+     * (checkpoint restore, orchestrator wiring, tests) keep compiling
+     * without change - see [ekfBeta]/[ekfTau] for the parameters that now
+     * actually govern the update's step size, via [EkfWeightUpdater].
+     */
+    @Deprecated("No longer used - PolicyEngine.update() is EKF-driven (gap-closure #3); see ekfBeta/ekfTau.")
+    val learningRate: Float = DEFAULT_LEARNING_RATE,
     val weightClip: Float = DEFAULT_WEIGHT_CLIP,
-    val feedbackL1Margin: Float = DEFAULT_FEEDBACK_L1_MARGIN,
     initialWeights: FloatArray? = null,
     seed: Long = 0L,
+    /** Ridge penalty for the [EkfWeightUpdater]'s initial covariance (`P = I / ekfBeta`) - see that class's doc. */
+    val ekfBeta: Float = EkfWeightUpdater.DEFAULT_BETA,
+    /** Exponential decay constant for the [EkfWeightUpdater] - see that class's doc. */
+    val ekfTau: Float = EkfWeightUpdater.DEFAULT_TAU,
 ) {
     companion object {
         const val DEFAULT_N_BACK = 5
-        /** `|w_i|` is clamped to this after every [update] - the EKF recursion (gap-closure #3) is not itself guaranteed bounded, so an explicit bound is this class's outer safety net, same role this constant has always played. */
+        @Deprecated("No longer used - see the learningRate parameter's own deprecation note.")
+        const val DEFAULT_LEARNING_RATE = 0.01f
+        /** `|w_i|` is clamped to this after every [update] - the EKF has no boundedness guarantee of its own, so this remains PolicyEngine's outer safety bound (see the class doc's gap-closure #3 note). */
         const val DEFAULT_WEIGHT_CLIP = 5f
         /** `|Δw_i|` from a single [update] call is clamped to this before being applied, same defense-in-depth spirit as [DEFAULT_WEIGHT_CLIP]. */
         const val DEFAULT_MAX_WEIGHT_DELTA = 0.5f
         /** Initial weights are drawn uniformly from `[-INIT_SCALE, INIT_SCALE]` - small, to start near `f_t ≈ 0` (flat) rather than pinned at ±1 from the first bar. */
         const val DEFAULT_INIT_SCALE = 0.05f
-
-        /**
-         * Upper bound on `Σ_k |w_backK|` (the trained weights on the own-
-         * output feedback slots `f_{t-1}, ..., f_{t-nBack}` - not to be
-         * confused with [ReservoirEngine]'s fixed, untrained `W_back`).
-         * This is the BIBO-stability margin for the RTRL trace recursion
-         * `d(f_t)/d(w_i) = dtanh * (regressor_i + Σ_k w_backK * d(f_{t-1-k})/d(w_i))`:
-         * treating the recursion as a linear time-varying IIR filter with
-         * per-step gain `dtanh_t ∈ [0, 1]`, the worst case (`dtanh_t ≡ 1`,
-         * unsaturated `f_t`) is BIBO-stable iff `Σ_k |w_backK| < 1`. Kept
-         * strictly below `1` (not just clipped to it) as margin against the
-         * `dtanh_t ≈ 1` worst case actually being hit repeatedly in a row.
-         * [DEFAULT_WEIGHT_CLIP] alone (`5f`) does not enforce this - it
-         * bounds each weight individually, not their sum - and the EKF's
-         * large early-training gain (small `beta`, so a large initial `P`)
-         * can walk `w_backK` past this threshold within a handful of bars,
-         * which blows the trace up geometrically every subsequent step
-         * until `f_t` saturates at `±1` (`dtanh_t → 0`) and the policy goes
-         * permanently dead: gradients vanish, so it can never train its way
-         * back out. See [update]'s feedback-projection step, which this
-         * constant bounds.
-         */
-        const val DEFAULT_FEEDBACK_L1_MARGIN = 0.95f
     }
 
     /** Regressor width: reservoir state (`nHidden`) + own-output feedback (`nBack`) + bias (1). No readout-forecast slot - see the class doc's gap-closure #2 note. */
@@ -146,11 +133,8 @@ class PolicyEngine(
     init {
         require(nHidden >= 1) { "nHidden must be >= 1, was $nHidden" }
         require(nBack >= 0) { "nBack must be >= 0, was $nBack" }
+        require(learningRate > 0f) { "learningRate must be > 0, was $learningRate" }
         require(weightClip > 0f) { "weightClip must be > 0, was $weightClip" }
-        require(feedbackL1Margin > 0f && feedbackL1Margin < 1f) {
-            "feedbackL1Margin must be in (0, 1) to guarantee RTRL trace stability, was $feedbackL1Margin"
-        }
-        // beta/tau are validated by EkfWeightUpdater's own init block below.
     }
 
     // ---- weights (the only thing trained) ----
@@ -177,15 +161,13 @@ class PolicyEngine(
     // Scratch buffers - allocated once, reused every step()/update() call.
     private val regressorScratch = FloatArray(nRegressors)
     private val newTraceScratch = FloatArray(nRegressors)
+    private val gradUtilityScratch = FloatArray(nRegressors)
 
     /** `d(f_t)/d(w_i)` from the most recent [step] call - what [update] applies the gradient against. */
     private val lastTrace = FloatArray(nRegressors)
 
-    // ---- gap-closure #3: EKF weight updater, replacing plain gradient ascent ----
-    private val ekf = EkfWeightUpdater(nWeights = nRegressors, beta = beta, tau = tau)
-
-    // Scratch buffer for the per-weight utility gradient passed to the EKF each [update] call.
-    private val gradUtilityScratch = FloatArray(nRegressors)
+    /** Gap-closure #3: turns [lastTrace]-derived utility gradients into weight deltas via an Extended Kalman Filter, replacing the old fixed-step gradient-ascent update. See its own class doc. */
+    private val ekf = EkfWeightUpdater(nWeights = nRegressors, beta = ekfBeta, tau = ekfTau)
 
     private var lastPosition: Float = 0f
     private var stepsTaken: Long = 0L
@@ -256,13 +238,18 @@ class PolicyEngine(
     /**
      * One EKF-driven update against the utility signal derived from the
      * bar this [step] call's `f_t` just priced in (gap-closure #3 - see
-     * the class doc's "Training" section and [EkfWeightUpdater]). See the
-     * class doc's "Training" section for the chain rule this multiplies
-     * out; `dUtilityDReward * dRewardDPosition` is `dU/d(f_t)`, so the
-     * per-weight utility gradient `∇υ_t` fed to [EkfWeightUpdater] is
-     * `dU/d(f_t) * d(f_t)/d(w_i)` (this class's own [lastTrace]).
+     * the class doc's "Training" section for the chain rule this
+     * multiplies out). `dUtilityDReward * dRewardDPosition` is
+     * `dU/d(f_t)`; multiplied through this class's own per-weight RTRL
+     * trace ([lastTrace], `d(f_t)/d(w_i)`) it gives the per-weight utility
+     * gradient `∇υ_t`, which [EkfWeightUpdater.computeDelta] turns into
+     * the weight delta `k` (`w_t = w_{t-1} + k`, i.e. ascent - utility is
+     * maximised, not minimised). [DEFAULT_MAX_WEIGHT_DELTA]/[weightClip]
+     * remain applied on top of that delta as an outer safety net, since
+     * the EKF itself has no boundedness guarantee (see the class doc's
+     * gap-closure #3 note).
      *
-     * @param dUtilityDReward `d(dsr_t)/d(r_t)` - [RewardEngine.RewardBreakdown.differentialSharpeGradientWrtReward] from the *same* bar's [RewardEngine.step] call.
+     * @param dUtilityDReward `d(υ_t)/d(r_t)` - [RewardEngine.RewardBreakdown.differentialSharpeGradientWrtReward] from the *same* bar's [RewardEngine.step] call.
      * @param dRewardDPosition `d(r_t)/d(f_t)` - [RewardEngine.positionGradient] computed with the *same* `prevPosition`/`currPosition` pair this bar's [step] call produced.
      */
     fun update(dUtilityDReward: Double, dRewardDPosition: Double) {
@@ -271,12 +258,9 @@ class PolicyEngine(
 
         var i = 0
         while (i < nRegressors) {
-            var g = gradientCoefficient * lastTrace[i]
-            if (!g.isFinite()) g = 0f
-            gradUtilityScratch[i] = g
+            gradUtilityScratch[i] = gradientCoefficient * lastTrace[i]
             i++
         }
-
         val delta = ekf.computeDelta(gradUtilityScratch)
 
         i = 0
@@ -287,38 +271,6 @@ class PolicyEngine(
             val updated = (weights[i] + d).coerceIn(-weightClip, weightClip)
             weights[i] = updated
             i++
-        }
-
-        projectFeedbackWeights()
-    }
-
-    /**
-     * Rescales the own-output feedback weights (`weights[feedbackBase]`
-     * through `weights[feedbackBase + nBack - 1]`) back onto the L1 ball of
-     * radius [feedbackL1Margin] whenever the EKF step above has walked
-     * their sum-of-magnitudes past it. [DEFAULT_WEIGHT_CLIP] bounds each
-     * weight individually and does nothing to stop their *sum* from
-     * exceeding the RTRL trace recursion's stability threshold - see
-     * [DEFAULT_FEEDBACK_L1_MARGIN]'s doc. Rescaling (not independently
-     * re-clipping each entry) preserves the EKF's chosen *direction* for
-     * this update, only shrinking its magnitude, and is a no-op on the
-     * (overwhelmingly common) steps where the sum is already under the
-     * margin.
-     */
-    private fun projectFeedbackWeights() {
-        if (nBack == 0) return
-        var sumAbs = 0f
-        var k = 0
-        while (k < nBack) {
-            sumAbs += kotlin.math.abs(weights[feedbackBase + k])
-            k++
-        }
-        if (sumAbs <= feedbackL1Margin || sumAbs <= 0f) return
-        val scale = feedbackL1Margin / sumAbs
-        k = 0
-        while (k < nBack) {
-            weights[feedbackBase + k] *= scale
-            k++
         }
     }
 
@@ -333,42 +285,37 @@ class PolicyEngine(
     }
 
     /**
-     * True iff every weight, every RTRL trace entry, and the EKF's own
-     * covariance `P` (gap-closure #3 - see [EkfWeightUpdater.isStable])
-     * are finite. A backtest replay should assert this after every
-     * [update] - mirrors [ReadoutTrainer.isStable]'s role for Phase 3, now
-     * for Phase 5's own online-learning stability requirement.
+     * True iff every weight and every RTRL trace entry is finite. A
+     * backtest replay should assert this after every [update] - mirrors
+     * [ReadoutTrainer.isStable]'s role for Phase 3, now for Phase 5's own
+     * online-learning stability requirement.
      */
     fun isStable(): Boolean {
         for (w in weights) if (!w.isFinite()) return false
         for (t in traceHistory) if (!t.isFinite()) return false
         for (t in lastTrace) if (!t.isFinite()) return false
-        if (!ekf.isStable()) return false
+        if (!ekf.isStable()) return false // gap-closure #3: the EKF's own covariance P is now part of this engine's stability surface
         val f = lastPosition
         if (!f.isFinite() || f < -1f || f > 1f) return false
         return true
     }
-
-    /**
-     * The largest absolute value anywhere in the EKF's covariance matrix
-     * `P` (gap-closure #3) - see [EkfWeightUpdater.covarianceMagnitude]'s
-     * doc for why this, not [isStable] alone, is the meaningful early
-     * divergence signal; same role [ReadoutTrainer.covarianceMagnitude]
-     * plays for the readout's RLS covariance.
-     */
-    fun ekfCovarianceMagnitude(): Float = ekf.covarianceMagnitude()
 
     /** Snapshot (fresh copy) of the trained weights - for logging/future checkpointing (Phase 6), not read on the hot path. */
     fun weightsSnapshot(): FloatArray = weights.copyOf()
 
     /**
      * Snapshot (fresh copy) of `d(f_t)/d(w_i)` from the most recent [step]
-     * call - test-only visibility, so gradient-correctness tests can
-     * compare this class's own RTRL trace directly against a
-     * finite-difference gradient without needing to reverse-engineer it
-     * out of [update]'s EKF-shaped output (see `PolicyEngineTest`).
+     * call - i.e. this class's own RTRL trace, independent of how [update]
+     * turns it into a weight delta. Exists mainly so tests can assert on
+     * the trace directly (gap-closure #3's [EkfWeightUpdater] no longer
+     * scales linearly with a fixed learning rate, so probing the trace
+     * indirectly via [update]'s applied delta - the old technique - no
+     * longer isolates it); not read on the hot path.
      */
-    internal fun lastTraceSnapshot(): FloatArray = lastTrace.copyOf()
+    fun traceSnapshot(): FloatArray = lastTrace.copyOf()
+
+    /** Snapshot (fresh copy) of the [EkfWeightUpdater]'s covariance matrix `P` - for logging/diagnostics/tests only, mirrors [weightsSnapshot]. */
+    fun ekfCovarianceSnapshot(): FloatArray = ekf.covarianceSnapshot()
 
     /**
      * Resets recurrent state (own-output feedback history and RTRL traces)

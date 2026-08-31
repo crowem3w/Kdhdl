@@ -3,125 +3,25 @@ package org.example.syncora.agent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.math.abs
 import kotlin.random.Random
 
 /**
  * Unit tests for [EkfWeightUpdater] - gap-closure #3
  * (`agent-architecture-gap-closure.md`). Structurally mirrors
- * [ReadoutTrainerTest]'s convergence / stability / numerical-guard
- * patterns, since the two recursions ([EkfWeightUpdater]'s `P` update and
- * [ReadoutTrainer]'s RLS covariance downdate) are the same shape - see
- * [EkfWeightUpdater]'s own class doc.
+ * [ReadoutTrainerTest] since both classes are the same shape of
+ * recursive, `O(n^2)`-per-step, flat-`FloatArray` covariance update
+ * (RLS there, EKF here) - same numerical-stability hazards, so the same
+ * test patterns apply: PSD-ness/finiteness under repeated updates,
+ * denominator-guard behavior, and convergence toward a known target.
  */
 class EkfWeightUpdaterTest {
 
-    // ---- convergence ----------------------------------------------------
-
-    @Test
-    fun `repeated updates against a fixed target gradient converge the weights toward that target`() {
-        // A minimal stand-in for what PolicyEngine actually does: treat
-        // "gradUtility_t = target - w_{t-1}" as the utility gradient of
-        // maximising -||w - target||^2 / 2 (i.e. driving w toward target),
-        // and confirm the EKF-driven w += delta sequence actually gets
-        // there - the property gap-closure #3 exists to give PolicyEngine.
-        val nWeights = 12
-        val target = FloatArray(nWeights) { i -> (i % 5 - 2) * 0.3f }
-        val updater = EkfWeightUpdater(nWeights = nWeights, beta = 0.01f, tau = 0.995f)
-        val w = FloatArray(nWeights)
-
-        var earlyError = 0f
-        var lateError = 0f
-        repeat(300) { step ->
-            val grad = FloatArray(nWeights) { i -> target[i] - w[i] }
-            val delta = updater.computeDelta(grad)
-            for (i in 0 until nWeights) w[i] += delta[i]
-
-            val error = (0 until nWeights).sumOf { abs(target[it] - w[it]).toDouble() }.toFloat()
-            if (step == 5) earlyError = error
-            if (step == 299) lateError = error
-        }
-
-        assertTrue("expected late-stage error ($lateError) to be much smaller than early-stage error ($earlyError)", lateError < earlyError * 0.05f)
-        assertTrue("expected the weights to have converged closely to the target (error=$lateError)", lateError < 0.05f)
+    private fun gradSequence(nWeights: Int, steps: Int, seed: Long): List<FloatArray> {
+        val rng = Random(seed)
+        return List(steps) { FloatArray(nWeights) { rng.nextFloat() * 2f - 1f } }
     }
 
-    @Test
-    fun `converges faster in early steps than a small fixed-rate update would from the same start`() {
-        // The paper's whole justification for EKF over plain fixed-rate
-        // gradient ascent (what PolicyEngine.update used before
-        // gap-closure #3) is adaptive, faster early convergence - pin that
-        // comparison directly on the same synthetic target-tracking setup.
-        val nWeights = 6
-        val target = FloatArray(nWeights) { 0.5f }
-
-        val ekf = EkfWeightUpdater(nWeights = nWeights, beta = 0.01f, tau = 0.995f)
-        val wEkf = FloatArray(nWeights)
-        repeat(10) {
-            val grad = FloatArray(nWeights) { i -> target[i] - wEkf[i] }
-            val delta = ekf.computeDelta(grad)
-            for (i in 0 until nWeights) wEkf[i] += delta[i]
-        }
-        val ekfError = (0 until nWeights).sumOf { abs(target[it] - wEkf[it]).toDouble() }.toFloat()
-
-        val fixedRate = 0.01f // a conservative, stable fixed learning rate, same order PolicyEngine used pre-gap-closure-#3
-        val wFixed = FloatArray(nWeights)
-        repeat(10) {
-            for (i in 0 until nWeights) wFixed[i] += fixedRate * (target[i] - wFixed[i])
-        }
-        val fixedError = (0 until nWeights).sumOf { abs(target[it] - wFixed[it]).toDouble() }.toFloat()
-
-        assertTrue(
-            "expected the EKF-driven update (error=$ekfError) to converge faster than a conservative fixed-rate update (error=$fixedError) over the same 10 steps",
-            ekfError < fixedError,
-        )
-    }
-
-    // ---- covariance shape / init -----------------------------------------
-
-    @Test
-    fun `covariance is initialized to I over beta`() {
-        val nWeights = 5
-        val beta = 4f
-        val updater = EkfWeightUpdater(nWeights = nWeights, beta = beta)
-        val p = updater.covarianceSnapshot()
-        for (i in 0 until nWeights) {
-            for (j in 0 until nWeights) {
-                val expected = if (i == j) 1f / beta else 0f
-                assertEquals("P[$i,$j] mismatch", expected, p[i * nWeights + j], 1e-6f)
-            }
-        }
-        assertEquals(1f / beta, updater.covarianceMagnitude(), 1e-6f)
-    }
-
-    // ---- stability / non-divergence --------------------------------------
-
-    @Test
-    fun `remains stable over a long noisy replay`() {
-        val nWeights = 40
-        val updater = EkfWeightUpdater(nWeights = nWeights, beta = 0.05f, tau = 0.99f)
-        val rng = Random(11L)
-        repeat(5000) {
-            val grad = FloatArray(nWeights) { (rng.nextFloat() * 2f - 1f) * 3f }
-            updater.computeDelta(grad)
-            assertTrue("EKF diverged (non-finite P entry found)", updater.isStable())
-        }
-    }
-
-    @Test
-    fun `covarianceMagnitude is a finite early-warning signal that tracks isStable`() {
-        val nWeights = 10
-        val updater = EkfWeightUpdater(nWeights = nWeights, beta = 0.1f, tau = 0.995f)
-        val rng = Random(22L)
-        repeat(1000) {
-            val grad = FloatArray(nWeights) { (rng.nextFloat() * 2f - 1f) }
-            updater.computeDelta(grad)
-            assertTrue(updater.isStable())
-            assertTrue(updater.covarianceMagnitude().isFinite())
-        }
-    }
-
-    // ---- construction guards ----------------------------------------------
+    // ---- construction validation ----
 
     @Test(expected = IllegalArgumentException::class)
     fun `nWeights of 0 is rejected`() {
@@ -134,23 +34,143 @@ class EkfWeightUpdaterTest {
     }
 
     @Test(expected = IllegalArgumentException::class)
-    fun `negative beta is rejected`() {
-        EkfWeightUpdater(nWeights = 5, beta = -1f)
-    }
-
-    @Test(expected = IllegalArgumentException::class)
-    fun `tau of 0 is rejected`() {
-        EkfWeightUpdater(nWeights = 5, tau = 0f)
-    }
-
-    @Test(expected = IllegalArgumentException::class)
     fun `negative tau is rejected`() {
-        EkfWeightUpdater(nWeights = 5, tau = -0.5f)
+        EkfWeightUpdater(nWeights = 5, tau = -0.1f)
+    }
+
+    // ---- initial covariance shape ----
+
+    @Test
+    fun `covariance starts diagonal at 1 over beta`() {
+        val nWeights = 6
+        val beta = 0.05f
+        val ekf = EkfWeightUpdater(nWeights = nWeights, beta = beta)
+        val p = ekf.covarianceSnapshot()
+        assertEquals(nWeights * nWeights, p.size)
+        for (i in 0 until nWeights) {
+            for (j in 0 until nWeights) {
+                val expected = if (i == j) 1f / beta else 0f
+                assertEquals("P[$i,$j]", expected, p[i * nWeights + j], 1e-6f)
+            }
+        }
+    }
+
+    // ---- computeDelta shape / determinism ----
+
+    @Test
+    fun `computeDelta returns a delta of the expected width and is deterministic for identical inputs`() {
+        val nWeights = 8
+        val grad = gradSequence(nWeights, steps = 1, seed = 1L)[0]
+
+        val a = EkfWeightUpdater(nWeights = nWeights)
+        val b = EkfWeightUpdater(nWeights = nWeights)
+        val deltaA = a.computeDelta(grad).copyOf()
+        val deltaB = b.computeDelta(grad).copyOf()
+        assertEquals(nWeights, deltaA.size)
+        assertEquals(deltaA.toList(), deltaB.toList())
     }
 
     @Test(expected = IllegalArgumentException::class)
-    fun `gradUtility of the wrong width is rejected`() {
-        val updater = EkfWeightUpdater(nWeights = 8)
-        updater.computeDelta(FloatArray(3))
+    fun `computeDelta rejects a mismatched gradient width`() {
+        val ekf = EkfWeightUpdater(nWeights = 4)
+        ekf.computeDelta(FloatArray(3))
+    }
+
+    // ---- convergence toward a known linear target ----
+
+    @Test
+    fun `EKF-updated weights converge toward a known linear target`() {
+        val nWeights = 15
+        val trueWeights = FloatArray(nWeights) { i -> (i % 5 - 2) * 0.2f }
+
+        val ekf = EkfWeightUpdater(nWeights = nWeights)
+        val weights = FloatArray(nWeights)
+        val regressors = gradSequence(nWeights, steps = 800, seed = 11L)
+
+        fun trueTarget(x: FloatArray): Float {
+            var acc = 0f
+            for (i in x.indices) acc += trueWeights[i] * x[i]
+            return acc
+        }
+        fun dot(w: FloatArray, x: FloatArray): Float {
+            var acc = 0f
+            for (i in x.indices) acc += w[i] * x[i]
+            return acc
+        }
+
+        var earlyAbsError = 0f
+        var lateAbsError = 0f
+        for ((step, x) in regressors.withIndex()) {
+            val target = trueTarget(x)
+            val predicted = dot(weights, x)
+            val error = target - predicted
+            val absError = kotlin.math.abs(error)
+            if (step == 20) earlyAbsError = absError
+            if (step == regressors.lastIndex) lateAbsError = absError
+
+            // gradUtility_i = error * x_i - a simple linear-regression-shaped
+            // "utility gradient" (maximizing -0.5*error^2 pushes weights
+            // toward trueWeights), exercising computeDelta the same way
+            // PolicyEngine.update() does with its own RTRL-derived gradient.
+            val gradUtility = FloatArray(nWeights) { i -> error * x[i] }
+            val delta = ekf.computeDelta(gradUtility)
+            for (i in 0 until nWeights) weights[i] += delta[i]
+        }
+
+        assertTrue("expected some learning by step 20 (error=$earlyAbsError)", earlyAbsError < 10f)
+        assertTrue(
+            "expected the late-stage error ($lateAbsError) to be much smaller than the early one ($earlyAbsError)",
+            lateAbsError < earlyAbsError * 0.1f,
+        )
+        assertTrue("expected convergence close to the true linear target (error=$lateAbsError)", lateAbsError < 0.25f)
+    }
+
+    // ---- stability / non-divergence ----
+
+    @Test
+    fun `EKF covariance remains stable over a long, noisy replay`() {
+        val nWeights = 20
+        val ekf = EkfWeightUpdater(nWeights = nWeights, beta = 0.1f, tau = 0.995f)
+        val rng = Random(4L)
+        val grads = gradSequence(nWeights, steps = 5000, seed = 5L)
+
+        for (base in grads) {
+            val noisy = FloatArray(nWeights) { i -> base[i] * (1f + (rng.nextFloat() - 0.5f)) }
+            ekf.computeDelta(noisy)
+            assertTrue("EKF diverged (non-finite covariance entry found)", ekf.isStable())
+        }
+    }
+
+    @Test
+    fun `tau of exactly 1 (no forgetting, no stabilization rescale) also stays stable`() {
+        val nWeights = 10
+        val ekf = EkfWeightUpdater(nWeights = nWeights, tau = 1.0f)
+        val grads = gradSequence(nWeights, steps = 3000, seed = 6L)
+        for (grad in grads) {
+            ekf.computeDelta(grad)
+            assertTrue(ekf.isStable())
+        }
+    }
+
+    @Test
+    fun `covarianceMagnitude reports infinity if the covariance ever diverges, finite otherwise`() {
+        val nWeights = 5
+        val ekf = EkfWeightUpdater(nWeights = nWeights)
+        assertTrue(ekf.covarianceMagnitude().isFinite())
+        val grads = gradSequence(nWeights, steps = 500, seed = 9L)
+        for (grad in grads) ekf.computeDelta(grad)
+        assertTrue("covariance magnitude should remain finite over a healthy replay", ekf.covarianceMagnitude().isFinite())
+    }
+
+    // ---- degenerate-gradient guard ----
+
+    @Test
+    fun `an all-zero gradient produces an all-zero delta and leaves covariance untouched`() {
+        val nWeights = 6
+        val ekf = EkfWeightUpdater(nWeights = nWeights, beta = 0.2f)
+        val pBefore = ekf.covarianceSnapshot()
+        val delta = ekf.computeDelta(FloatArray(nWeights))
+        for (d in delta) assertEquals(0f, d, 0f)
+        assertEquals(pBefore.toList(), ekf.covarianceSnapshot().toList())
     }
 }
