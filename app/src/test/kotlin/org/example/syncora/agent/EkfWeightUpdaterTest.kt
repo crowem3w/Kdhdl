@@ -60,20 +60,31 @@ class EkfWeightUpdaterTest {
     @Test
     fun `computeDelta returns a delta of the expected width and is deterministic for identical inputs`() {
         val nWeights = 8
-        val grad = gradSequence(nWeights, steps = 1, seed = 1L)[0]
+        val trace = gradSequence(nWeights, steps = 1, seed = 1L)[0]
 
         val a = EkfWeightUpdater(nWeights = nWeights)
         val b = EkfWeightUpdater(nWeights = nWeights)
-        val deltaA = a.computeDelta(grad).copyOf()
-        val deltaB = b.computeDelta(grad).copyOf()
+        val deltaA = a.computeDelta(trace, residual = 0.7f).copyOf()
+        val deltaB = b.computeDelta(trace, residual = 0.7f).copyOf()
         assertEquals(nWeights, deltaA.size)
         assertEquals(deltaA.toList(), deltaB.toList())
     }
 
     @Test(expected = IllegalArgumentException::class)
-    fun `computeDelta rejects a mismatched gradient width`() {
+    fun `computeDelta rejects a mismatched trace width`() {
         val ekf = EkfWeightUpdater(nWeights = 4)
-        ekf.computeDelta(FloatArray(3))
+        ekf.computeDelta(FloatArray(3), residual = 1f)
+    }
+
+    @Test
+    fun `a non-finite residual produces an all-zero delta and leaves covariance untouched`() {
+        val nWeights = 6
+        val ekf = EkfWeightUpdater(nWeights = nWeights, beta = 0.2f)
+        val trace = gradSequence(nWeights, steps = 1, seed = 2L)[0]
+        val pBefore = ekf.covarianceSnapshot()
+        val delta = ekf.computeDelta(trace, residual = Float.NaN)
+        for (d in delta) assertEquals(0f, d, 0f)
+        assertEquals(pBefore.toList(), ekf.covarianceSnapshot().toList())
     }
 
     // ---- convergence toward a known linear target ----
@@ -108,12 +119,13 @@ class EkfWeightUpdaterTest {
             if (step == 20) earlyAbsError = absError
             if (step == regressors.lastIndex) lateAbsError = absError
 
-            // gradUtility_i = error * x_i - a simple linear-regression-shaped
-            // "utility gradient" (maximizing -0.5*error^2 pushes weights
-            // toward trueWeights), exercising computeDelta the same way
-            // PolicyEngine.update() does with its own RTRL-derived gradient.
-            val gradUtility = FloatArray(nWeights) { i -> error * x[i] }
-            val delta = ekf.computeDelta(gradUtility)
+            // trace_i = x_i (this synthetic task's "Jacobian" is just the
+            // regressor itself, i.e. treating weights as directly linear in
+            // x - the same H_t role PolicyEngine's RTRL trace plays), and
+            // the scalar residual is the prediction error - exactly the
+            // trace/residual split PolicyEngine.update() now passes into
+            // computeDelta separately (see EkfWeightUpdater's class doc).
+            val delta = ekf.computeDelta(x, residual = error)
             for (i in 0 until nWeights) weights[i] += delta[i]
         }
 
@@ -136,7 +148,7 @@ class EkfWeightUpdaterTest {
 
         for (base in grads) {
             val noisy = FloatArray(nWeights) { i -> base[i] * (1f + (rng.nextFloat() - 0.5f)) }
-            ekf.computeDelta(noisy)
+            ekf.computeDelta(noisy, residual = rng.nextFloat() * 2f - 1f)
             assertTrue("EKF diverged (non-finite covariance entry found)", ekf.isStable())
         }
     }
@@ -147,7 +159,7 @@ class EkfWeightUpdaterTest {
         val ekf = EkfWeightUpdater(nWeights = nWeights, tau = 1.0f)
         val grads = gradSequence(nWeights, steps = 3000, seed = 6L)
         for (grad in grads) {
-            ekf.computeDelta(grad)
+            ekf.computeDelta(grad, residual = 1f)
             assertTrue(ekf.isStable())
         }
     }
@@ -158,18 +170,18 @@ class EkfWeightUpdaterTest {
         val ekf = EkfWeightUpdater(nWeights = nWeights)
         assertTrue(ekf.covarianceMagnitude().isFinite())
         val grads = gradSequence(nWeights, steps = 500, seed = 9L)
-        for (grad in grads) ekf.computeDelta(grad)
+        for (grad in grads) ekf.computeDelta(grad, residual = 1f)
         assertTrue("covariance magnitude should remain finite over a healthy replay", ekf.covarianceMagnitude().isFinite())
     }
 
     // ---- degenerate-gradient guard ----
 
     @Test
-    fun `an all-zero gradient produces an all-zero delta and leaves covariance untouched`() {
+    fun `an all-zero trace produces an all-zero delta and leaves covariance untouched`() {
         val nWeights = 6
         val ekf = EkfWeightUpdater(nWeights = nWeights, beta = 0.2f)
         val pBefore = ekf.covarianceSnapshot()
-        val delta = ekf.computeDelta(FloatArray(nWeights))
+        val delta = ekf.computeDelta(FloatArray(nWeights), residual = 1f)
         for (d in delta) assertEquals(0f, d, 0f)
         assertEquals(pBefore.toList(), ekf.covarianceSnapshot().toList())
     }

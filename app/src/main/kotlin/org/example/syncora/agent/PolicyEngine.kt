@@ -72,7 +72,11 @@ import kotlin.random.Random
  * class now delegates that to an [EkfWeightUpdater], which treats `w` as
  * the hidden state of an Extended Kalman Filter and gives every weight
  * its own curvature-aware step size via the filter's covariance - see
- * that class's doc for the recursion. [DEFAULT_WEIGHT_CLIP] and
+ * that class's doc for the recursion. [lastTrace] (`H_t`) and
+ * [update]'s `dUtilityDReward * dRewardDPosition` (the scalar `dU/df_t`)
+ * are passed into [EkfWeightUpdater.computeDelta] as two separate
+ * arguments, not fused into one vector first - see that class's doc for
+ * why fusing them is a bug, not a simplification. [DEFAULT_WEIGHT_CLIP] and
  * [DEFAULT_MAX_WEIGHT_DELTA] remain as an outer defense-in-depth bound
  * around the EKF's output, a deliberate divergence *in favor of* the
  * app's more conservative posture (the EKF itself has no boundedness
@@ -161,7 +165,6 @@ class PolicyEngine(
     // Scratch buffers - allocated once, reused every step()/update() call.
     private val regressorScratch = FloatArray(nRegressors)
     private val newTraceScratch = FloatArray(nRegressors)
-    private val gradUtilityScratch = FloatArray(nRegressors)
 
     /** `d(f_t)/d(w_i)` from the most recent [step] call - what [update] applies the gradient against. */
     private val lastTrace = FloatArray(nRegressors)
@@ -240,11 +243,13 @@ class PolicyEngine(
      * bar this [step] call's `f_t` just priced in (gap-closure #3 - see
      * the class doc's "Training" section for the chain rule this
      * multiplies out). `dUtilityDReward * dRewardDPosition` is
-     * `dU/d(f_t)`; multiplied through this class's own per-weight RTRL
-     * trace ([lastTrace], `d(f_t)/d(w_i)`) it gives the per-weight utility
-     * gradient `∇υ_t`, which [EkfWeightUpdater.computeDelta] turns into
-     * the weight delta `k` (`w_t = w_{t-1} + k`, i.e. ascent - utility is
-     * maximised, not minimised). [DEFAULT_MAX_WEIGHT_DELTA]/[weightClip]
+     * `dU/d(f_t)`, the scalar residual; this class's own per-weight RTRL
+     * trace ([lastTrace], `d(f_t)/d(w_i)`, the Jacobian `H_t`) is kept
+     * separate and both are passed into [EkfWeightUpdater.computeDelta] as
+     * two arguments (never pre-multiplied into one fused `∇υ_t` vector -
+     * see that class's doc for why that fusion is a bug), which turns them
+     * into the weight delta `k` (`w_t = w_{t-1} + k`, i.e. ascent - utility
+     * is maximised, not minimised). [DEFAULT_MAX_WEIGHT_DELTA]/[weightClip]
      * remain applied on top of that delta as an outer safety net, since
      * the EKF itself has no boundedness guarantee (see the class doc's
      * gap-closure #3 note).
@@ -256,14 +261,15 @@ class PolicyEngine(
         val gradientCoefficient = (dUtilityDReward * dRewardDPosition).toFloat()
         if (!gradientCoefficient.isFinite()) return // guard: never let a bad gradient corrupt stable weights
 
-        var i = 0
-        while (i < nRegressors) {
-            gradUtilityScratch[i] = gradientCoefficient * lastTrace[i]
-            i++
-        }
-        val delta = ekf.computeDelta(gradUtilityScratch)
+        // lastTrace (H_t = d(f_t)/d(w)) and gradientCoefficient (dU/df_t)
+        // are passed separately - the EKF's covariance update must see the
+        // raw trace alone, never pre-multiplied by the scalar utility
+        // gradient, or its notion of "information gained" scales with the
+        // square of the error and collapses P prematurely. See
+        // EkfWeightUpdater's class doc ("bug fix" note) for the analysis.
+        val delta = ekf.computeDelta(lastTrace, gradientCoefficient)
 
-        i = 0
+        var i = 0
         while (i < nRegressors) {
             var d = delta[i]
             if (!d.isFinite()) d = 0f

@@ -8,10 +8,10 @@ package org.example.syncora.agent
  *
  * ### What this replaces
  * [PolicyEngine] used to update its weights via plain gradient ascent:
- * `w_i += learningRate * gradUtility_i`, a fixed, isotropic step size for
- * every weight. The paper instead treats the weight vector as the hidden
- * state of an EKF and the utility gradient `∇υ_t` as (proportional to)
- * an observation driving that state, giving each weight its own,
+ * `w_i += learningRate * dU/df_t * trace_i`, a fixed, isotropic step size
+ * for every weight. The paper instead treats the weight vector as the
+ * hidden state of an EKF and the RTRL trace as (proportional to) an
+ * observation driving that state, giving each weight its own,
  * curvature-aware adaptive step size via the filter's covariance `P` -
  * the same second-order intuition as Newton's method, but built up
  * recursively online instead of requiring a batch Hessian.
@@ -19,18 +19,49 @@ package org.example.syncora.agent
  * This class only replaces *how the RTRL trace becomes a weight delta*.
  * The trace itself - `d(f_t)/d(w_i)`, computed via [PolicyEngine]'s own
  * truncated RTRL through the feedback recurrence - is unchanged; see
- * [PolicyEngine.update] for how the two compose:
- * `gradUtility_i = dUtilityDReward * dRewardDPosition * trace_i`, and
- * that product is what's passed into [computeDelta] here.
+ * [PolicyEngine.update] for how the two compose.
  *
- * ### The recursion (paper §III-B2 / doc §3)
+ * ### Bug fix: the Jacobian and the residual must stay separate
+ * An earlier revision fused `dUtilityDReward * dRewardDPosition` (a
+ * *scalar* - the sensitivity of utility to the policy's raw output,
+ * `dU/df_t`) into the per-weight trace *before* handing the whole product
+ * to this class as a single `gradUtility` vector, then used that fused
+ * vector both to form the Kalman gain (`q`, `k`) *and* as the delta
+ * itself. That conflates two different roles: in the standard EKF
+ * training recursion for a network's weights (Williams 1992; Haykin,
+ * *Kalman Filtering and Neural Networks*, ch. 2 - also what
+ * [ReadoutTrainer]'s own RLS mirrors, see its class doc: a *raw regressor*
+ * `x_t` builds `Px`/`denom`, and a *separate scalar residual* `e_o` scales
+ * the delta), the quantity that should build the covariance/gain (`P`,
+ * `q`, `k`) is the network's own output Jacobian `H_t = d(f_t)/d(w)` - i.e.
+ * [PolicyEngine]'s RTRL [PolicyEngine.traceSnapshot] alone - while the
+ * scalar `dU/df_t` only ever multiplies the *final* delta.
+ *
+ * Feeding the fused vector into the quadratic form instead means the
+ * "information" the filter thinks it has just observed scales with the
+ * *square* of the current error, so a single early, large-error step
+ * collapses `P` almost to zero (see the class's own
+ * `EkfWeightUpdaterTest` for the regression that catches this: with the
+ * fused vector, `P`'s trace fell from `1400` to `~0.14` within the first
+ * hundred steps and the weights never recovered, converging to nowhere
+ * near the true target). Feeding the *raw trace* keeps `P`'s scale tied to
+ * the regressor's own geometry - exactly as RLS does - so the filter
+ * converges the way the paper's Monte Carlo results imply it should.
+ *
+ * ### The recursion (paper §III-B2 / doc §3), corrected
  * ```
- * q     = 1 + ∇υ_tᵀ P_{t-1} ∇υ_t / tau
- * k     = P_{t-1} ∇υ_t / (q * tau)
+ * H_t   = trace_t                                  (d(f_t)/d(w), NOT pre-multiplied by dU/df_t)
+ * q     = 1 + H_tᵀ P_{t-1} H_t / tau
+ * gain  = P_{t-1} H_t / (q * tau)
+ * k     = (dU/df_t) * gain                          (the scalar residual scales the delta only)
  * w_t   = w_{t-1} + k
- * P_t   = P_{t-1}/tau - k kᵀ q
- * P_t   = P_t * tau                     (variance stabilization)
+ * P_t   = P_{t-1} - (q * tau) * gain gainᵀ
  * ```
+ * (The doc's `P_t = P_{t-1}/tau − k kᵀ q` then `P_t *= tau` "stabilization"
+ * step algebraically cancels to exactly `P_{t-1} − (q·tau)·k kᵀ` - the two
+ * lines were never doing anything beyond that single downdate. Written as
+ * one step here to avoid implying there's a separate forgetting-factor
+ * growth the old two-line form didn't actually provide.)
  * `P` is initialized to `I / beta` (`beta` a ridge penalty - a small
  * `beta` means a large initial `P`, i.e. very little prior confidence, so
  * early updates move fast, the same role [ReadoutTrainer]'s
@@ -52,7 +83,7 @@ package org.example.syncora.agent
  * Same shape and cost discipline as [ReadoutTrainer]'s RLS: `P` is a
  * flat, row-major `FloatArray` (`nWeights x nWeights`), no boxed
  * `Double`, no `Array<FloatArray>`. [computeDelta]'s two `O(nWeights^2)`
- * passes (the `Pg = P * gradUtility` matrix-vector product and the `P`
+ * passes (the `Pg = P * trace` matrix-vector product and the `P`
  * rank-one downdate) are the only per-step cost - the same order as the
  * RLS update it structurally mirrors. Scratch buffers are allocated once,
  * here in the constructor.
@@ -100,42 +131,56 @@ class EkfWeightUpdater(
     // Scratch buffers, allocated once - the only allocations this class
     // ever performs beyond the covariance matrix itself.
     private val pgScratch = FloatArray(nWeights)
+    private val gainScratch = FloatArray(nWeights)
     private val kScratch = FloatArray(nWeights)
 
     /**
-     * One EKF step: turns the per-weight utility gradient [gradUtility]
-     * into a weight delta `k`, and updates the internal covariance `P` in
-     * place. See the class doc for the recursion; `O(nWeights^2)`, no
-     * allocation.
+     * One EKF step: turns [trace] (the RTRL Jacobian `H_t = d(f_t)/d(w)`)
+     * and the scalar [residual] (`dU/df_t`) into a weight delta `k`, and
+     * updates the internal covariance `P` in place. See the class doc for
+     * the recursion and for why `trace` and `residual` must stay separate
+     * arguments rather than being pre-multiplied by the caller.
+     * `O(nWeights^2)`, no allocation.
      *
-     * @param gradUtility `∇υ_t` - `dUtilityDReward * dRewardDPosition *
-     *   trace_i` per weight, i.e. exactly what [PolicyEngine.update] used
-     *   to apply directly as a gradient-ascent step before this gap.
+     * @param trace `H_t` - the per-weight RTRL trace `d(f_t)/d(w_i)` from
+     *   [PolicyEngine.traceSnapshot]/`lastTrace`. This is the network's own
+     *   output-sensitivity Jacobian and must **not** be pre-scaled by the
+     *   utility gradient - see the class doc's "bug fix" note.
+     * @param residual `dU/df_t` - `dUtilityDReward * dRewardDPosition`,
+     *   the scalar sensitivity of utility to the policy's raw output.
+     *   Scales the resulting delta only; it never enters the covariance
+     *   update, exactly mirroring how [ReadoutTrainer.update] keeps its
+     *   scalar error `e_o` out of the `P` downdate.
      * @return the weight delta `k` to add - `w_t = w_{t-1} + k`. Returns
      *   [kScratch], the engine's own scratch buffer (same convention as
      *   [ReservoirEngine.step]/[ReadoutTrainer.predict]) - copy it if a
      *   stable snapshot is needed past the caller's immediate use. If the
      *   update denominator degenerates (guarded by [DENOM_EPS], mirroring
-     *   [ReadoutTrainer]'s own guard), returns an all-zero delta and
-     *   leaves `P` untouched rather than risking a corrupting step.
+     *   [ReadoutTrainer]'s own guard) or [residual] isn't finite, returns
+     *   an all-zero delta and leaves `P` untouched rather than risking a
+     *   corrupting step.
      */
-    fun computeDelta(gradUtility: FloatArray): FloatArray {
-        require(gradUtility.size == nWeights) {
-            "gradUtility size ${gradUtility.size} != nWeights $nWeights"
+    fun computeDelta(trace: FloatArray, residual: Float): FloatArray {
+        require(trace.size == nWeights) {
+            "trace size ${trace.size} != nWeights $nWeights"
+        }
+        if (!residual.isFinite()) {
+            kScratch.fill(0f)
+            return kScratch
         }
 
-        // Pg = P_{t-1} * gradUtility
+        // Pg = P_{t-1} * H_t  (H_t = trace, NOT residual-scaled)
         var i = 0
         while (i < nWeights) {
-            pgScratch[i] = dot(covariance, i * nWeights, gradUtility)
+            pgScratch[i] = dot(covariance, i * nWeights, trace)
             i++
         }
 
-        // q = 1 + gradUtility^T Pg / tau
+        // q = 1 + H_t^T Pg / tau
         var quad = 0f
         i = 0
         while (i < nWeights) {
-            quad += gradUtility[i] * pgScratch[i]
+            quad += trace[i] * pgScratch[i]
             i++
         }
         val q = 1f + quad / tau
@@ -145,37 +190,47 @@ class EkfWeightUpdater(
             return kScratch
         }
 
-        // k = Pg / (q * tau)
+        // gain = Pg / (q * tau); k = residual * gain. gainScratch is reused
+        // (post-multiplication) as kScratch's backing buffer via in-place
+        // scaling, so both the covariance downdate (which needs the
+        // *unscaled* gain) and the returned delta (which needs the
+        // *residual-scaled* gain) are available without an extra buffer.
         i = 0
         while (i < nWeights) {
-            kScratch[i] = pgScratch[i] / denom
+            gainScratch[i] = pgScratch[i] / denom
             i++
         }
 
-        // P_t = P_{t-1}/tau - k k^T q, then *= tau (stabilization),
-        // algebraically combined into one pass: P_t = P_{t-1} - k k^T (q * tau)
-        val kqTau = q * tau
+        // P_t = P_{t-1} - (q * tau) * gain * gain^T  - uses the unscaled
+        // gain, never the residual, so the covariance reflects only the
+        // regressor's own geometry (see class doc's "bug fix" note).
         i = 0
         while (i < nWeights) {
             val rowBase = i * nWeights
-            val ki = kScratch[i]
+            val gi = gainScratch[i]
             var j = 0
             while (j < nWeights) {
-                covariance[rowBase + j] -= ki * kScratch[j] * kqTau
+                covariance[rowBase + j] -= gi * gainScratch[j] * denom
                 j++
             }
+            i++
+        }
+
+        i = 0
+        while (i < nWeights) {
+            kScratch[i] = residual * gainScratch[i]
             i++
         }
 
         return kScratch
     }
 
-    /** Dot product of `row` (a length-[nWeights] slice of a flat matrix starting at [base]) with [gradUtility]. */
-    private fun dot(flatMatrix: FloatArray, base: Int, gradUtility: FloatArray): Float {
+    /** Dot product of `row` (a length-[nWeights] slice of a flat matrix starting at [base]) with [vector]. */
+    private fun dot(flatMatrix: FloatArray, base: Int, vector: FloatArray): Float {
         var acc = 0f
         var k = 0
         while (k < nWeights) {
-            acc += flatMatrix[base + k] * gradUtility[k]
+            acc += flatMatrix[base + k] * vector[k]
             k++
         }
         return acc
