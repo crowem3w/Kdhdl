@@ -171,7 +171,7 @@ class AgentLiveSession(
          * passed straight through to
          * [AgentCheckpointStore.restoreOrFreshOrchestrator] - see that
          * function's doc for why the checkpoint itself doesn't carry these.
-         * [policyNHidden]/[policyNBack]/[policyLearningRate]/[policyWeightClip]
+         * [policyNHidden]/[policyNBack]/[policyBeta]/[policyTau]/[policyWeightClip]
          * are the shape/hyperparameters a *fresh* [PolicyEngine] is built
          * with if there's nothing to restore - ignored once a checkpoint is
          * restored, whose own saved shape wins instead (same reasoning
@@ -185,7 +185,8 @@ class AgentLiveSession(
             orderEmitter: PositionOrderEmitter,
             policyNHidden: Int = reservoirWeights.nHidden,
             policyNBack: Int = PolicyEngine.DEFAULT_N_BACK,
-            policyLearningRate: Float = PolicyEngine.DEFAULT_LEARNING_RATE,
+            policyBeta: Float = EkfWeightUpdater.DEFAULT_BETA,
+            policyTau: Float = EkfWeightUpdater.DEFAULT_TAU,
             policyWeightClip: Float = PolicyEngine.DEFAULT_WEIGHT_CLIP,
             scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
         ): AgentLiveSession {
@@ -195,7 +196,8 @@ class AgentLiveSession(
                 rewardEngine = rewardEngine,
                 policyNHidden = policyNHidden,
                 policyNBack = policyNBack,
-                policyLearningRate = policyLearningRate,
+                policyBeta = policyBeta,
+                policyTau = policyTau,
                 policyWeightClip = policyWeightClip,
             )
             return AgentLiveSession(

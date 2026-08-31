@@ -109,7 +109,8 @@ fun AgentCheckpoint.toOrchestrator(
     featureAssembler: FeatureAssembler,
     reservoirWeights: ReservoirWeights,
     rewardEngine: RewardEngine,
-    policyLearningRate: Float = PolicyEngine.DEFAULT_LEARNING_RATE,
+    policyBeta: Float = EkfWeightUpdater.DEFAULT_BETA,
+    policyTau: Float = EkfWeightUpdater.DEFAULT_TAU,
     policyWeightClip: Float = PolicyEngine.DEFAULT_WEIGHT_CLIP,
 ): AgentOrchestrator {
     require(reservoirWeights.nHidden == reservoirState.size) {
@@ -127,7 +128,8 @@ fun AgentCheckpoint.toOrchestrator(
     val policy = PolicyEngine(
         nHidden = policyNHidden,
         nBack = policyNBack,
-        learningRate = policyLearningRate,
+        beta = policyBeta,
+        tau = policyTau,
         weightClip = policyWeightClip,
         initialWeights = policyWeights,
     )
@@ -184,7 +186,8 @@ suspend fun AgentCheckpointStore.restoreOrFreshOrchestrator(
     rewardEngine: RewardEngine,
     policyNHidden: Int = reservoirWeights.nHidden,
     policyNBack: Int = PolicyEngine.DEFAULT_N_BACK,
-    policyLearningRate: Float = PolicyEngine.DEFAULT_LEARNING_RATE,
+    policyBeta: Float = EkfWeightUpdater.DEFAULT_BETA,
+    policyTau: Float = EkfWeightUpdater.DEFAULT_TAU,
     policyWeightClip: Float = PolicyEngine.DEFAULT_WEIGHT_CLIP,
 ): AgentOrchestrator {
     val restored = load()?.let { checkpoint ->
@@ -193,7 +196,8 @@ suspend fun AgentCheckpointStore.restoreOrFreshOrchestrator(
                 featureAssembler = featureAssembler,
                 reservoirWeights = reservoirWeights,
                 rewardEngine = rewardEngine,
-                policyLearningRate = policyLearningRate,
+                policyBeta = policyBeta,
+                policyTau = policyTau,
                 policyWeightClip = policyWeightClip,
             )
         } catch (e: IllegalArgumentException) {
@@ -213,7 +217,8 @@ suspend fun AgentCheckpointStore.restoreOrFreshOrchestrator(
         policyEngine = PolicyEngine(
             nHidden = policyNHidden,
             nBack = policyNBack,
-            learningRate = policyLearningRate,
+            beta = policyBeta,
+            tau = policyTau,
             weightClip = policyWeightClip,
         ),
     )

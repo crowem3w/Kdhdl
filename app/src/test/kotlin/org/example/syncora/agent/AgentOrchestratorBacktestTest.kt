@@ -77,7 +77,7 @@ class AgentOrchestratorBacktestTest {
         val reservoir = ReservoirEngine(weights)
         val readout = ReadoutTrainer(nHidden = nHidden, forgettingFactor = 0.995f)
         val reward = RewardEngine()
-        val policy = PolicyEngine(nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L)
+        val policy = PolicyEngine(nHidden = nHidden, nBack = 5, seed = 3L)
 
         val orchestrator = AgentOrchestrator(assembler, reservoir, readout, reward, policy)
 
@@ -126,11 +126,14 @@ class AgentOrchestratorBacktestTest {
     }
 
     @Test
-    fun `a flat policy (nBack = 0, zero learning rate) still produces a stable, well-formed run`() {
+    fun `a flat policy (nBack = 0, near-zero EKF gain) still produces a stable, well-formed run`() {
         // A degenerate but well-defined configuration - checks the
         // orchestrator's own plumbing (not the policy's learning dynamics)
         // stays sane even when the policy is frozen near its small-random
-        // initialization the whole run.
+        // initialization the whole run. A huge ridge penalty (beta) makes
+        // the EKF's initial covariance P_0 = I/beta ~ 0, so every weight
+        // delta stays near-zero for the whole run - the EKF-era equivalent
+        // of the old gradient-ascent updater's near-zero learningRate.
         val bars = 500
         val klines = fixtureKlines(bars = bars, seed = 5150L)
 
@@ -139,7 +142,7 @@ class AgentOrchestratorBacktestTest {
         val reservoir = ReservoirEngine(weights)
         val readout = ReadoutTrainer(nHidden = nHidden)
         val reward = RewardEngine()
-        val policy = PolicyEngine(nHidden = nHidden, nBack = 0, learningRate = 1e-9f, seed = 1L)
+        val policy = PolicyEngine(nHidden = nHidden, nBack = 0, beta = 1e9f, seed = 1L)
 
         val orchestrator = AgentOrchestrator(assembler, reservoir, readout, reward, policy)
         val result = orchestrator.runBacktest(
@@ -173,7 +176,7 @@ class AgentOrchestratorBacktestTest {
         val untouchedWOut = readout.wOutSnapshot()
         val untouchedCovariance = readout.covarianceSnapshot()
         val reward = RewardEngine()
-        val policy = PolicyEngine(nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L)
+        val policy = PolicyEngine(nHidden = nHidden, nBack = 5, seed = 3L)
 
         val orchestrator = AgentOrchestrator(assembler, reservoir, readout, reward, policy, diagnosticsOnly = false)
         val result = orchestrator.runBacktest(
@@ -217,7 +220,7 @@ class AgentOrchestratorBacktestTest {
                 reservoir = ReservoirEngine(weights),
                 readoutTrainer = ReadoutTrainer(nHidden = nHidden),
                 rewardEngine = RewardEngine(),
-                policyEngine = PolicyEngine(nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L),
+                policyEngine = PolicyEngine(nHidden = nHidden, nBack = 5, seed = 3L),
                 diagnosticsOnly = diagnosticsOnly,
             )
         }

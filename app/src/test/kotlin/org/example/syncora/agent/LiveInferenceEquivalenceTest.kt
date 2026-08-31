@@ -79,7 +79,7 @@ class LiveInferenceEquivalenceTest {
         val reservoir = ReservoirEngine(weights)
         val readout = ReadoutTrainer(nHidden = nHidden, forgettingFactor = 0.995f)
         val reward = RewardEngine()
-        val policy = PolicyEngine(nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 9L)
+        val policy = PolicyEngine(nHidden = nHidden, nBack = 5, seed = 9L)
         return AgentOrchestrator(assembler, reservoir, readout, reward, policy)
     }
 

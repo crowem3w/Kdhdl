@@ -104,7 +104,8 @@ class AgentSoakHarness(
     private val orderEmitterFactory: () -> PositionOrderEmitter,
     private val policyNHidden: Int = reservoirWeights.nHidden,
     private val policyNBack: Int = PolicyEngine.DEFAULT_N_BACK,
-    private val policyLearningRate: Float = PolicyEngine.DEFAULT_LEARNING_RATE,
+    private val policyBeta: Float = EkfWeightUpdater.DEFAULT_BETA,
+    private val policyTau: Float = EkfWeightUpdater.DEFAULT_TAU,
     private val policyWeightClip: Float = PolicyEngine.DEFAULT_WEIGHT_CLIP,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
@@ -294,7 +295,8 @@ class AgentSoakHarness(
         orderEmitter = orderEmitterFactory(),
         policyNHidden = policyNHidden,
         policyNBack = policyNBack,
-        policyLearningRate = policyLearningRate,
+        policyBeta = policyBeta,
+        policyTau = policyTau,
         policyWeightClip = policyWeightClip,
         scope = scope,
     )
