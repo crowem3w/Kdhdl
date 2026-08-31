@@ -44,6 +44,7 @@ class ReservoirEngineBenchmarkTest {
         const val TAG = "ReservoirBenchmark"
         const val N_HIDDEN = 150
         const val N_INPUT = 6 // FeatureAssembler.FEATURE_WIDTH
+        const val N_BACK = 5 // PolicyEngine.DEFAULT_N_BACK - the realistic feedback width
         const val WARMUP_STEPS = 2_000
         const val MEASURED_STEPS = 20_000
 
@@ -95,6 +96,58 @@ class ReservoirEngineBenchmarkTest {
 
         assertTrue(
             "reservoir step averaged %.1f us, which exceeds the %.1f us headroom budget (%.2f%% of the %dms bar interval)"
+                .format(
+                    avgStepNanos / 1_000.0,
+                    budgetNanos / 1_000.0,
+                    BUDGET_FRACTION_OF_BAR * 100,
+                    Timeframe.ONE_MINUTE.durationMillis,
+                ),
+            avgStepNanos < budgetNanos,
+        )
+    }
+
+    /**
+     * Same shape as [step_at_n150_fits_comfortably_within_the_bar_close_budget],
+     * but with gap-closure #1's `W_back` feedback path enabled at
+     * [N_BACK] = 5 (matching [PolicyEngine.DEFAULT_N_BACK]) - the added
+     * `O(nHidden * nBack)` cost the gap-closure plan calls out as "small
+     * relative to the existing `O(nHidden^2)` term". This should land at
+     * essentially the same average step time as the feedback-free case
+     * above, well within the same headroom budget.
+     */
+    @Test
+    fun step_at_n150_with_wBack_feedback_still_fits_comfortably_within_the_bar_close_budget() {
+        logDeviceFingerprint()
+
+        val weights = ReservoirWeights.randomWeights(nInput = N_INPUT, nHidden = N_HIDDEN, nBack = N_BACK, seed = 1234L)
+        val engine = ReservoirEngine(weights)
+        val rng = Random(5678L)
+
+        repeat(WARMUP_STEPS) {
+            engine.step(FloatArray(N_INPUT) { rng.nextFloat() * 2f - 1f }, ownOutput = rng.nextFloat() * 2f - 1f)
+        }
+
+        val inputs = Array(MEASURED_STEPS) { FloatArray(N_INPUT) { rng.nextFloat() * 2f - 1f } }
+        val ownOutputs = FloatArray(MEASURED_STEPS) { rng.nextFloat() * 2f - 1f }
+
+        val startNanos = System.nanoTime()
+        for (i in inputs.indices) {
+            engine.step(inputs[i], ownOutputs[i])
+        }
+        val elapsedNanos = System.nanoTime() - startNanos
+
+        val avgStepNanos = elapsedNanos.toDouble() / MEASURED_STEPS
+        val barIntervalNanos = Timeframe.ONE_MINUTE.durationMillis * 1_000_000.0
+        val budgetNanos = barIntervalNanos * BUDGET_FRACTION_OF_BAR
+
+        Log.i(
+            TAG,
+            "n_hidden=$N_HIDDEN n_back=$N_BACK avg step = %.1f us over %d steps (budget = %.1f us, bar interval = %.0f ms)"
+                .format(avgStepNanos / 1_000.0, MEASURED_STEPS, budgetNanos / 1_000.0, barIntervalNanos / 1_000_000.0),
+        )
+
+        assertTrue(
+            "reservoir step with W_back averaged %.1f us, which exceeds the %.1f us headroom budget (%.2f%% of the %dms bar interval)"
                 .format(
                     avgStepNanos / 1_000.0,
                     budgetNanos / 1_000.0,

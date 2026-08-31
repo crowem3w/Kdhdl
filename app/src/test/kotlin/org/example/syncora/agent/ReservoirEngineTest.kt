@@ -200,6 +200,128 @@ class ReservoirEngineTest {
         }
     }
 
+    // ---- gap-closure #1: W_back own-output feedback ----------------------
+
+    @Test
+    fun `nBack = 0 (default) makes ownOutput a no-op`() {
+        val weights = ReservoirWeights.randomWeights(nInput = nInput, nHidden = nHidden, seed = 5L)
+        val withoutFeedbackArg = ReservoirEngine(weights)
+        val withIgnoredFeedbackArg = ReservoirEngine(weights)
+
+        for (u in featureSequence(steps = 25)) {
+            val a = withoutFeedbackArg.step(u).copyOf()
+            val b = withIgnoredFeedbackArg.step(u, ownOutput = 0.73f).copyOf()
+            assertEquals(a.toList(), b.toList())
+        }
+    }
+
+    @Test
+    fun `two engines with identical weights but different initial states still converge with feedback enabled`() {
+        val weights = ReservoirWeights.randomWeights(nInput = nInput, nHidden = nHidden, nBack = 5, seed = 7L)
+
+        val zeroStart = ReservoirEngine(weights, initialState = FloatArray(nHidden))
+        val randomStart = ReservoirEngine(
+            weights,
+            initialState = FloatArray(nHidden) { Random(123L).nextFloat() * 2f - 1f },
+        )
+
+        val inputs = featureSequence(steps = 500)
+        val feedbackRng = Random(321L)
+        var lastDiff = Float.MAX_VALUE
+        for (u in inputs) {
+            // Same feedback sequence into both copies of the *same* network -
+            // Definition 2 only requires the input sequence (here, u_t and
+            // the feedback channel together) to match, not the state.
+            val ownOutput = feedbackRng.nextFloat() * 2f - 1f
+            zeroStart.step(u, ownOutput)
+            randomStart.step(u, ownOutput)
+            lastDiff = maxAbsDiff(zeroStart.currentState(), randomStart.currentState())
+        }
+
+        assertTrue(
+            "echo state property violated with feedback enabled: trajectories did not converge (final max abs diff = $lastDiff)",
+            lastDiff < 1e-3f,
+        )
+    }
+
+    @Test
+    fun `feedback history never contains this step's own output (no look-ahead)`() {
+        val nBack = 3
+        val weights = ReservoirWeights.randomWeights(nInput = nInput, nHidden = nHidden, nBack = nBack, seed = 9L)
+        val engine = ReservoirEngine(weights)
+
+        val inputs = featureSequence(steps = 10)
+        val fakeFuturePositions = floatArrayOf(0.1f, -0.4f, 0.9f, -0.9f, 0.2f, 0.0f, 0.5f, -0.1f, 0.3f, -0.6f)
+
+        val expectedHistory = ArrayDeque<Float>()
+        for ((i, u) in inputs.withIndex()) {
+            engine.step(u, ownOutput = fakeFuturePositions[i])
+            // The history fed into *this* step's x_t must be exactly
+            // [f_{t-1}, ..., f_{t-nBack}] - i.e. built from ownOutput values
+            // passed on *previous* calls, never including the value just
+            // passed on this call (that would be f_t leaking into ŷ_t).
+            expectedHistory.addFirst(fakeFuturePositions[i])
+            if (expectedHistory.size > nBack) expectedHistory.removeLast()
+
+            val actual = engine.currentFeedbackHistory()
+            for (k in 0 until nBack) {
+                val expected = expectedHistory.getOrNull(k) ?: 0f
+                // expectedHistory reflects state *after* this call's insert,
+                // but currentFeedbackHistory() also reflects the state used
+                // to *compute* x_t this step (shift happens before the
+                // forward pass) - both should agree post-shift.
+                assertEquals(
+                    "feedback slot $k after step $i mismatched (look-ahead bug)",
+                    expected,
+                    actual[k],
+                    0f,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `augmentedState concatenates u_t, x_t and the feedback history in order`() {
+        val nBack = 4
+        val weights = ReservoirWeights.randomWeights(nInput = nInput, nHidden = nHidden, nBack = nBack, seed = 13L)
+        val engine = ReservoirEngine(weights)
+
+        val u = featureSequence(1)[0]
+        engine.step(u, ownOutput = 0.42f)
+        val z = engine.augmentedState(u)
+
+        assertEquals(nInput + nHidden + nBack, z.size)
+        for (i in 0 until nInput) assertEquals(u[i], z[i], 0f)
+        for (h in 0 until nHidden) assertEquals(engine.currentState()[h], z[nInput + h], 0f)
+        for (k in 0 until nBack) assertEquals(engine.currentFeedbackHistory()[k], z[nInput + nHidden + k], 0f)
+    }
+
+    @Test
+    fun `resetState clears the feedback history along with the hidden state`() {
+        val weights = ReservoirWeights.randomWeights(nInput = nInput, nHidden = nHidden, nBack = 3, seed = 17L)
+        val engine = ReservoirEngine(weights)
+        engine.step(featureSequence(1)[0], ownOutput = 0.5f)
+        assertTrue(engine.currentFeedbackHistory().any { it != 0f })
+
+        engine.resetState()
+
+        for (f in engine.currentFeedbackHistory()) assertEquals(0f, f, 0f)
+    }
+
+    @Test
+    fun `same seed produces bit-identical wBack, and wInput-wHidden-rho are unaffected by nBack`() {
+        val withoutFeedback = ReservoirWeights.randomWeights(nInput = nInput, nHidden = nHidden, seed = 42L)
+        val withFeedback = ReservoirWeights.randomWeights(nInput = nInput, nHidden = nHidden, nBack = 6, seed = 42L)
+
+        assertEquals(withoutFeedback.wInput.toList(), withFeedback.wInput.toList())
+        assertEquals(withoutFeedback.wHidden.toList(), withFeedback.wHidden.toList())
+        assertEquals(withoutFeedback.spectralRadiusAchieved, withFeedback.spectralRadiusAchieved, 0f)
+
+        val w1 = ReservoirWeights.randomWeights(nInput = nInput, nHidden = nHidden, nBack = 6, seed = 99L)
+        val w2 = ReservoirWeights.randomWeights(nInput = nInput, nHidden = nHidden, nBack = 6, seed = 99L)
+        assertEquals(w1.wBack.toList(), w2.wBack.toList())
+    }
+
     private fun maxAbsDiff(a: FloatArray, b: FloatArray): Float {
         var maxDiff = 0f
         for (i in a.indices) {
