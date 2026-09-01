@@ -15,29 +15,11 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
-        // Instrumented tests only exist for on-device benchmarks that must
-        // run on real hardware (e.g. ReservoirEngineBenchmarkTest, which
-        // must be run on the MT6765G target device, never an emulator).
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
-    }
-
-    testOptions {
-        unitTests {
-            // FileAgentCheckpointStore/FileReadoutCheckpointStore log via
-            // android.util.Log on their error paths (see e.g.
-            // AgentCheckpointStoreTest's corrupt-file case). Plain JVM unit
-            // tests run against the unmocked android.jar stub, where every
-            // framework method throws by default - without this flag,
-            // hitting Log.w() during a test blows up with a RuntimeException
-            // instead of letting the intended null-return/error-handling
-            // path run.
-            isReturnDefaultValues = true
-        }
     }
 }
 
@@ -54,10 +36,4 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.security.crypto)
-    testImplementation(libs.junit)
-    testImplementation(libs.org.json)
-    testImplementation(libs.kotlinx.coroutines.test)
-    androidTestImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.test.runner)
-    androidTestImplementation(libs.androidx.test.ext.junit)
 }

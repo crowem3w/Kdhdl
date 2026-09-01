@@ -23,16 +23,6 @@ import android.widget.TextView
 import androidx.core.content.res.ResourcesCompat
 import org.example.syncora.R
 
-/**
- * Full-screen modal launched from the bottom-bar "data" button.
- *
- * Mirrors [TradingModeDialog]'s glass-card shell (same blurred backdrop,
- * translucent bordered card, header row with back/close controls) but opens
- * straight onto a vertical list of data categories - Order Book, OHLCV, Open
- * Interest, Funding Rates - each row showing a small leading icon plus a
- * title/description text block. Each row drills into its own bare screen;
- * the content for those screens is intentionally left empty for now.
- */
 class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingModalTheme) {
 
     private enum class Screen { OPTIONS, ORDER_BOOK, OHLCV, OPEN_INTEREST, FUNDING_RATES }
@@ -72,8 +62,6 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
     )
 
     private companion object {
-        // Same glass-panel math as TradingModeDialog, kept in sync so the
-        // two modals read as one consistent design language.
         const val CARD_FILL_OPACITY_PERCENT = 0.75f
         val CARD_BASE_COLOR_RGB = Color.parseColor("#1C1C1E")
 
@@ -132,8 +120,6 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
         }
     }
 
-    // ---- Root scaffold: full-screen scrim + centered glass card ----
-
     private fun buildRootView(): View {
         rootView = FrameLayout(context).apply {
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
@@ -157,7 +143,7 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
             clipToOutline = true
             elevation = dp(16).toFloat()
             isClickable = true
-            setOnClickListener { /* consume: don't dismiss when tapping inside the card */ }
+            setOnClickListener {  }
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -269,8 +255,6 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
         }
     }
 
-    // ---- Screen 1: vertical list of icon + title/description rows ----
-
     private fun buildOptionsScreen(): View {
         val list = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -344,8 +328,6 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
 
         return row
     }
-
-    // ---- Screens 2-5: bare placeholders, content intentionally left empty ----
 
     private fun buildEmptyScreen(): View = FrameLayout(context).apply {
         layoutParams = ViewGroup.LayoutParams(

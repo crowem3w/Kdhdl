@@ -1,14 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-    Glass-card frame for the "keep it running in the background" onboarding
-    dialog. Mirrors the translucent, thin-bordered panel look from the
-    onboarding reference mock: a dark, semi-transparent fill with a soft
-    light stroke, plus a faint top-down sheen so it reads as a glass panel
-    over whatever sits behind it (the orb / dark onboarding background).
--->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Base translucent panel -->
     <item>
         <shape android:shape="rectangle">
             <corners android:radius="24dp" />
@@ -19,7 +11,6 @@
         </shape>
     </item>
 
-    <!-- Soft glass sheen along the top edge -->
     <item android:top="1dp" android:left="1dp" android:right="1dp">
         <shape android:shape="rectangle">
             <corners android:radius="23dp" />
