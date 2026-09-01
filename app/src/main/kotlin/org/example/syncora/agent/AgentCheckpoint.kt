@@ -15,17 +15,30 @@ import java.io.File
  * / Phase 2), the readout's `W_out` and RLS covariance `P` (wrapped as the
  * existing [ReadoutCheckpoint] from Phase 3 - no need to re-derive that
  * shape here), and the policy's trained weights ([PolicyEngine] / Phase 5),
- * plus the shape parameters ([policyNHidden]/[policyNBack]) needed to
- * reconstruct a *compatible* [PolicyEngine] - same reasoning
+ * plus the shape parameters ([policyNInput]/[policyNHidden]/[policyNBack])
+ * needed to reconstruct a *compatible* [PolicyEngine] - same reasoning
  * [ReadoutCheckpoint]'s own kdoc gives for carrying its shape alongside its
  * weights.
  *
- * Deliberately does *not* include [PolicyEngine]'s own-output feedback
- * history or RTRL trace state (`pastPositions`/`traceHistory`) - Prompt 7d
- * names exactly four components ("reservoir state, `W_out`, RLS covariance,
- * and policy weights"), not the policy's short recurrent window, so this
- * checkpoint sticks to that list precisely rather than silently expanding
- * scope.
+ * [policyNInput] was added by gap-closure #1: since [PolicyEngine] now
+ * consumes the reservoir's augmented state `z_t = concat(u_t, x_t, ŷ_t)`
+ * directly rather than `x_t` alone, its regressor width depends on the
+ * reservoir's `nInput` too, not just `nHidden`/`nBack` - so this checkpoint
+ * needs to carry all three to reconstruct a shape-compatible engine. A
+ * checkpoint saved before gap-closure #1 has no `policyNInput` field at
+ * all; [FileAgentCheckpointStore.load] treats that the same as any other
+ * malformed checkpoint (caught, logged, `null` returned) rather than
+ * guessing a value.
+ *
+ * Deliberately does *not* include [PolicyEngine]'s own last-computed trace
+ * (`lastTrace`) or [ReservoirEngine]'s own-output feedback history
+ * (`ownOutputHistory`) - Prompt 7d names exactly four components
+ * ("reservoir state, `W_out`, RLS covariance, and policy weights"), not
+ * either engine's short recurrent window, so this checkpoint sticks to that
+ * list precisely rather than silently expanding scope. (Gap-closure #1
+ * moved the own-output feedback history from [PolicyEngine] into
+ * [ReservoirEngine], but did not change whether it's checkpointed - it
+ * still isn't, on either side.)
  */
 data class AgentCheckpoint(
     /** Wall-clock time this checkpoint was captured, epoch millis - diagnostic only, not used to validate compatibility on load. */
@@ -36,6 +49,8 @@ data class AgentCheckpoint(
     val readout: ReadoutCheckpoint,
     /** [PolicyEngine.weightsSnapshot]'s trained weights. */
     val policyWeights: FloatArray,
+    /** [PolicyEngine.nInput] the saved [policyWeights] were trained against - needed to reconstruct a compatible engine (gap-closure #1: PolicyEngine's regressor now includes the reservoir's raw input `u_t`, not just `x_t`/`ŷ_t`). */
+    val policyNInput: Int,
     /** [PolicyEngine.nHidden] the saved [policyWeights] were trained against - needed to reconstruct a compatible engine. */
     val policyNHidden: Int,
     /** [PolicyEngine.nBack] the saved [policyWeights] were trained against - needed to reconstruct a compatible engine. */
@@ -64,6 +79,7 @@ data class AgentCheckpoint(
         return reservoirState.contentEquals(other.reservoirState) &&
             readout == other.readout &&
             policyWeights.contentEquals(other.policyWeights) &&
+            policyNInput == other.policyNInput &&
             policyNHidden == other.policyNHidden &&
             policyNBack == other.policyNBack
     }
@@ -72,6 +88,7 @@ data class AgentCheckpoint(
         var result = reservoirState.contentHashCode()
         result = 31 * result + readout.hashCode()
         result = 31 * result + policyWeights.contentHashCode()
+        result = 31 * result + policyNInput
         result = 31 * result + policyNHidden
         result = 31 * result + policyNBack
         return result
@@ -121,10 +138,20 @@ fun AgentCheckpoint.toOrchestrator(
     require(reservoirWeights.nHidden == policyNHidden) {
         "reservoirWeights.nHidden ${reservoirWeights.nHidden} != checkpoint policyNHidden $policyNHidden"
     }
+    // Gap-closure #1: PolicyEngine now consumes z_t = concat(u_t, x_t, ŷ_t),
+    // so its regressor width also depends on the reservoir's nInput/nBack,
+    // not just nHidden - both must match this checkpoint's saved shape too.
+    require(reservoirWeights.nInput == policyNInput) {
+        "reservoirWeights.nInput ${reservoirWeights.nInput} != checkpoint policyNInput $policyNInput"
+    }
+    require(reservoirWeights.nBack == policyNBack) {
+        "reservoirWeights.nBack ${reservoirWeights.nBack} != checkpoint policyNBack $policyNBack"
+    }
 
     val reservoir = ReservoirEngine(reservoirWeights, initialState = reservoirState)
     val readoutTrainer = readout.toTrainer()
     val policy = PolicyEngine(
+        nInput = policyNInput,
         nHidden = policyNHidden,
         nBack = policyNBack,
         learningRate = policyLearningRate,
@@ -182,8 +209,18 @@ suspend fun AgentCheckpointStore.restoreOrFreshOrchestrator(
     featureAssembler: FeatureAssembler,
     reservoirWeights: ReservoirWeights,
     rewardEngine: RewardEngine,
+    policyNInput: Int = reservoirWeights.nInput,
     policyNHidden: Int = reservoirWeights.nHidden,
-    policyNBack: Int = PolicyEngine.DEFAULT_N_BACK,
+    /**
+     * Gap-closure #1: [PolicyEngine]'s feedback slots are now structurally
+     * the reservoir's own `ŷ_t` (via [ReservoirEngine.augmentedState]), so
+     * this must match [reservoirWeights]' own `nBack` for `z_t`'s width to
+     * line up with [PolicyEngine.nRegressors] - it defaults to exactly that
+     * rather than [PolicyEngine.DEFAULT_N_BACK], which would silently
+     * mismatch whenever [reservoirWeights] wasn't built with that same
+     * default.
+     */
+    policyNBack: Int = reservoirWeights.nBack,
     policyLearningRate: Float = PolicyEngine.DEFAULT_LEARNING_RATE,
     policyWeightClip: Float = PolicyEngine.DEFAULT_WEIGHT_CLIP,
 ): AgentOrchestrator {
@@ -211,6 +248,7 @@ suspend fun AgentCheckpointStore.restoreOrFreshOrchestrator(
         readoutTrainer = ReadoutTrainer(nHidden = reservoirWeights.nHidden),
         rewardEngine = rewardEngine,
         policyEngine = PolicyEngine(
+            nInput = policyNInput,
             nHidden = policyNHidden,
             nBack = policyNBack,
             learningRate = policyLearningRate,
@@ -273,6 +311,13 @@ class FileAgentCheckpointStore(
                     covariance = readoutJson.getJSONArray("covariance").toFloatArray(),
                 ),
                 policyWeights = root.getJSONArray("policyWeights").toFloatArray(),
+                // getInt throws (caught below, treated as "no usable
+                // checkpoint") if this field is absent - the natural,
+                // no-extra-machinery way a pre-gap-closure-#1 checkpoint
+                // (saved before this field existed) gets rejected rather
+                // than silently misinterpreted. See the class doc's
+                // [policyNInput] note.
+                policyNInput = root.getInt("policyNInput"),
                 policyNHidden = root.getInt("policyNHidden"),
                 policyNBack = root.getInt("policyNBack"),
             )
@@ -299,6 +344,7 @@ class FileAgentCheckpointStore(
                 root.put("reservoirState", checkpoint.reservoirState.toJsonArray())
                 root.put("readout", readoutJson)
                 root.put("policyWeights", checkpoint.policyWeights.toJsonArray())
+                root.put("policyNInput", checkpoint.policyNInput)
                 root.put("policyNHidden", checkpoint.policyNHidden)
                 root.put("policyNBack", checkpoint.policyNBack)
 

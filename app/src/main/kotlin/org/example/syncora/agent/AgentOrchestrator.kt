@@ -49,10 +49,15 @@ import kotlin.math.sqrt
  *
  * ### The chain, per bar
  * 1. [FeatureAssembler.assemble] -> `u_t` (Phase 1).
- * 2. [ReservoirEngine.step] -> `x_t` (Phase 2).
- * 3. [PolicyEngine.step] against `x_t` alone -> `f_t`, this bar's bounded
- *    position (Phase 5). Per gap-closure #2, [ReadoutTrainer] has no role
- *    in this decision - see the "Readout: diagnostics only" note below.
+ * 2. [ReservoirEngine.step], fed `u_t` and the *previous* bar's policy
+ *    position (`f_{t-1}`, read from [PolicyEngine.currentPosition] before
+ *    this step - the reservoir's `W_back` own-output feedback path,
+ *    gap-closure #1) -> `x_t` (Phase 2), then [ReservoirEngine.augmentedState]
+ *    -> `z_t = concat(u_t, x_t, ŷ_t)`.
+ * 3. [PolicyEngine.step] against `z_t` -> `f_t`, this bar's bounded
+ *    position (Phase 5). Per gap-closure #1, `z_t` is PolicyEngine's only
+ *    external input (no readout-forecast slot either - gap-closure #2 - see
+ *    the "Readout: diagnostics only" note below).
  * 4. [RewardEngine.step] against `f_{t-1}`/`f_t` and this bar's
  *    price/cost/funding inputs -> `r_t` and `dsr_t` (Phase 4).
  * 5. [PolicyEngine.update], via [RewardEngine.RewardBreakdown.differentialSharpeGradientWrtReward]
@@ -71,7 +76,8 @@ import kotlin.math.sqrt
  * trained - the augmented state `z_t` is passed straight into the
  * reinforcement learning agent." Accordingly, [readoutTrainer]'s forecast
  * is **never** passed to [PolicyEngine.step] - [PolicyEngine] takes only
- * the reservoir state. [readoutTrainer] is retained solely as an optional,
+ * the reservoir's augmented state `z_t` (gap-closure #1), never a readout
+ * forecast. [readoutTrainer] is retained solely as an optional,
  * clearly-labeled diagnostic: when [diagnosticsOnly] is `true` (the
  * default), this class still calls [ReadoutTrainer.predict]/[ReadoutTrainer.update]
  * every bar purely so [DecisionLog.readoutForecast] and
@@ -301,11 +307,24 @@ class AgentOrchestrator(
         val nowMs = kline.startTime
 
         val u = featureAssembler.assemble(klinesSoFar, depth, nowMs)
-        val reservoirState = reservoir.step(u).copyOf() // copy: this bar's audit log must survive the next step() call reusing the buffer
+
+        // Gap-closure #1: the reservoir's own-output feedback (W_back)
+        // needs f_{t-1} - the policy's position from the *previous* bar -
+        // before this step's forward pass, so this read must happen before
+        // reservoir.step() below. Reading it here (rather than after) is
+        // also what keeps ŷ_t from ever containing f_t itself: f_t doesn't
+        // exist yet at this point in the chain.
+        val prevPosition = policyEngine.currentPosition()
+        reservoir.step(u, prevPosition)
+        val reservoirState = reservoir.currentState().copyOf() // copy: this bar's audit log must survive the next step() call reusing the buffer
+        val z = reservoir.augmentedState(u) // z_t = concat(u_t, x_t, ŷ_t) - what PolicyEngine.step consumes directly (gap-closure #1)
 
         // Readout: diagnostics only (gap-closure #2 - see the class doc).
-        // Never gates or feeds PolicyEngine.step below, whether or not
-        // diagnosticsOnly is enabled.
+        // Operates on the reservoir's raw hidden state x_t (not the
+        // augmented z_t - the readout predates gap-closure #1 and has no
+        // need for the feedback slots). Never gates or feeds
+        // PolicyEngine.step below, whether or not diagnosticsOnly is
+        // enabled.
         val forecast = if (diagnosticsOnly) {
             // Complete last bar's forecast now that this bar's actual return is known.
             val prior = state.previousReservoirState
@@ -322,8 +341,7 @@ class AgentOrchestrator(
             Float.NaN
         }
 
-        val prevPosition = policyEngine.currentPosition()
-        val currPosition = policyEngine.step(reservoirState)
+        val currPosition = policyEngine.step(z)
 
         val bids = depth.bids
         val asks = depth.asks
@@ -388,8 +406,9 @@ class AgentOrchestrator(
      * Prompt 7b's live inference loop. Wires one live bar-close event -
      * [LiveBarCloseSubscriber]'s output (Prompt 7a) - into the full chain
      * via [processBar], the exact same call [runBacktest] makes for every
-     * offline bar: same [FeatureAssembler.assemble] -> [ReservoirEngine.step]
-     * -> [PolicyEngine.step]/`update` -> [RewardEngine.step] sequence
+     * offline bar: same [FeatureAssembler.assemble] -> [ReservoirEngine.step]/
+     * [ReservoirEngine.augmentedState] -> [PolicyEngine.step]/`update` ->
+     * [RewardEngine.step] sequence
      * (with [ReadoutTrainer.predict]/`update` alongside it purely as a
      * diagnostics-only signal when [diagnosticsOnly] is `true` - see the
      * class doc's gap-closure #2 note), producing a fresh reservoir state
@@ -486,6 +505,7 @@ class AgentOrchestrator(
         reservoirState = reservoir.currentState().copyOf(),
         readout = readoutTrainer.toCheckpoint(),
         policyWeights = policyEngine.weightsSnapshot(),
+        policyNInput = policyEngine.nInput,
         policyNHidden = policyEngine.nHidden,
         policyNBack = policyEngine.nBack,
     )

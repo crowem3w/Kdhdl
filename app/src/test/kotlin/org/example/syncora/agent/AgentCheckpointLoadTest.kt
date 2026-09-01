@@ -62,14 +62,14 @@ class AgentCheckpointLoadTest {
 
     /** Fresh, independent (but shape-matched) [FeatureAssembler]/[ReservoirWeights]/[RewardEngine] - a stand-in for "this run's configuration", built once per test so save-side and load-side agree on shape without sharing any mutable object. */
     private fun freshReservoirWeights(seed: Long = 77L) =
-        ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, seed = seed)
+        ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 5, seed = seed)
 
     private fun freshOrchestrator(reservoirWeights: ReservoirWeights): AgentOrchestrator {
         val assembler = FeatureAssembler()
         val reservoir = ReservoirEngine(reservoirWeights)
         val readout = ReadoutTrainer(nHidden = nHidden, forgettingFactor = 0.995f)
         val reward = RewardEngine()
-        val policy = PolicyEngine(nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L)
+        val policy = PolicyEngine(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L)
         return AgentOrchestrator(assembler, reservoir, readout, reward, policy)
     }
 

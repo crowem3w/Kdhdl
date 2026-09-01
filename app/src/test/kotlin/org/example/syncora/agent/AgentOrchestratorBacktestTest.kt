@@ -73,11 +73,11 @@ class AgentOrchestratorBacktestTest {
         val klines = fixtureKlines(bars = bars, seed = 909090L)
 
         val assembler = FeatureAssembler()
-        val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, seed = 21L)
+        val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 5, seed = 21L)
         val reservoir = ReservoirEngine(weights)
         val readout = ReadoutTrainer(nHidden = nHidden, forgettingFactor = 0.995f)
         val reward = RewardEngine()
-        val policy = PolicyEngine(nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L)
+        val policy = PolicyEngine(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L)
 
         val orchestrator = AgentOrchestrator(assembler, reservoir, readout, reward, policy)
 
@@ -135,11 +135,11 @@ class AgentOrchestratorBacktestTest {
         val klines = fixtureKlines(bars = bars, seed = 5150L)
 
         val assembler = FeatureAssembler()
-        val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, seed = 4L)
+        val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 0, seed = 4L)
         val reservoir = ReservoirEngine(weights)
         val readout = ReadoutTrainer(nHidden = nHidden)
         val reward = RewardEngine()
-        val policy = PolicyEngine(nHidden = nHidden, nBack = 0, learningRate = 1e-9f, seed = 1L)
+        val policy = PolicyEngine(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 0, learningRate = 1e-9f, seed = 1L)
 
         val orchestrator = AgentOrchestrator(assembler, reservoir, readout, reward, policy)
         val result = orchestrator.runBacktest(
@@ -167,13 +167,13 @@ class AgentOrchestratorBacktestTest {
         val klines = fixtureKlines(bars = bars, seed = 424242L)
 
         val assembler = FeatureAssembler()
-        val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, seed = 8L)
+        val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 5, seed = 8L)
         val reservoir = ReservoirEngine(weights)
         val readout = ReadoutTrainer(nHidden = nHidden)
         val untouchedWOut = readout.wOutSnapshot()
         val untouchedCovariance = readout.covarianceSnapshot()
         val reward = RewardEngine()
-        val policy = PolicyEngine(nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L)
+        val policy = PolicyEngine(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L)
 
         val orchestrator = AgentOrchestrator(assembler, reservoir, readout, reward, policy, diagnosticsOnly = false)
         val result = orchestrator.runBacktest(
@@ -211,13 +211,13 @@ class AgentOrchestratorBacktestTest {
         val bars = 150
         val klines = fixtureKlines(bars = bars, seed = 13131L)
         fun freshChain(diagnosticsOnly: Boolean): AgentOrchestrator {
-            val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, seed = 8L)
+            val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 5, seed = 8L)
             return AgentOrchestrator(
                 featureAssembler = FeatureAssembler(),
                 reservoir = ReservoirEngine(weights),
                 readoutTrainer = ReadoutTrainer(nHidden = nHidden),
                 rewardEngine = RewardEngine(),
-                policyEngine = PolicyEngine(nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L),
+                policyEngine = PolicyEngine(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L),
                 diagnosticsOnly = diagnosticsOnly,
             )
         }

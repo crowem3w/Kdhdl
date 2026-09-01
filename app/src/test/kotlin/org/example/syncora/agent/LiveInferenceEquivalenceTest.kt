@@ -75,11 +75,11 @@ class LiveInferenceEquivalenceTest {
     /** Builds a fresh, identically-seeded orchestrator - the two call sites must construct engines the same way for equivalence to be a meaningful test. */
     private fun newOrchestrator(): AgentOrchestrator {
         val assembler = FeatureAssembler()
-        val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, seed = 77L)
+        val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 5, seed = 77L)
         val reservoir = ReservoirEngine(weights)
         val readout = ReadoutTrainer(nHidden = nHidden, forgettingFactor = 0.995f)
         val reward = RewardEngine()
-        val policy = PolicyEngine(nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 9L)
+        val policy = PolicyEngine(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 9L)
         return AgentOrchestrator(assembler, reservoir, readout, reward, policy)
     }
 

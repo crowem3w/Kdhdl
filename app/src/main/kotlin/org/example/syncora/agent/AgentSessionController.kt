@@ -77,7 +77,16 @@ class AgentSessionController(
     private val featureAssembler = FeatureAssembler(
         fundingRateProvider = { null }, // no cached funding rate feed wired in yet - see class doc
     )
-    private val reservoirWeights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH)
+    // nBack = PolicyEngine.DEFAULT_N_BACK wires up the paper's W_back
+    // own-output feedback path (gap-closure #1) - a zero-width W_back
+    // (the ReservoirWeights.randomWeights default) would make
+    // PolicyEngine.step's z_t carry no feedback slots at all, silently
+    // reverting to the pre-gap-closure-#1 architecture in production even
+    // though every class involved supports the feedback path.
+    private val reservoirWeights = ReservoirWeights.randomWeights(
+        nInput = FeatureAssembler.FEATURE_WIDTH,
+        nBack = PolicyEngine.DEFAULT_N_BACK,
+    )
     private val rewardEngine = RewardEngine()
     private val killSwitch = AgentKillSwitch()
     private val guardrailSupervisor = GuardrailSupervisor(

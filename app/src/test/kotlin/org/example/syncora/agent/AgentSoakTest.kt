@@ -102,6 +102,7 @@ class AgentSoakTest {
         val reservoirWeights = ReservoirWeights.randomWeights(
             nInput = FeatureAssembler.FEATURE_WIDTH,
             nHidden = nHidden,
+            nBack = PolicyEngine.DEFAULT_N_BACK,
             seed = 7L,
         )
 
@@ -300,7 +301,7 @@ class AgentSoakTest {
         val klines = fixtureKlines(bars = barsCount, seed = 11L, barSpanMs = barSpanMs)
 
         val featureAssembler = FeatureAssembler()
-        val reservoirWeights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, seed = 3L)
+        val reservoirWeights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = PolicyEngine.DEFAULT_N_BACK, seed = 3L)
         val tmpDir = Files.createTempDirectory("agent-soak-crash-test").toFile()
         val checkpointStore = FileAgentCheckpointStore(File(tmpDir, "checkpoint.json"))
         val ledger = RecordingPaperLedger(feeRate = 0.0)

@@ -85,11 +85,11 @@ class AgentLiveSessionDecisionLogTest {
 
     private fun newSession(): AgentLiveSession {
         val assembler = FeatureAssembler()
-        val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, seed = 5L)
+        val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 5, seed = 5L)
         val reservoir = ReservoirEngine(weights)
         val readout = ReadoutTrainer(nHidden = nHidden, forgettingFactor = 0.995f)
         val reward = RewardEngine()
-        val policy = PolicyEngine(nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L)
+        val policy = PolicyEngine(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 5, learningRate = 0.005f, seed = 3L)
         val orchestrator = AgentOrchestrator(assembler, reservoir, readout, reward, policy)
         val orderEmitter = PositionOrderEmitter(
             orderSink = NoopOrderSink(),

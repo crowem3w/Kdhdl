@@ -105,10 +105,10 @@ class GuardrailHardeningFailureModeTest {
     /** A healthy, freshly-constructed [AgentOrchestrator] - the "nothing has gone wrong yet" baseline every test starts from unless it deliberately corrupts one component below. */
     private fun healthyOrchestrator(
         readout: ReadoutTrainer = ReadoutTrainer(nHidden = nHidden, forgettingFactor = 0.995f),
-        policy: PolicyEngine = PolicyEngine(nHidden = nHidden, nBack = 2, seed = 3L),
+        policy: PolicyEngine = PolicyEngine(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 2, seed = 3L),
     ): AgentOrchestrator {
         val assembler = FeatureAssembler()
-        val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, seed = 21L)
+        val weights = ReservoirWeights.randomWeights(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 2, seed = 21L)
         val reservoir = ReservoirEngine(weights)
         val reward = RewardEngine()
         return AgentOrchestrator(assembler, reservoir, readout, reward, policy)
@@ -152,7 +152,7 @@ class GuardrailHardeningFailureModeTest {
         var clock = 0L
         val killSwitch = AgentKillSwitch()
         val session = newSession(
-            orchestrator = healthyOrchestrator(policy = PolicyEngine(nHidden = nHidden, nBack = 2, seed = 3L, initialWeights = FloatArray(nHidden + 2 + 1) { 2f })),
+            orchestrator = healthyOrchestrator(policy = PolicyEngine(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 2, seed = 3L, initialWeights = FloatArray(FeatureAssembler.FEATURE_WIDTH + nHidden + 2 + 1) { 2f })),
             orderSink = orderSink,
             killSwitch = killSwitch,
             nowMs = { clock },
@@ -181,7 +181,7 @@ class GuardrailHardeningFailureModeTest {
         // tanh(0) = 0 - the session stays flat through the first, healthy
         // bar before the dropout is simulated, matching the "already flat"
         // premise this test is named for.
-        val flatPolicy = PolicyEngine(nHidden = nHidden, nBack = 2, seed = 3L, initialWeights = FloatArray(nHidden + 2 + 1))
+        val flatPolicy = PolicyEngine(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 2, seed = 3L, initialWeights = FloatArray(FeatureAssembler.FEATURE_WIDTH + nHidden + 2 + 1))
         val orderSink = RecordingOrderSink()
         var clock = 0L
         val session = newSession(orchestrator = healthyOrchestrator(policy = flatPolicy), orderSink = orderSink, nowMs = { clock })
@@ -251,9 +251,9 @@ class GuardrailHardeningFailureModeTest {
         // A PolicyEngine seeded with a NaN weight - any regressor with a
         // nonzero coefficient at that index makes z, and therefore
         // tanh(z), NaN on the very first step.
-        val corruptedWeights = FloatArray(nHidden + 2 + 1)
+        val corruptedWeights = FloatArray(FeatureAssembler.FEATURE_WIDTH + nHidden + 2 + 1)
         corruptedWeights[0] = Float.NaN
-        val policy = PolicyEngine(nHidden = nHidden, nBack = 2, seed = 3L, initialWeights = corruptedWeights)
+        val policy = PolicyEngine(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 2, seed = 3L, initialWeights = corruptedWeights)
 
         val orderSink = RecordingOrderSink()
         val killSwitch = AgentKillSwitch()
@@ -273,8 +273,8 @@ class GuardrailHardeningFailureModeTest {
     fun `hard position and notional caps bind even when the policy would go further`() {
         // Large positive weights push tanh(z) toward +1 - the policy "wants"
         // max long - but a tight fraction cap must still bind.
-        val eagerWeights = FloatArray(nHidden + 2 + 1) { 3f }
-        val policy = PolicyEngine(nHidden = nHidden, nBack = 2, seed = 3L, initialWeights = eagerWeights)
+        val eagerWeights = FloatArray(FeatureAssembler.FEATURE_WIDTH + nHidden + 2 + 1) { 3f }
+        val policy = PolicyEngine(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 2, seed = 3L, initialWeights = eagerWeights)
 
         val orderSink = RecordingOrderSink()
         var clock = 0L
@@ -302,9 +302,9 @@ class GuardrailHardeningFailureModeTest {
         val killSwitch = AgentKillSwitch()
 
         // Open a position first via a healthy bar with eager weights.
-        val eagerWeights = FloatArray(nHidden + 2 + 1) { 3f }
+        val eagerWeights = FloatArray(FeatureAssembler.FEATURE_WIDTH + nHidden + 2 + 1) { 3f }
         val eagerSession = newSession(
-            orchestrator = healthyOrchestrator(policy = PolicyEngine(nHidden = nHidden, nBack = 2, seed = 3L, initialWeights = eagerWeights)),
+            orchestrator = healthyOrchestrator(policy = PolicyEngine(nInput = FeatureAssembler.FEATURE_WIDTH, nHidden = nHidden, nBack = 2, seed = 3L, initialWeights = eagerWeights)),
             orderSink = orderSink,
             killSwitch = killSwitch,
             nowMs = { 0L },
