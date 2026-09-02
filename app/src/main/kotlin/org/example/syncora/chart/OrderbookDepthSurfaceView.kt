@@ -16,7 +16,6 @@ import android.view.View
 import org.example.syncora.bitget.DepthLevel
 import kotlin.math.cos
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sin
 
@@ -118,8 +117,11 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
     private var pitchDeg = defaultPitchDeg
     private var zoom = 1f
 
-    private val minPitch = 8f
-    private val maxPitch = 82f
+    // Vertical drag swings elevation across a wide band - from almost edge-on (near the floor)
+    // to almost straight down (top-down) - so a swipe up/down reads as a real rotation rather
+    // than a small nudge.
+    private val minPitch = -70f
+    private val maxPitch = 88f
     private val minZoom = 0.55f
     private val maxZoom = 2.8f
 
@@ -266,6 +268,23 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
     private val emptyStatePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#5B6472")
         textSize = sp(12f)
+        textAlign = Paint.Align.CENTER
+    }
+    private val axisBoxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#4A5568")
+        style = Paint.Style.STROKE
+        strokeWidth = dp(0.75f)
+        alpha = 130
+    }
+    private val axisLetterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#C7CED9")
+        textSize = sp(12.5f)
+        isFakeBoldText = true
+        textAlign = Paint.Align.CENTER
+    }
+    private val axisNamePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#8A94A3")
+        textSize = sp(9f)
         textAlign = Paint.Align.CENTER
     }
 
@@ -419,10 +438,11 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
             }
         }
 
-        // Faint reference grid on the z=0 floor, then the mid-price divider plane, drawn first
-        // as the backdrop the shaded surface sits on top of.
+        // Faint reference grid on the z=0 floor, then the mid-price divider plane, then the
+        // wireframe bounding box - all drawn first as the backdrop the shaded surface sits on.
         drawFloorGrid(canvas)
         drawMidPlane(canvas, rows)
+        drawAxesBox(canvas)
 
         // Build every quad with its average depth (for the painter's algorithm) and colour.
         data class Quad(val path: Path, val color: Int, val depth: Float, val isCliff: Boolean)
@@ -506,6 +526,48 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
         }
         canvas.drawPath(path, midPlanePaint)
         canvas.drawLine(top.sx, top.sy, bottom.sx, bottom.sy, midPlaneEdgePaint)
+    }
+
+    /**
+     * Wireframe bounding box around the full data volume (X = depth, Y = time, Z = resting
+     * volume), plus single-letter axis labels so the mesh's rotation always reads against a
+     * fixed frame of reference - mirroring the panelled axes of the reference surface plot.
+     */
+    private fun drawAxesBox(canvas: Canvas) {
+        val z0 = 0f
+        val z1 = heightScale
+
+        val c000 = project(Vec3(-1f, -1f, z0))
+        val c100 = project(Vec3(1f, -1f, z0))
+        val c110 = project(Vec3(1f, 1f, z0))
+        val c010 = project(Vec3(-1f, 1f, z0))
+        val c001 = project(Vec3(-1f, -1f, z1))
+        val c101 = project(Vec3(1f, -1f, z1))
+        val c111 = project(Vec3(1f, 1f, z1))
+        val c011 = project(Vec3(-1f, 1f, z1))
+
+        fun edge(a: Projected, b: Projected) = canvas.drawLine(a.sx, a.sy, b.sx, b.sy, axisBoxPaint)
+
+        // Floor rectangle
+        edge(c000, c100); edge(c100, c110); edge(c110, c010); edge(c010, c000)
+        // Ceiling rectangle
+        edge(c001, c101); edge(c101, c111); edge(c111, c011); edge(c011, c001)
+        // Vertical corner posts
+        edge(c000, c001); edge(c100, c101); edge(c110, c111); edge(c010, c011)
+
+        // X = depth (bid <-> ask), Y = time, Z = resting volume.
+        val xAnchor = project(Vec3(1.18f, -1f, z0))
+        val yAnchor = project(Vec3(-1.2f, 0f, z0))
+        val zAnchor = project(Vec3(-1f, -1f, z1 * 1.25f))
+
+        canvas.drawText("X", xAnchor.sx, xAnchor.sy, axisLetterPaint)
+        canvas.drawText("depth", xAnchor.sx, xAnchor.sy + dp(12f), axisNamePaint)
+
+        canvas.drawText("Y", yAnchor.sx, yAnchor.sy, axisLetterPaint)
+        canvas.drawText("time", yAnchor.sx, yAnchor.sy + dp(12f), axisNamePaint)
+
+        canvas.drawText("Z", zAnchor.sx, zAnchor.sy, axisLetterPaint)
+        canvas.drawText("volume", zAnchor.sx, zAnchor.sy + dp(12f), axisNamePaint)
     }
 
     private fun drawHeader(canvas: Canvas) {
