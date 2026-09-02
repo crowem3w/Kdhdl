@@ -111,8 +111,8 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
     // recede from a near, low-volume (purple) corner toward a far, high-volume (yellow) one.
     // The view holds this pose at rest - it never animates on its own - and only moves when
     // the person actively drags or pinches it.
-    private val defaultYawDeg = -55f
-    private val defaultPitchDeg = 32f
+    private val defaultYawDeg = -65f
+    private val defaultPitchDeg = 27.5f
 
     private var yawDeg = defaultYawDeg
     private var pitchDeg = defaultPitchDeg

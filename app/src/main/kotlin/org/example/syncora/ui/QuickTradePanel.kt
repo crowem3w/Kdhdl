@@ -83,7 +83,7 @@ class QuickTradePanel @JvmOverloads constructor(
 
     private fun buildLiquiditySurfaceSection(): View =
         FrameLayout(context).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(220)).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(300)).apply {
                 topMargin = dp(8)
                 marginStart = dp(4)
                 marginEnd = dp(4)
