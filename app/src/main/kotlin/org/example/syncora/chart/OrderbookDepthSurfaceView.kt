@@ -3,10 +3,8 @@ package org.example.syncora.chart
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.Shader
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.GestureDetector
@@ -230,12 +228,6 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
         strokeCap = Paint.Cap.ROUND
         alpha = 40
     }
-    private val panelBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#3A4656")
-        style = Paint.Style.STROKE
-        strokeWidth = dp(0.75f)
-        alpha = 150
-    }
     private val cliffRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#FDF4FF")
         style = Paint.Style.STROKE
@@ -259,11 +251,6 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#8A94A3")
         textSize = sp(10f)
-    }
-    private val titleLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#C7CED9")
-        textSize = sp(10.5f)
-        isFakeBoldText = true
     }
     private val emptyStatePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#5B6472")
@@ -298,11 +285,6 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
         intArrayOf(0x5D, 0xC8, 0x63), // #5DC863
         intArrayOf(0xFD, 0xE7, 0x25), // #FDE725 - heavy wall
     )
-    private val gradientIntColors = IntArray(gradientStops.size) { i ->
-        val s = gradientStops[i]
-        Color.rgb(s[0], s[1], s[2])
-    }
-
     private fun volumeColor(t: Float, alpha: Int): Int {
         val clamped = t.coerceIn(0f, 1f)
         // Gamma-lift so low/mid volume differences stay visible rather than crowding near purple.
@@ -375,7 +357,6 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), backgroundPaint)
-        drawHeader(canvas)
 
         if (history.size < 2) {
             canvas.drawText(
@@ -438,9 +419,12 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
             }
         }
 
-        // Faint reference grid on the z=0 floor, then the mid-price divider plane, then the
-        // wireframe bounding box - all drawn first as the backdrop the shaded surface sits on.
+        // Faint reference grid across the three axis planes (XY floor, XZ back wall, YZ side
+        // wall), then the mid-price divider plane, then the corner posts framing the volume -
+        // all drawn first as the backdrop the shaded surface sits on.
         drawFloorGrid(canvas)
+        drawBackWallGrid(canvas)
+        drawSideWallGrid(canvas)
         drawMidPlane(canvas, rows)
         drawAxesBox(canvas)
 
@@ -489,10 +473,10 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
         }
 
         drawAxisLabels(canvas, rows)
-        drawLegend(canvas)
     }
 
     private fun drawFloorGrid(canvas: Canvas) {
+        // XY plane (z = 0): the floor. Lines across depth (X) and across time (Y).
         val depthLines = 8
         for (i in 0..depthLines) {
             val mx = ((i.toFloat() / depthLines) - 0.5f) * 2f
@@ -505,6 +489,46 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
             val my = ((i.toFloat() / timeLines) - 0.5f) * 2f
             val a = project(Vec3(-1f, my, 0f))
             val b = project(Vec3(1f, my, 0f))
+            canvas.drawLine(a.sx, a.sy, b.sx, b.sy, floorGridPaint)
+        }
+    }
+
+    private fun drawBackWallGrid(canvas: Canvas) {
+        // XZ plane (y = -1, the back wall): lines across depth (X) and across volume tiers (Z).
+        val z0 = 0f
+        val z1 = heightScale
+        val depthLines = 8
+        for (i in 0..depthLines) {
+            val mx = ((i.toFloat() / depthLines) - 0.5f) * 2f
+            val a = project(Vec3(mx, -1f, z0))
+            val b = project(Vec3(mx, -1f, z1))
+            canvas.drawLine(a.sx, a.sy, b.sx, b.sy, floorGridPaint)
+        }
+        val tierLines = 4
+        for (i in 0..tierLines) {
+            val mz = z0 + (z1 - z0) * (i.toFloat() / tierLines)
+            val a = project(Vec3(-1f, -1f, mz))
+            val b = project(Vec3(1f, -1f, mz))
+            canvas.drawLine(a.sx, a.sy, b.sx, b.sy, floorGridPaint)
+        }
+    }
+
+    private fun drawSideWallGrid(canvas: Canvas) {
+        // YZ plane (x = -1, the side wall): lines across time (Y) and across volume tiers (Z).
+        val z0 = 0f
+        val z1 = heightScale
+        val timeLines = 6
+        for (i in 0..timeLines) {
+            val my = ((i.toFloat() / timeLines) - 0.5f) * 2f
+            val a = project(Vec3(-1f, my, z0))
+            val b = project(Vec3(-1f, my, z1))
+            canvas.drawLine(a.sx, a.sy, b.sx, b.sy, floorGridPaint)
+        }
+        val tierLines = 4
+        for (i in 0..tierLines) {
+            val mz = z0 + (z1 - z0) * (i.toFloat() / tierLines)
+            val a = project(Vec3(-1f, -1f, mz))
+            val b = project(Vec3(-1f, 1f, mz))
             canvas.drawLine(a.sx, a.sy, b.sx, b.sy, floorGridPaint)
         }
     }
@@ -529,9 +553,10 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
     }
 
     /**
-     * Wireframe bounding box around the full data volume (X = depth, Y = time, Z = resting
-     * volume), plus single-letter axis labels so the mesh's rotation always reads against a
-     * fixed frame of reference - mirroring the panelled axes of the reference surface plot.
+     * Corner posts marking the full data volume (X = depth, Y = time, Z = resting volume), plus
+     * single-letter axis labels so the mesh's rotation always reads against a fixed frame of
+     * reference. The three faces themselves are gridded separately (see drawFloorGrid /
+     * drawBackWallGrid / drawSideWallGrid).
      */
     private fun drawAxesBox(canvas: Canvas) {
         val z0 = 0f
@@ -570,16 +595,6 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
         canvas.drawText("volume", zAnchor.sx, zAnchor.sy + dp(12f), axisNamePaint)
     }
 
-    private fun drawHeader(canvas: Canvas) {
-        canvas.drawText("Orderbook Depth & Microstructure Liquidity Surface", dp(12f), dp(18f), titleLabelPaint)
-        canvas.drawText(
-            "drag to rotate \u00b7 pinch to zoom \u00b7 double-tap to reset",
-            dp(12f),
-            dp(32f),
-            labelPaint,
-        )
-    }
-
     private fun drawAxisLabels(canvas: Canvas, rows: Int) {
         val bidAnchor = project(Vec3(-1f, 1.04f, 0f))
         val askAnchor = project(Vec3(1f, 1.04f, 0f))
@@ -601,30 +616,6 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
                 labelPaint,
             )
         }
-        labelPaint.textAlign = Paint.Align.LEFT
-    }
-
-    private fun drawLegend(canvas: Canvas) {
-        val barWidth = dp(10f)
-        val barHeight = dp(74f)
-        val left = width - dp(12f) - barWidth
-        val top = height - dp(24f) - barHeight
-        val right = left + barWidth
-        val bottom = top + barHeight
-
-        val gradient = LinearGradient(
-            0f, top, 0f, bottom,
-            gradientIntColors.reversedArray(),
-            null,
-            Shader.TileMode.CLAMP,
-        )
-        val legendPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = gradient }
-        canvas.drawRect(left, top, right, bottom, legendPaint)
-        canvas.drawRect(left, top, right, bottom, panelBorderPaint)
-
-        labelPaint.textAlign = Paint.Align.RIGHT
-        canvas.drawText("heavy", left - dp(4f), top + dp(9f), labelPaint)
-        canvas.drawText("thin", left - dp(4f), bottom, labelPaint)
         labelPaint.textAlign = Paint.Align.LEFT
     }
 }
