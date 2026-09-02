@@ -346,9 +346,12 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        originX = w / 2f
-        originY = h * 0.56f
-        baseScale = min(w, h) * 0.62f
+        // Scale off width (not min(w,h)): at the default yaw/pitch the mesh's horizontal spread
+        // is the binding constraint, and tying scale to a taller container would otherwise blow
+        // the surface past the view's edges as the panel grows taller.
+        originX = w * 0.47f
+        originY = h * 0.52f
+        baseScale = w * 0.30f
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -516,11 +519,11 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
     }
 
     private fun drawAxisLabels(canvas: Canvas, rows: Int) {
-        val bidAnchor = project(Vec3(-1f, 1.08f, 0f))
-        val askAnchor = project(Vec3(1f, 1.08f, 0f))
+        val bidAnchor = project(Vec3(-1f, 1.04f, 0f))
+        val askAnchor = project(Vec3(1f, 1.04f, 0f))
         // row index (rows-1) = the most recently sampled tick (newest), row 0 = oldest.
-        val nowAnchor = project(Vec3(0f, 1.12f, 0f))
-        val pastAnchor = project(Vec3(0f, -1.16f, 0f))
+        val nowAnchor = project(Vec3(0f, 1.07f, 0f))
+        val pastAnchor = project(Vec3(0f, -1.08f, 0f))
 
         labelPaint.textAlign = Paint.Align.LEFT
         canvas.drawText("BIDS \u2190 depth", bidAnchor.sx, bidAnchor.sy, labelPaint)
