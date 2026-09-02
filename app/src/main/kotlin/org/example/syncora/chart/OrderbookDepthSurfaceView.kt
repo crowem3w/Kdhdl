@@ -56,6 +56,10 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
     private val minSampleIntervalMs = 130L
 
     private val columns = levelsPerSide * 2
+
+    /** Bilinear upsampling factor applied at render time for a smooth, continuous surface. */
+    private val smoothFactor = 2
+
     private val history = ArrayDeque<FloatArray>()
     private var lastSampleMs = 0L
     private var runningPeakVolume = 1f
@@ -104,8 +108,13 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
     // Camera state (rotation + zoom)
     // ---------------------------------------------------------------------
 
-    private var yawDeg = -35f
-    private var pitchDeg = 26f
+    // Default framing mirrors a classic low-elevation 3D-surface view: both the depth and time
+    // axes recede from a near, low-volume (purple) corner toward a far, high-volume (yellow) one.
+    private val defaultYawDeg = -55f
+    private val defaultPitchDeg = 17f
+
+    private var yawDeg = defaultYawDeg
+    private var pitchDeg = defaultPitchDeg
     private var zoom = 1f
 
     private val minPitch = 8f
@@ -125,7 +134,7 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
             interpolator = LinearInterpolator()
             addUpdateListener {
                 if (userHasInteracted) return@addUpdateListener
-                yawDeg = -35f + it.animatedValue as Float
+                yawDeg = defaultYawDeg + it.animatedValue as Float
                 invalidate()
             }
             start()
@@ -140,8 +149,8 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
 
     fun resetCamera() {
         userHasInteracted = false
-        yawDeg = -35f
-        pitchDeg = 26f
+        yawDeg = defaultYawDeg
+        pitchDeg = defaultPitchDeg
         zoom = 1f
         restartIdleSpin()
         invalidate()
@@ -240,10 +249,26 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, value, resources.displayMetrics)
 
     private val backgroundPaint = Paint().apply { color = Color.parseColor("#0A0E14") }
+
+    // Quiet mesh seams: thin, low-alpha, and colour-matched to the fill so they read as a
+    // faint facet edge rather than a hard lattice line.
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#2A3644")
+        color = Color.parseColor("#0A0E14")
+        style = Paint.Style.STROKE
+        strokeWidth = dp(0.5f)
+        alpha = 60
+    }
+    private val floorGridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#3A4656")
+        style = Paint.Style.STROKE
+        strokeWidth = dp(0.6f)
+        alpha = 70
+    }
+    private val panelBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#3A4656")
         style = Paint.Style.STROKE
         strokeWidth = dp(0.75f)
+        alpha = 150
     }
     private val cliffRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#FDF4FF")
@@ -278,32 +303,33 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
         textAlign = Paint.Align.CENTER
     }
 
-    // Purple -> Yellow -> Green liquidity gradient. Purple = thin/quiet depth,
-    // yellow = building interest, green = heavy resting size / a wall.
-    private val gradientStopPurple = intArrayOf(0x8B, 0x5C, 0xF6) // #8B5CF6
-    private val gradientStopYellow = intArrayOf(0xFA, 0xCC, 0x15) // #FACC15
-    private val gradientStopGreen = intArrayOf(0x22, 0xC5, 0x5E) // #22C55E
+    // Purple -> blue -> teal -> green -> yellow liquidity gradient: thin/quiet depth reads as
+    // deep purple, building interest moves through teal-green, and a heavy resting wall reads
+    // bright yellow-green - the same low-to-high volume ramp as the reference surface.
+    private val gradientStops = arrayOf(
+        intArrayOf(0x44, 0x01, 0x54), // #440154 - quiet / near-zero depth
+        intArrayOf(0x3B, 0x52, 0x8B), // #3B528B
+        intArrayOf(0x21, 0x90, 0x8C), // #21908C
+        intArrayOf(0x5D, 0xC8, 0x63), // #5DC863
+        intArrayOf(0xFD, 0xE7, 0x25), // #FDE725 - heavy wall
+    )
+    private val gradientIntColors = IntArray(gradientStops.size) { i ->
+        val s = gradientStops[i]
+        Color.rgb(s[0], s[1], s[2])
+    }
 
     private fun volumeColor(t: Float, alpha: Int): Int {
         val clamped = t.coerceIn(0f, 1f)
         // Gamma-lift so low/mid volume differences stay visible rather than crowding near purple.
-        val eased = clamped.toDouble().pow(0.72).toFloat()
-        val (r, g, b) = if (eased < 0.5f) {
-            val f = eased / 0.5f
-            Triple(
-                lerp(gradientStopPurple[0], gradientStopYellow[0], f),
-                lerp(gradientStopPurple[1], gradientStopYellow[1], f),
-                lerp(gradientStopPurple[2], gradientStopYellow[2], f),
-            )
-        } else {
-            val f = (eased - 0.5f) / 0.5f
-            Triple(
-                lerp(gradientStopYellow[0], gradientStopGreen[0], f),
-                lerp(gradientStopYellow[1], gradientStopGreen[1], f),
-                lerp(gradientStopYellow[2], gradientStopGreen[2], f),
-            )
-        }
-        return Color.argb(alpha, r, g, b)
+        val eased = clamped.toDouble().pow(0.78).toFloat()
+
+        val segments = gradientStops.size - 1
+        val scaled = eased * segments
+        val segIndex = scaled.toInt().coerceIn(0, segments - 1)
+        val f = (scaled - segIndex).coerceIn(0f, 1f)
+        val a = gradientStops[segIndex]
+        val b = gradientStops[segIndex + 1]
+        return Color.argb(alpha, lerp(a[0], b[0], f), lerp(a[1], b[1], f), lerp(a[2], b[2], f))
     }
 
     private fun lerp(a: Int, b: Int, f: Float): Int = (a + (b - a) * f).toInt().coerceIn(0, 255)
@@ -375,41 +401,76 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
         // Snapshot once per frame so the mesh doesn't tear if a new row lands mid-draw.
         val frame = history.toTypedArray()
 
-        // Pre-project every grid vertex.
-        val projected = Array(rows) { r ->
-            Array(columns) { c ->
-                val mx = ((c.toFloat() / (columns - 1)) - 0.5f) * 2f
-                val my = ((r.toFloat() / (rows - 1)) - 0.5f) * 2f
-                val vol = frame[r][c]
-                val norm = (vol / runningPeakVolume).coerceIn(0f, 1f)
+        // Cliff flags are computed on the raw (coarse) samples - smoothing must never blur away
+        // a genuine wall, it should only make the surface between samples read continuously.
+        val cliffCoarse = Array(rows - 1) { r ->
+            BooleanArray(columns - 1) { c ->
+                val v00 = frame[r][c]
+                val v10 = frame[r][c + 1]
+                val v01 = frame[r + 1][c]
+                val v11 = frame[r + 1][c + 1]
+                val avgVol = (v00 + v10 + v01 + v11) / 4f
+                // A "cliff": this level rests well above its inward (nearer-to-mid) neighbour -
+                // the visual signature of a spoofing wall or a shelf that could act as
+                // support/resistance before price actually gets there.
+                val inwardVol = if (c < levelsPerSide - 1 || c >= levelsPerSide) {
+                    if (c < levelsPerSide) v10 else v00 // neighbour that sits closer to mid
+                } else 0f
+                avgVol > runningPeakVolume * 0.32f && inwardVol > 0f && avgVol > inwardVol * 2.1f
+            }
+        }
+
+        fun sampleVolume(rf: Float, cf: Float): Float {
+            val r0 = rf.toInt().coerceIn(0, rows - 1)
+            val r1 = (r0 + 1).coerceAtMost(rows - 1)
+            val c0 = cf.toInt().coerceIn(0, columns - 1)
+            val c1 = (c0 + 1).coerceAtMost(columns - 1)
+            val tr = rf - r0
+            val tc = cf - c0
+            val top = frame[r0][c0] + (frame[r0][c1] - frame[r0][c0]) * tc
+            val bottom = frame[r1][c0] + (frame[r1][c1] - frame[r1][c0]) * tc
+            return top + (bottom - top) * tr
+        }
+
+        // Upsample the sparse tick/level grid with bilinear interpolation so the rendered mesh
+        // reads as a smooth, continuous surface rather than a blocky lattice.
+        val fineRows = (rows - 1) * smoothFactor + 1
+        val fineCols = (columns - 1) * smoothFactor + 1
+        val fineVolume = Array(fineRows) { fr ->
+            FloatArray(fineCols) { fc -> sampleVolume(fr.toFloat() / smoothFactor, fc.toFloat() / smoothFactor) }
+        }
+        val projected = Array(fineRows) { fr ->
+            Array(fineCols) { fc ->
+                val mx = ((fc.toFloat() / (fineCols - 1)) - 0.5f) * 2f
+                val my = ((fr.toFloat() / (fineRows - 1)) - 0.5f) * 2f
+                val norm = (fineVolume[fr][fc] / runningPeakVolume).coerceIn(0f, 1f)
                 project(Vec3(mx, my, norm * heightScale))
             }
         }
 
-        // Mid-price divider plane, drawn first as the visual "floor seam" between bid & ask.
+        // Faint reference grid on the z=0 floor, then the mid-price divider plane, drawn first
+        // as the backdrop the shaded surface sits on top of.
+        drawFloorGrid(canvas)
         drawMidPlane(canvas, rows)
 
         // Build every quad with its average depth (for the painter's algorithm) and colour.
         data class Quad(val path: Path, val color: Int, val depth: Float, val isCliff: Boolean)
-        val quads = ArrayList<Quad>((rows - 1) * (columns - 1))
+        val quads = ArrayList<Quad>((fineRows - 1) * (fineCols - 1))
 
-        for (r in 0 until rows - 1) {
-            for (c in 0 until columns - 1) {
-                val p00 = projected[r][c]
-                val p10 = projected[r][c + 1]
-                val p11 = projected[r + 1][c + 1]
-                val p01 = projected[r + 1][c]
+        for (fr in 0 until fineRows - 1) {
+            val coarseR = (fr / smoothFactor).coerceAtMost(rows - 2)
+            // Newer rows (higher fr) read slightly brighter -> a gentle depth cue in time.
+            val recency = 0.55f + 0.45f * (fr.toFloat() / (fineRows - 1))
+            val alpha = (150 + 90 * recency).toInt().coerceIn(0, 235)
 
-                val v00 = frame[r][c]
-                val v10 = frame[r][c + 1]
-                val v11 = frame[r + 1][c + 1]
-                val v01 = frame[r + 1][c]
-                val avgVol = (v00 + v10 + v11 + v01) / 4f
+            for (fc in 0 until fineCols - 1) {
+                val p00 = projected[fr][fc]
+                val p10 = projected[fr][fc + 1]
+                val p11 = projected[fr + 1][fc + 1]
+                val p01 = projected[fr + 1][fc]
+
+                val avgVol = (fineVolume[fr][fc] + fineVolume[fr][fc + 1] + fineVolume[fr + 1][fc + 1] + fineVolume[fr + 1][fc]) / 4f
                 val norm = (avgVol / runningPeakVolume).coerceIn(0f, 1f)
-
-                // Row-shading: newer rows (larger r) read slightly brighter -> depth cue in time.
-                val recency = 0.55f + 0.45f * (r.toFloat() / (rows - 1))
-                val alpha = (150 + 90 * recency).toInt().coerceIn(0, 235)
 
                 val path = Path().apply {
                     moveTo(p00.sx, p00.sy)
@@ -419,15 +480,8 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
                     close()
                 }
 
-                // A "cliff": this level rests well above its inward (nearer-to-mid) neighbour -
-                // the visual signature of a spoofing wall or a shelf that could act as
-                // support/resistance before price actually gets there.
-                val inwardVol = if (c < levelsPerSide - 1 || c >= levelsPerSide) {
-                    if (c < levelsPerSide) v10 else v00 // neighbour that sits closer to mid
-                } else 0f
-                val isCliff = avgVol > runningPeakVolume * 0.32f &&
-                    inwardVol > 0f &&
-                    avgVol > inwardVol * 2.1f
+                val coarseC = (fc / smoothFactor).coerceAtMost(columns - 2)
+                val isCliff = cliffCoarse[coarseR][coarseC]
 
                 val depthKey = (p00.depth + p10.depth + p11.depth + p01.depth) / 4f
                 quads.add(Quad(path, volumeColor(norm, alpha), depthKey, isCliff))
@@ -445,6 +499,23 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
 
         drawAxisLabels(canvas, rows)
         drawLegend(canvas)
+    }
+
+    private fun drawFloorGrid(canvas: Canvas) {
+        val depthLines = 8
+        for (i in 0..depthLines) {
+            val mx = ((i.toFloat() / depthLines) - 0.5f) * 2f
+            val a = project(Vec3(mx, -1f, 0f))
+            val b = project(Vec3(mx, 1f, 0f))
+            canvas.drawLine(a.sx, a.sy, b.sx, b.sy, floorGridPaint)
+        }
+        val timeLines = 6
+        for (i in 0..timeLines) {
+            val my = ((i.toFloat() / timeLines) - 0.5f) * 2f
+            val a = project(Vec3(-1f, my, 0f))
+            val b = project(Vec3(1f, my, 0f))
+            canvas.drawLine(a.sx, a.sy, b.sx, b.sy, floorGridPaint)
+        }
     }
 
     private fun drawMidPlane(canvas: Canvas, rows: Int) {
@@ -510,17 +581,13 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
 
         val gradient = LinearGradient(
             0f, top, 0f, bottom,
-            intArrayOf(
-                volumeColor(1f, 255),
-                volumeColor(0.5f, 255),
-                volumeColor(0f, 255),
-            ),
+            gradientIntColors.reversedArray(),
             null,
             Shader.TileMode.CLAMP,
         )
         val legendPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = gradient }
         canvas.drawRect(left, top, right, bottom, legendPaint)
-        canvas.drawRect(left, top, right, bottom, gridPaint)
+        canvas.drawRect(left, top, right, bottom, panelBorderPaint)
 
         labelPaint.textAlign = Paint.Align.RIGHT
         canvas.drawText("heavy", left - dp(4f), top + dp(9f), labelPaint)
