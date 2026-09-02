@@ -1,6 +1,5 @@
 package org.example.syncora.chart
 
-import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
@@ -14,7 +13,6 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
-import android.view.animation.LinearInterpolator
 import org.example.syncora.bitget.DepthLevel
 import kotlin.math.cos
 import kotlin.math.max
@@ -31,7 +29,9 @@ import kotlin.math.sin
  *   Z = resting volume at that depth level in that sample
  *
  * The surface is built and touch-manipulated entirely with [Canvas] + manual 3D->2D projection
- * (rotation matrices + a light perspective term) so it has no extra rendering dependency.
+ * (rotation matrices + a light perspective term) so it has no extra rendering dependency. It
+ * holds a fixed default pose at rest (no auto-rotation) and only moves in response to the
+ * person's own drag/pinch gestures.
  * Volume "cliffs" - a level whose size jumps well above its inward neighbour - are rimmed with a
  * bright highlight, since a sudden step in resting size is the visual signature of a spoofing
  * wall or an emerging support/resistance shelf.
@@ -94,7 +94,6 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
         // but still climbs instantly to a fresh peak (e.g. a wall being dropped in).
         runningPeakVolume = max(runningPeakVolume * 0.985f, max(rowPeak, 1e-4f))
 
-        if (!userHasInteracted) restartIdleSpin()
         invalidate()
     }
 
@@ -108,10 +107,12 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
     // Camera state (rotation + zoom)
     // ---------------------------------------------------------------------
 
-    // Default framing mirrors a classic low-elevation 3D-surface view: both the depth and time
-    // axes recede from a near, low-volume (purple) corner toward a far, high-volume (yellow) one.
+    // Static default framing matching the reference surface: both the depth and time axes
+    // recede from a near, low-volume (purple) corner toward a far, high-volume (yellow) one.
+    // The view holds this pose at rest - it never animates on its own - and only moves when
+    // the person actively drags or pinches it.
     private val defaultYawDeg = -55f
-    private val defaultPitchDeg = 17f
+    private val defaultPitchDeg = 32f
 
     private var yawDeg = defaultYawDeg
     private var pitchDeg = defaultPitchDeg
@@ -122,37 +123,10 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
     private val minZoom = 0.55f
     private val maxZoom = 2.8f
 
-    private var userHasInteracted = false
-    private var idleSpinAnimator: ValueAnimator? = null
-
-    private fun restartIdleSpin() {
-        if (userHasInteracted) return
-        idleSpinAnimator?.cancel()
-        idleSpinAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
-            duration = 24_000L
-            repeatCount = ValueAnimator.INFINITE
-            interpolator = LinearInterpolator()
-            addUpdateListener {
-                if (userHasInteracted) return@addUpdateListener
-                yawDeg = defaultYawDeg + it.animatedValue as Float
-                invalidate()
-            }
-            start()
-        }
-    }
-
-    private fun stopIdleSpin() {
-        userHasInteracted = true
-        idleSpinAnimator?.cancel()
-        idleSpinAnimator = null
-    }
-
     fun resetCamera() {
-        userHasInteracted = false
         yawDeg = defaultYawDeg
         pitchDeg = defaultPitchDeg
         zoom = 1f
-        restartIdleSpin()
         invalidate()
     }
 
@@ -169,7 +143,6 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
         context,
         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-                stopIdleSpin()
                 isPinching = true
                 return true
             }
@@ -205,7 +178,6 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
-                stopIdleSpin()
                 lastTouchX = event.x
                 lastTouchY = event.y
             }
@@ -227,17 +199,6 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
         return true
     }
 
-    override fun onAttachedToWindow() {
-        super.onAttachedToWindow()
-        restartIdleSpin()
-    }
-
-    override fun onDetachedFromWindow() {
-        idleSpinAnimator?.cancel()
-        idleSpinAnimator = null
-        super.onDetachedFromWindow()
-    }
-
     // ---------------------------------------------------------------------
     // Styling
     // ---------------------------------------------------------------------
@@ -250,19 +211,22 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
 
     private val backgroundPaint = Paint().apply { color = Color.parseColor("#0A0E14") }
 
-    // Quiet mesh seams: thin, low-alpha, and colour-matched to the fill so they read as a
-    // faint facet edge rather than a hard lattice line.
+    // Quiet mesh seams: thin, low-alpha, softly rounded, and colour-matched to the fill so they
+    // read as a faint facet edge rather than a hard, sharp lattice line.
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#0A0E14")
         style = Paint.Style.STROKE
-        strokeWidth = dp(0.5f)
-        alpha = 60
+        strokeWidth = dp(0.4f)
+        strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
+        alpha = 32
     }
     private val floorGridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#3A4656")
         style = Paint.Style.STROKE
-        strokeWidth = dp(0.6f)
-        alpha = 70
+        strokeWidth = dp(0.5f)
+        strokeCap = Paint.Cap.ROUND
+        alpha = 40
     }
     private val panelBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#3A4656")
@@ -273,8 +237,10 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
     private val cliffRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#FDF4FF")
         style = Paint.Style.STROKE
-        strokeWidth = dp(1.4f)
-        alpha = 210
+        strokeWidth = dp(1.1f)
+        strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
+        alpha = 190
     }
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val midPlanePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -341,7 +307,9 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
     private data class Vec3(val x: Float, val y: Float, val z: Float)
     private data class Projected(val sx: Float, val sy: Float, val depth: Float)
 
-    private val heightScale = 0.85f
+    // Kept low so the mesh reads as a flattened sheet - relief communicated mostly through the
+    // colour gradient, like a sheet of paper laid at an angle, rather than a tall relief map.
+    private val heightScale = 0.32f
     private val perspectiveDistance = 4.2f
 
     private var originX = 0f
