@@ -1,6 +1,7 @@
 package org.example.syncora.ui
 
 import android.content.Context
+import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.util.AttributeSet
 import android.view.Gravity
@@ -8,11 +9,13 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import org.example.syncora.bitget.DepthLevel
 import org.example.syncora.bitget.PaperAccountBalance
 import org.example.syncora.bitget.PaperPosition
 import org.example.syncora.bitget.PendingLimitOrder
 import org.example.syncora.bitget.PositionSide
+import org.example.syncora.chart.OrderbookDepthSurfaceView
 
 class QuickTradePanel @JvmOverloads constructor(
     context: Context,
@@ -50,7 +53,9 @@ class QuickTradePanel @JvmOverloads constructor(
 
     private var handleDownY = 0f
 
-    private lateinit var scrollView: View
+    private lateinit var scrollView: ScrollView
+
+    private lateinit var depthSurfaceView: OrderbookDepthSurfaceView
 
     val scrollableContent: View
         get() = scrollView
@@ -60,11 +65,42 @@ class QuickTradePanel @JvmOverloads constructor(
     init {
         orientation = VERTICAL
         addView(buildGrabHandle())
-        scrollView = View(context).apply {
+        scrollView = ScrollView(context).apply {
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f)
+            isFillViewport = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            addView(buildScrollContent())
         }
         addView(scrollView)
     }
+
+    private fun buildScrollContent(): View =
+        LinearLayout(context).apply {
+            orientation = VERTICAL
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            addView(buildLiquiditySurfaceSection())
+        }
+
+    private fun buildLiquiditySurfaceSection(): View =
+        FrameLayout(context).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(280)).apply {
+                topMargin = dp(8)
+                marginStart = dp(4)
+                marginEnd = dp(4)
+                bottomMargin = dp(8)
+            }
+            background = GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat()
+                setColor(Color.parseColor("#0A0E14"))
+                setStroke(dp(1), borderColor)
+            }
+            clipToOutline = true
+            outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+            depthSurfaceView = OrderbookDepthSurfaceView(context).apply {
+                layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            }
+            addView(depthSurfaceView)
+        }
 
     fun bind(callbacks: Callbacks) {
     }
@@ -73,7 +109,9 @@ class QuickTradePanel @JvmOverloads constructor(
 
     fun renderMarkPrice(price: Double?) = Unit
 
-    fun renderOrderBook(bids: List<DepthLevel>, asks: List<DepthLevel>) = Unit
+    fun renderOrderBook(bids: List<DepthLevel>, asks: List<DepthLevel>) {
+        depthSurfaceView.submitOrderBook(bids, asks)
+    }
 
     fun renderOpenPositions(positions: List<PaperPosition>) = Unit
 
