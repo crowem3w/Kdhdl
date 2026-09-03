@@ -131,7 +131,8 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
     }
 
     // ---------------------------------------------------------------------
-    // Touch handling: one-finger drag rotates, pinch zooms, double-tap resets.
+    // Touch handling: one-finger vertical drag rotates (pitch only), pinch zooms, double-tap
+    // resets. Azimuth (yaw) is fixed at its default and no longer responds to horizontal drag.
     // ---------------------------------------------------------------------
 
     private val rotateSensitivity = 0.35f
@@ -183,9 +184,9 @@ class OrderbookDepthSurfaceView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!isPinching && event.pointerCount == 1) {
-                    val dx = event.x - lastTouchX
                     val dy = event.y - lastTouchY
-                    yawDeg += dx * rotateSensitivity
+                    // Horizontal drag no longer rotates azimuth - only vertical swipe (pitch)
+                    // is active; azimuth stays fixed at its default.
                     pitchDeg = (pitchDeg - dy * rotateSensitivity).coerceIn(minPitch, maxPitch)
                     lastTouchX = event.x
                     lastTouchY = event.y
