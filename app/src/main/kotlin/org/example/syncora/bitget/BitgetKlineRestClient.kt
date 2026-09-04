@@ -28,10 +28,20 @@ class BitgetKlineRestClient(
         // page is a separate REST round trip when paginating.
         const val HISTORY_PAGE_LIMIT = 200
 
-        // Hard safety cap on how many pages a single backfill will walk,
-        // so a misbehaving API (e.g. always returning a full page but never
-        // advancing) can't turn into an unbounded request storm.
-        const val MAX_BACKFILL_PAGES = 50
+        // Small slack added on top of the pages strictly needed to reach a
+        // given `targetCount`, absorbing the exchange occasionally
+        // returning a short page just before the true start of available
+        // history.
+        const val BACKFILL_PAGE_BUDGET_SLACK = 5
+
+        // Absolute belt-and-suspenders ceiling: no matter how the page
+        // budget below is computed, a single backfill can never walk more
+        // than this many pages. This only exists to guard against a
+        // misconfigured (or accidentally huge) targetCount turning into an
+        // unbounded request storm - it is not meant to be the everyday
+        // limiting factor. At HISTORY_PAGE_LIMIT=200 this allows up to
+        // 400,000 candles (~278 days of 1m bars) per backfill.
+        const val MAX_BACKFILL_PAGES_HARD_CEILING = 2_000
     }
 
     suspend fun fetchRecentCandles(
@@ -59,8 +69,9 @@ class BitgetKlineRestClient(
      *     requesting older pages from /history-candles - each page's
      *     `endTime` set just before the oldest candle seen so far - until
      *     either the target is met, the exchange returns an empty page
-     *     (we've hit the start of available history), or [MAX_BACKFILL_PAGES]
-     *     is reached.
+     *     (we've hit the start of available history), or the page budget
+     *     (scaled to [targetCount], see [BACKFILL_PAGE_BUDGET_SLACK]) is
+     *     exhausted.
      *
      * Returns candles sorted ascending by start time, trimmed to at most
      * the most recent [targetCount] bars.
@@ -85,7 +96,16 @@ class BitgetKlineRestClient(
 
         var cursor = collected.keys.minOrNull()
         var pages = 0
-        while (collected.size < targetCount && cursor != null && pages < MAX_BACKFILL_PAGES) {
+
+        // Scale the page budget to whatever depth was actually asked for
+        // instead of a fixed ceiling - a small fixed cap (previously 50
+        // pages, i.e. 10,000 candles) would silently truncate the backfill
+        // once targetCount grew past a few thousand candles, well short of
+        // what Bitget's history endpoint is documented to serve.
+        val maxPages = ((targetCount / HISTORY_PAGE_LIMIT) + BACKFILL_PAGE_BUDGET_SLACK)
+            .coerceAtMost(MAX_BACKFILL_PAGES_HARD_CEILING)
+
+        while (collected.size < targetCount && cursor != null && pages < maxPages) {
             pages++
             val page = try {
                 fetchCandlePage(

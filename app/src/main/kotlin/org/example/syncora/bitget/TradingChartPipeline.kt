@@ -219,14 +219,21 @@ class TradingChartPipeline(
         val missingBars = (now - expectedNext) / barMs
         Log.d(TAG, "Startup catch-up: cache is ~$missingBars 1m candle(s) behind; backfilling via REST")
 
-        val missing = try {
-            restClient.fetchCandleRange(
+        // Reuse the same deep-history walk that the full startup snapshot
+        // uses (paginates through /history-candles beyond the first
+        // 1000-candle page) rather than a single bounded range fetch. A
+        // long offline gap - phone off overnight, no signal for a day,
+        // etc. - can easily exceed what one REST call returns, and a
+        // plain forward range fetch risks landing on the *oldest* part of
+        // the gap instead of the freshest candles the chart actually needs
+        // to display. Asking for the newest `bufferCapacity` candles
+        // outright sidesteps that entirely.
+        val refreshed = try {
+            restClient.backfillCandles(
                 instId = instId,
                 productType = productType,
                 granularity = Timeframe.ONE_MINUTE.restParam,
-                startTime = expectedNext,
-                endTime = now,
-                limit = GAP_BACKFILL_MAX_CANDLES,
+                targetCount = bufferCapacity,
             )
         } catch (e: Exception) {
             // Best-effort: loadSnapshotWithRetry() will still bring the
@@ -235,7 +242,7 @@ class TradingChartPipeline(
             Log.w(TAG, "Startup catch-up backfill failed: ${e.message}")
             return
         }
-        if (missing.isEmpty()) return
+        if (refreshed.isEmpty()) return
 
         primeLock.withLock {
             // Bail if a real snapshot already primed the buffer, or the
@@ -244,12 +251,12 @@ class TradingChartPipeline(
 
             val merged = LinkedHashMap<Long, Kline>()
             for (candle in cached) merged[candle.startTime] = candle
-            for (candle in missing) merged[candle.startTime] = candle
+            for (candle in refreshed) merged[candle.startTime] = candle
 
             _klines.value = merged.values.sortedBy { it.startTime }.takeLast(bufferCapacity)
             _usingCache.value = true
         }
-        Log.d(TAG, "Startup catch-up filled ${missing.size} candle(s) from cache")
+        Log.d(TAG, "Startup catch-up refreshed ${refreshed.size} candle(s) from REST")
     }
 
     private suspend fun persistCachePeriodically() {
