@@ -7,7 +7,6 @@ import org.example.syncora.bitget.BitgetLiveCredentialsStore
 import org.example.syncora.bitget.BitgetTradeSocket
 import org.example.syncora.bitget.DepthPipeline
 import org.example.syncora.bitget.FileKlineCacheStore
-import org.example.syncora.bitget.KlineBackfillManager
 import org.example.syncora.bitget.LiveTradingRepository
 import org.example.syncora.bitget.LocalPaperTradingStore
 import org.example.syncora.bitget.PaperTradingRepository
@@ -15,8 +14,6 @@ import org.example.syncora.bitget.RiskSettingsStore
 import org.example.syncora.bitget.StopLossGuard
 import org.example.syncora.bitget.Timeframe
 import org.example.syncora.bitget.TradingChartPipeline
-import org.example.syncora.storage.ObjectBoxKlineStore
-import org.example.syncora.storage.ObjectBoxStore
 
 /**
  * Holds the market-data pipelines at application scope instead of activity scope.
@@ -33,21 +30,6 @@ import org.example.syncora.storage.ObjectBoxStore
  * a killed START_STICKY service) is always safe to call into.
  */
 class SyncoraApplication : Application() {
-
-    override fun onCreate() {
-        super.onCreate()
-        // Must happen before anything touches klineStore/klineBackfillManager.
-        ObjectBoxStore.init(this)
-    }
-
-    val klineStore: ObjectBoxKlineStore by lazy { ObjectBoxKlineStore() }
-
-    // 1m-only for now (see KlineBackfillManager kdoc). Owned here, not by
-    // any Activity/Dialog, so a backfill in progress survives a screen
-    // rotation or the Historical Data dialog being dismissed.
-    val klineBackfillManager: KlineBackfillManager by lazy {
-        KlineBackfillManager(store = klineStore)
-    }
 
     val pipeline: TradingChartPipeline by lazy {
         TradingChartPipeline(
