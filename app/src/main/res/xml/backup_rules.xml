@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!--
-  Pre-Android-12 (API <31) equivalent of data_extraction_rules.xml, for
-  devices that only support the older android:fullBackupContent mechanism.
--->
-<full-backup-content>
-    <exclude domain="sharedpref" path="bitget_live_credentials_encrypted.xml" />
-</full-backup-content>
