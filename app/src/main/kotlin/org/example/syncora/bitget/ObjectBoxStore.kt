@@ -4,28 +4,23 @@ import android.content.Context
 import io.objectbox.BoxStore
 
 /**
- * Holds the single ObjectBox [BoxStore] for the app's lifetime.
+ * App-wide ObjectBox [BoxStore] singleton.
  *
- * ObjectBox recommends exactly one open Store per database, kept open for
- * as long as the app runs rather than opened/closed per use - so this is
- * initialized once from [org.example.syncora.SyncoraApplication.onCreate]
- * and read from anywhere that needs a Box (currently just
- * [ObjectBoxKlineCacheStore]).
- *
- * `MyObjectBox` is the binding class ObjectBox's annotation processor
- * generates from the `@Entity`-annotated classes in this package (see
- * [CachedKlineEntity]) - it doesn't exist in source, only after a build.
+ * Opening more than one [BoxStore] against the same on-disk database throws,
+ * so every local ObjectBox-backed store (currently just [Ohlcv1mArchiveStore])
+ * must obtain its store through [get] rather than building its own via
+ * `MyObjectBox.builder()...build()` directly.
  */
 object ObjectBoxStore {
-    private var store: BoxStore? = null
 
-    fun init(context: Context) {
-        if (store != null) return
-        store = MyObjectBox.builder()
-            .androidContext(context.applicationContext)
-            .build()
-    }
+    @Volatile
+    private var instance: BoxStore? = null
 
-    fun requireStore(): BoxStore =
-        store ?: error("ObjectBoxStore.init(context) must be called before use (see SyncoraApplication.onCreate)")
+    fun get(context: Context): BoxStore =
+        instance ?: synchronized(this) {
+            instance ?: MyObjectBox.builder()
+                .androidContext(context.applicationContext)
+                .build()
+                .also { instance = it }
+        }
 }

@@ -32,6 +32,7 @@ import org.example.syncora.bitget.ClosedPaperTrade
 import org.example.syncora.bitget.FeeRates
 import org.example.syncora.bitget.Kline
 import org.example.syncora.bitget.LatencyConfig
+import org.example.syncora.bitget.Ohlcv1mArchiveStore
 import org.example.syncora.bitget.PaperAccount
 import org.example.syncora.bitget.PaperAccountBalance
 import org.example.syncora.bitget.PaperPosition
@@ -81,6 +82,13 @@ class MainActivity : AppCompatActivity() {
     private val paperTradingRepository by lazy { app.paperTradingRepository }
     private val liveCredentialsStore by lazy { app.liveCredentialsStore }
     private val liveTradingRepository by lazy { app.liveTradingRepository }
+
+    // Local, append-only archive of 1-minute OHLCV candles backing the
+    // Historical Data > OHCLV Data > 1m (minute) info sheet - see
+    // Ohlcv1mArchiveStore's kdoc. Recorded here (rather than only while the
+    // dialog is open) so "deepest historical candle" keeps growing for as
+    // long as the app is running, not just while that screen is visible.
+    private val ohlcv1mArchiveStore by lazy { Ohlcv1mArchiveStore(applicationContext) }
 
     // Android 13+ requires this permission for the foreground service's persistent
     // status notification to actually be visible - the service still runs and
@@ -206,7 +214,7 @@ class MainActivity : AppCompatActivity() {
         drawingToolsButton = findViewById(R.id.drawingToolsButton)
         timeframeExpandButton = findViewById(R.id.timeframeExpandButton)
         timeframeExpandButton.setOnClickListener {
-            HistoricalDataDialog(this).show()
+            HistoricalDataDialog(this, archiveStore = ohlcv1mArchiveStore).show()
         }
         drawingContextToolbar = findViewById(R.id.drawingContextToolbar)
         paragraphButton = findViewById(R.id.paragraphButton)
@@ -313,6 +321,12 @@ class MainActivity : AppCompatActivity() {
 
                         depthHeatmap.syncToCandles(visible, pipeline.barDurationMillis.value)
                         quickTradePanel.renderMarkPrice(candles.lastOrNull()?.close)
+
+                        // Archive locally whenever the chart is actually on the
+                        // 1-minute resolution - see ohlcv1mArchiveStore's kdoc.
+                        if (pipeline.barDurationMillis.value == ONE_MINUTE_MILLIS) {
+                            ohlcv1mArchiveStore.record(candles)
+                        }
                     }
                 }
 
@@ -860,6 +874,10 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         const val CONNECTIVITY_TIMEOUT_MS = 15_000L
+
+        // Bar duration that identifies the 1-minute resolution for the
+        // OHCLV local archive - see ohlcv1mArchiveStore.
+        const val ONE_MINUTE_MILLIS = 60_000L
     }
 
     /**
