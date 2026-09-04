@@ -35,6 +35,9 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.example.syncora.R
+import org.example.syncora.bitget.BackfillProgress
+import org.example.syncora.bitget.BackfillState
+import org.example.syncora.bitget.DeepHistoryBackfillJob
 import org.example.syncora.bitget.Kline
 import org.example.syncora.bitget.TradingChartPipeline
 import java.text.SimpleDateFormat
@@ -55,6 +58,7 @@ import java.util.TimeZone
 class HistoricalDataDialog(
     context: Context,
     private val pipeline: TradingChartPipeline? = null,
+    private val backfillJob: DeepHistoryBackfillJob? = null,
 ) : Dialog(context, R.style.TradingModalTheme) {
 
     private enum class Screen { OPTIONS, ORDER_BOOK, OHLCV, OPEN_INTEREST, FUNDING_RATES }
@@ -138,6 +142,7 @@ class HistoricalDataDialog(
     // (and any in-flight CSV export) never outlives the modal.
     private val dialogScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var liveStatsJob: Job? = null
+    private var backfillProgressJob: Job? = null
 
     private fun dp(value: Int): Int = (value * context.resources.displayMetrics.density).toInt()
 
@@ -282,6 +287,8 @@ class HistoricalDataDialog(
         currentScreen = screen
         liveStatsJob?.cancel()
         liveStatsJob = null
+        backfillProgressJob?.cancel()
+        backfillProgressJob = null
         contentContainer.removeAllViews()
         if (screen == Screen.OPTIONS) {
             titleText.text = "Historical Data"
@@ -441,6 +448,13 @@ class HistoricalDataDialog(
         container.addView(exportButton)
         container.addView(exportStatusText)
 
+        if (backfillJob != null) {
+            container.addView(View(context).apply {
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(16))
+            })
+            container.addView(buildDeepArchiveSection(backfillJob))
+        }
+
         // Renders once immediately with whatever's in the buffer right now,
         // then keeps refreshing for as long as this screen stays visible -
         // klines is the same in-memory snapshot that gets periodically
@@ -460,6 +474,103 @@ class HistoricalDataDialog(
             .launchIn(dialogScope)
 
         return container
+    }
+
+    /**
+     * Deep archive section of the OHLCV screen: a "Download full history"
+     * trigger, a progress row bound to [DeepHistoryBackfillJob.progress],
+     * and a second CSV export path that reads from [KlineArchiveStore]
+     * (via the job's own cacheKey) once a backfill has stored anything -
+     * separate from [exportOhlcvCsv] above, which only ever sees the live
+     * buffer's few-thousand-candle window.
+     */
+    private fun buildDeepArchiveSection(job: DeepHistoryBackfillJob): View {
+        val section = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+
+        section.addView(TextView(context).apply {
+            text = "Deep Archive"
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(mutedColor)
+            setPadding(dp(2), 0, 0, dp(6))
+        })
+
+        val statusText = TextView(context).apply {
+            textSize = 11.5f
+            setTextColor(mutedColor)
+            setPadding(dp(2), 0, dp(2), dp(10))
+        }
+        section.addView(statusText)
+
+        val actionButton = buildExportButton { }
+        val actionLabel = (actionButton as LinearLayout).getChildAt(0) as TextView
+        section.addView(actionButton)
+
+        val archiveExportStatusText = TextView(context).apply {
+            textSize = 11f
+            setTextColor(mutedColor)
+            visibility = View.GONE
+            setPadding(dp(2), dp(8), dp(2), 0)
+        }
+
+        fun renderForState(p: BackfillProgress) {
+            val downloadedLabel = "%,d candles".format(Locale.US, p.candlesDownloaded)
+            val oldestLabel = p.oldestTimestampSoFar?.let { statTimestampFormat.format(Date(it)) }
+
+            when (p.state) {
+                BackfillState.IDLE -> {
+                    statusText.text = if (p.candlesDownloaded > 0) {
+                        "$downloadedLabel stored so far - oldest reached: ${oldestLabel ?: "\u2014"}"
+                    } else {
+                        "Not started. This downloads the instrument's full available 1m " +
+                            "history (potentially years, ~225 MB) independent of the live chart."
+                    }
+                    actionLabel.text = if (p.candlesDownloaded > 0) "Resume full history download" else "Download full history"
+                    actionButton.isEnabled = true
+                    actionButton.alpha = 1f
+                }
+                BackfillState.RUNNING, BackfillState.RATE_LIMITED_RETRYING -> {
+                    statusText.text = "$downloadedLabel downloaded - oldest reached: ${oldestLabel ?: "\u2014"}" +
+                        if (p.state == BackfillState.RATE_LIMITED_RETRYING) " (retrying...)" else ""
+                    actionLabel.text = "Downloading\u2026"
+                    actionButton.isEnabled = false
+                    actionButton.alpha = 0.6f
+                }
+                BackfillState.COMPLETE -> {
+                    statusText.text = "$downloadedLabel stored - oldest reached: ${oldestLabel ?: "\u2014"}"
+                    actionLabel.text = "Continue further back"
+                    actionButton.isEnabled = true
+                    actionButton.alpha = 1f
+                }
+                BackfillState.FAILED -> {
+                    statusText.text = "Paused (${p.errorMessage ?: "network error"}) - $downloadedLabel stored so far"
+                    actionLabel.text = "Resume full history download"
+                    actionButton.isEnabled = true
+                    actionButton.alpha = 1f
+                }
+            }
+        }
+
+        actionButton.setOnClickListener { job.start() }
+
+        section.addView(View(context).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(10))
+        })
+        val archiveExportButton = buildExportButton {
+            exportArchiveCsv(job, archiveExportStatusText)
+        }
+        ((archiveExportButton as LinearLayout).getChildAt(0) as TextView).text = "Export full archive as CSV"
+        section.addView(archiveExportButton)
+        section.addView(archiveExportStatusText)
+
+        backfillProgressJob = job.progress
+            .onEach { p -> renderForState(p) }
+            .launchIn(dialogScope)
+
+        return section
     }
 
     private fun buildTimeframePill(): View {
@@ -615,6 +726,31 @@ class HistoricalDataDialog(
         }
         val fileName = "syncora_ohlcv_1m_BTCUSDT_${csvTimestampFormat.format(Date())}.csv"
         dialogScope.launch {
+            val savedPath = withContext(Dispatchers.IO) { writeCsvToDownloads(fileName, candles) }
+            if (savedPath != null) {
+                statusText.text = "Saved to $savedPath"
+                statusText.visibility = View.VISIBLE
+                Toast.makeText(context, "Exported ${candles.size} candles to Downloads", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(context, "Export failed - couldn't write file", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /**
+     * Same on-device CSV export as [exportOhlcvCsv], but reading from
+     * [DeepHistoryBackfillJob]'s archive store instead of the live buffer -
+     * the "actually-deep dataset" once a backfill has run (blueprint §3.5),
+     * rather than whatever few thousand candles the chart currently holds.
+     */
+    private fun exportArchiveCsv(job: DeepHistoryBackfillJob, statusText: TextView) {
+        dialogScope.launch {
+            val candles = withContext(Dispatchers.IO) { job.loadArchivedCandles() }
+            if (candles.isEmpty()) {
+                Toast.makeText(context, "No archived history downloaded yet", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val fileName = "syncora_ohlcv_1m_BTCUSDT_archive_${csvTimestampFormat.format(Date())}.csv"
             val savedPath = withContext(Dispatchers.IO) { writeCsvToDownloads(fileName, candles) }
             if (savedPath != null) {
                 statusText.text = "Saved to $savedPath"

@@ -206,7 +206,7 @@ class MainActivity : AppCompatActivity() {
         drawingToolsButton = findViewById(R.id.drawingToolsButton)
         timeframeExpandButton = findViewById(R.id.timeframeExpandButton)
         timeframeExpandButton.setOnClickListener {
-            HistoricalDataDialog(this, pipeline).show()
+            HistoricalDataDialog(this, pipeline, app.deepHistoryBackfillJob).show()
         }
         drawingContextToolbar = findViewById(R.id.drawingContextToolbar)
         paragraphButton = findViewById(R.id.paragraphButton)

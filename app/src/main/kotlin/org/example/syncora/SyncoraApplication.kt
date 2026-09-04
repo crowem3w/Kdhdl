@@ -4,8 +4,11 @@ import android.app.Application
 import org.example.syncora.bitget.BitgetFeeRateClient
 import org.example.syncora.bitget.BitgetFundingRateClient
 import org.example.syncora.bitget.BitgetLiveCredentialsStore
+import org.example.syncora.bitget.BitgetKlineRestClient
 import org.example.syncora.bitget.BitgetTradeSocket
+import org.example.syncora.bitget.DeepHistoryBackfillJob
 import org.example.syncora.bitget.DepthPipeline
+import org.example.syncora.bitget.KlineArchiveStore
 import org.example.syncora.bitget.LiveTradingRepository
 import org.example.syncora.bitget.LocalPaperTradingStore
 import org.example.syncora.bitget.ObjectBoxKlineCacheStore
@@ -56,6 +59,22 @@ class SyncoraApplication : Application() {
                 boxStore = ObjectBoxStore.requireStore(),
                 cacheKey = "BTCUSDT_USDT-FUTURES_${Timeframe.DEFAULT.wsChannel}",
             ),
+        )
+    }
+
+    // Independent of `pipeline` above by design (blueprint §2): a one-time,
+    // resumable full-history download into its own ObjectBox table, never
+    // touching the live chart's rolling buffer or cache. Lazily created (not
+    // started) - the user kicks it off from the OHLCV screen's "Download
+    // full history" button, and it survives across activity/dialog
+    // recreation the same way `pipeline` does.
+    val deepHistoryBackfillJob: DeepHistoryBackfillJob by lazy {
+        DeepHistoryBackfillJob(
+            restClient = BitgetKlineRestClient(),
+            archiveStore = KlineArchiveStore(ObjectBoxStore.requireStore()),
+            instId = "BTCUSDT",
+            productType = "usdt-futures",
+            granularity = Timeframe.ONE_MINUTE.restParam,
         )
     }
 
