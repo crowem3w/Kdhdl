@@ -11,6 +11,21 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+/**
+ * Owns the polling loop against [BitgetTradingRestClient] and exposes
+ * the **real** account's balance/positions as [StateFlow]s the UI can
+ * collect, plus the actions to open/close positions with real funds.
+ *
+ * This is a structural mirror of [PaperTradingRepository] - same polling
+ * cadence, same state shape, same underlying client class - but pinned to
+ * [BitgetEnvironment.LIVE]. There is no Testnet/Demo toggle on this path:
+ * every request this repository issues goes to Bitget's real matching
+ * engine against the balance backing [credentialsStore]'s key. Paper
+ * trading is the only supported way to route orders at Bitget's sandbox
+ * (see [PaperTradingRepository]).
+ * Reuses [PaperTradingConnectionState]/[PaperTradingResult] since those are
+ * just generic "connection status" / "result" wrappers, not paper-specific.
+ */
 class LiveTradingRepository(
     private val credentialsStore: BitgetLiveCredentialsStore,
     private val symbol: String = "BTCUSDT",
@@ -20,6 +35,8 @@ class LiveTradingRepository(
         const val POLL_INTERVAL_MS = 4_000L
     }
 
+    // Always reads the latest saved credentials, so a key entered after
+    // construction (or cleared from settings) takes effect on the next poll.
     private val client = BitgetTradingRestClient(
         environment = { BitgetEnvironment.LIVE },
         credentialsProvider = { credentialsStore.load() },
@@ -61,6 +78,7 @@ class LiveTradingRepository(
         pollJob = null
     }
 
+    /** Call after credentials are saved/cleared from settings to re-evaluate connection state. */
     fun onCredentialsChanged() {
         start()
     }
@@ -81,6 +99,8 @@ class LiveTradingRepository(
             _connectionState.value = PaperTradingConnectionState.LIVE
             _lastError.value = null
             if (_userId.value == null) {
+                // UID doesn't change for a given key, so fetch it once per
+                // connection rather than on every 4s poll.
                 runCatching { client.fetchUserId() }.getOrNull()?.let { _userId.value = it }
             }
         } catch (e: BitgetNotAuthenticatedException) {
@@ -93,6 +113,7 @@ class LiveTradingRepository(
         }
     }
 
+    /** Places a real, funded market order. Callers are expected to have already confirmed with the user. */
     suspend fun openPosition(side: PositionSide, sizeInBaseCoin: String, leverage: Int): PaperTradingResult<PlacedOrder> {
         return try {
             client.setLeverage(symbol, leverage)

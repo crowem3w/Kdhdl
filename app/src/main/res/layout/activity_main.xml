@@ -249,6 +249,15 @@
                 android:layout_gravity="top|start"
                 android:visibility="gone" />
 
+            <!--
+                Always-on quick-trade drawer handle. Docked to the bottom-center of the
+                chart canvas itself (above the timeframe row / drawer, horizontally
+                centered on the full screen width) so it stays visible even while the
+                drawer is fully collapsed and GONE. Dragging it drives the same reveal
+                gesture as the drawer's own internal grab handle; it fades out once the
+                drawer is visible so the two handles never show at once (see
+                MainActivity#applyQuickTradeProgress).
+            -->
             <FrameLayout
                 android:id="@+id/quickTradeHandleIndicator"
                 android:layout_width="56dp"

@@ -21,8 +21,27 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.res.ResourcesCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.example.syncora.R
+import org.example.syncora.SyncoraApplication
+import org.example.syncora.bitget.BackfillState
+import org.example.syncora.bitget.Timeframe
 
+/**
+ * Full-screen modal launched from the bottom-bar "data" button.
+ *
+ * Mirrors [TradingModeDialog]'s glass-card shell (same blurred backdrop,
+ * translucent bordered card, header row with back/close controls) but opens
+ * straight onto a vertical list of data categories - Order Book, OHLCV, Open
+ * Interest, Funding Rates - each row showing a small leading icon plus a
+ * title/description text block. Each row drills into its own bare screen;
+ * the content for those screens is intentionally left empty for now.
+ */
 class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingModalTheme) {
 
     private enum class Screen { OPTIONS, ORDER_BOOK, OHLCV, OPEN_INTEREST, FUNDING_RATES }
@@ -62,6 +81,8 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
     )
 
     private companion object {
+        // Same glass-panel math as TradingModeDialog, kept in sync so the
+        // two modals read as one consistent design language.
         const val CARD_FILL_OPACITY_PERCENT = 0.75f
         val CARD_BASE_COLOR_RGB = Color.parseColor("#1C1C1E")
 
@@ -92,6 +113,15 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
     private val optionsScreen by lazy { buildOptionsScreen() }
     private var currentScreen: Screen = Screen.OPTIONS
 
+    // Dialog isn't a LifecycleOwner, so this scope is managed manually:
+    // created in onCreate, cancelled in onDismiss below. Only used to
+    // observe KlineBackfillManager.state - the backfill work itself runs
+    // in the manager's own app-scoped CoroutineScope (see
+    // SyncoraApplication.klineBackfillManager) and keeps running even if
+    // this dialog is dismissed mid-backfill.
+    private val dialogScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var backfillObserverJob: Job? = null
+
     private fun dp(value: Int): Int = (value * context.resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -100,6 +130,7 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
         setCancelable(true)
         setCanceledOnTouchOutside(true)
         applyWindowBlur()
+        setOnDismissListener { dialogScope.cancel() }
         showScreen(Screen.OPTIONS)
     }
 
@@ -119,6 +150,8 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
             }
         }
     }
+
+    // ---- Root scaffold: full-screen scrim + centered glass card ----
 
     private fun buildRootView(): View {
         rootView = FrameLayout(context).apply {
@@ -143,7 +176,7 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
             clipToOutline = true
             elevation = dp(16).toFloat()
             isClickable = true
-            setOnClickListener {  }
+            setOnClickListener { /* consume: don't dismiss when tapping inside the card */ }
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -230,6 +263,7 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
 
     private fun showScreen(screen: Screen) {
         currentScreen = screen
+        backfillObserverJob?.cancel()
         contentContainer.removeAllViews()
         if (screen == Screen.OPTIONS) {
             titleText.text = "Historical Data"
@@ -239,7 +273,8 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
             val category = categories.first { it.screen == screen }
             titleText.text = category.title
             backButton.visibility = View.VISIBLE
-            contentContainer.addView(scrollableCopy(buildEmptyScreen()))
+            val content = if (screen == Screen.OHLCV) buildOhlcvScreen() else buildEmptyScreen()
+            contentContainer.addView(scrollableCopy(content))
         }
     }
 
@@ -254,6 +289,8 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
             addView(content)
         }
     }
+
+    // ---- Screen 1: vertical list of icon + title/description rows ----
 
     private fun buildOptionsScreen(): View {
         val list = LinearLayout(context).apply {
@@ -329,10 +366,88 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
         return row
     }
 
+    // ---- Screens 3-5 (Order Book, Open Interest, Funding Rates): bare
+    // placeholders, content intentionally left empty ----
+
     private fun buildEmptyScreen(): View = FrameLayout(context).apply {
         layoutParams = ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             dp(160),
         )
+    }
+
+    // ---- Screen 2 (OHLCV): trigger + live progress for the 1m local backfill ----
+
+    private fun buildOhlcvScreen(): View {
+        val backfillManager = (context.applicationContext as SyncoraApplication).klineBackfillManager
+
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+            setPadding(dp(4), dp(8), dp(4), dp(8))
+        }
+
+        val statusText = TextView(context).apply {
+            text = "1m candles, BTCUSDT (USDT-FUTURES). Not started."
+            textSize = 12.5f
+            typeface = thinFont ?: Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            setTextColor(mutedColor)
+        }
+
+        val actionButton = TextView(context).apply {
+            text = "Start backfill"
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(labelColor)
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(8).toFloat()
+                setColor(Color.parseColor("#332F80ED"))
+            }
+            setOnClickListener {
+                backfillManager.start(
+                    symbol = "BTCUSDT",
+                    productType = "usdt-futures",
+                    granularity = Timeframe.ONE_MINUTE.restParam,
+                )
+            }
+        }
+        val buttonRow = FrameLayout(context).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(10) }
+            addView(actionButton)
+        }
+
+        container.addView(statusText)
+        container.addView(buttonRow)
+
+        backfillObserverJob = dialogScope.launch {
+            backfillManager.state.collect { state ->
+                statusText.text = describe(state)
+            }
+        }
+
+        return container
+    }
+
+    private fun describe(state: BackfillState): String = when (state) {
+        is BackfillState.Idle ->
+            "1m candles, BTCUSDT (USDT-FUTURES). Not started."
+        is BackfillState.Running ->
+            "Backfilling... ${state.candlesStored} candles stored across ${state.pagesLoaded} page(s)." +
+                (state.oldestSoFar?.let { "\nOldest so far: ${java.util.Date(it)}" } ?: "")
+        is BackfillState.Completed ->
+            "Done. ${state.candlesStored} candles stored." +
+                (state.oldestTimestamp?.let { "\nOldest candle: ${java.util.Date(it)}" } ?: "")
+        is BackfillState.Failed ->
+            "Stopped after an error: ${state.message}\n" +
+                "${state.candlesStoredBeforeFailure} candles stored so far. Tap Start backfill to resume."
     }
 }
