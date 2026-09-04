@@ -51,13 +51,6 @@ class TradingChartPipeline(
         // (minutes to hours of missed 1m bars) without needing the full
         // multi-page pagination used for the initial deep backfill.
         const val GAP_BACKFILL_MAX_CANDLES = 1_000
-
-        // Cap on how many candles the startup catch-up path will patch in
-        // a single REST call. If the cache is staler than this (device was
-        // offline/killed for a long stretch), a single request may not
-        // reliably cover the gap - fall back to the paginated deep backfill
-        // instead of trusting one big range request.
-        const val STARTUP_CATCH_UP_MAX_BARS = 1_000
     }
 
     private val buffer = KlineBuffer(bufferCapacity)
@@ -263,7 +256,16 @@ class TradingChartPipeline(
         var attempt = 0
         while (true) {
             try {
-                val historical = acquireStartupSnapshot()
+                // Real backfill: walks /history-candles across as many
+                // pages as needed (not just a single capped REST call) to
+                // assemble up to `bufferCapacity` candles of genuine history
+                // for the current timeframe.
+                val historical = restClient.backfillCandles(
+                    instId = instId,
+                    productType = productType,
+                    granularity = _currentTimeframe.value.restParam,
+                    targetCount = bufferCapacity,
+                )
                 applySnapshot(historical)
                 return
             } catch (e: Exception) {
@@ -278,93 +280,6 @@ class TradingChartPipeline(
                 delay(delayMs)
             }
         }
-    }
-
-    /**
-     * Decides how to (re)seed the buffer on start()/timeframe switch.
-     *
-     * If there's a usable on-device cache for the current granularity, this
-     * is real forward gap-filling: fetch only the candles broadcast during
-     * whatever window the app was offline, backgrounded, or killed - one
-     * targeted REST call bridging [lastCachedCandle, now] - and splice them
-     * onto the cache. The websocket (already connecting/streaming via
-     * `start()`) then only needs to carry the feed forward from "now"; it
-     * never has to be the sole source for bars that arrived while nobody
-     * was listening.
-     *
-     * Falls back to the full paginated deep backfill when there's no cache
-     * yet, the cache is already current, the cache belongs to a different
-     * granularity (spacing mismatch), or the offline gap is too large to
-     * patch in a single request.
-     */
-    private suspend fun acquireStartupSnapshot(): List<Kline> {
-        val barMs = _barDurationMillis.value
-        val cached = cacheStore.load()?.filter { it.startTime > 0 }
-
-        suspend fun deepBackfill() = restClient.backfillCandles(
-            instId = instId,
-            productType = productType,
-            granularity = _currentTimeframe.value.restParam,
-            targetCount = bufferCapacity,
-        )
-
-        if (cached.isNullOrEmpty() || barMs <= 0) {
-            Log.d(TAG, "No usable cache for startup catch-up; running full deep backfill")
-            return deepBackfill()
-        }
-
-        if (cached.size >= 2) {
-            val spacing = cached.last().startTime - cached[cached.size - 2].startTime
-            if (spacing != barMs) {
-                Log.d(
-                    TAG,
-                    "Cached candle spacing (${spacing}ms) doesn't match current " +
-                        "timeframe (${barMs}ms); cache is stale/wrong granularity, " +
-                        "running full deep backfill",
-                )
-                return deepBackfill()
-            }
-        }
-
-        val lastCachedTime = cached.last().startTime
-        val expectedNext = lastCachedTime + barMs
-        val now = System.currentTimeMillis()
-        val missingBars = (now - expectedNext) / barMs
-
-        if (missingBars <= 0) {
-            Log.d(TAG, "Cache already current (last candle $lastCachedTime); no catch-up needed")
-            return cached.takeLast(bufferCapacity)
-        }
-
-        if (missingBars > STARTUP_CATCH_UP_MAX_BARS) {
-            Log.d(
-                TAG,
-                "Cache is $missingBars bar(s) stale, beyond single-request catch-up cap " +
-                    "($STARTUP_CATCH_UP_MAX_BARS); running full deep backfill instead",
-            )
-            return deepBackfill()
-        }
-
-        Log.d(TAG, "Catching up on $missingBars candle(s) missed while offline since $lastCachedTime")
-        val caughtUp = try {
-            restClient.fetchCandleRange(
-                instId = instId,
-                productType = productType,
-                granularity = _currentTimeframe.value.restParam,
-                startTime = expectedNext,
-                endTime = now,
-                limit = missingBars.coerceAtMost(STARTUP_CATCH_UP_MAX_BARS.toLong()).toInt(),
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "Startup catch-up REST call failed, falling back to deep backfill: ${e.message}")
-            return deepBackfill()
-        }
-
-        val merged = LinkedHashMap<Long, Kline>()
-        for (candle in cached) merged[candle.startTime] = candle
-        for (candle in caughtUp) merged[candle.startTime] = candle
-        val sorted = merged.values.sortedBy { it.startTime }
-        return if (sorted.size > bufferCapacity) sorted.takeLast(bufferCapacity) else sorted
     }
 
     private suspend fun applySnapshot(historical: List<Kline>) {

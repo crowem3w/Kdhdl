@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!-- Focal point: a ~420x420dp morphing orb, centered, white core with a subtle teal
+         outer glow. It sits behind all text/UI, well below the top-left lockup and above
+         the bottom caption/button, so it reads as the visual anchor of the screen. -->
+    <org.example.syncora.orb.OrbView
+        android:id="@+id/orbView"
+        android:layout_width="320dp"
+        android:layout_height="320dp"
+        android:layout_gravity="center"
+        android:layout_marginTop="70dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fitsSystemWindows="true"
+        android:orientation="vertical"
+        android:paddingStart="32dp"
+        android:paddingEnd="32dp"
+        android:paddingTop="32dp"
+        android:paddingBottom="32dp">
+
+        <!-- Top-left lockup: teal mark + uppercase wordmark, generously letter-spaced.
+             Positioned ~48dp from the left / ~56dp from the top: the parent container
+             already contributes 32dp of padding on each edge, so the extra 16dp start /
+             24dp top margins below make up the remaining offset. -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:layout_marginTop="24dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <ImageView
+                android:layout_width="29dp"
+                android:layout_height="45dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_syncora_logo"
+                android:contentDescription="@string/onboarding_logo_content_description" />
+
+            <Space
+                android:layout_width="10dp"
+                android:layout_height="1dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/inter_medium"
+                android:textFontWeight="500"
+                android:text="@string/onboarding_wordmark"
+                android:textAllCaps="true"
+                android:textColor="#E6FFFFFF"
+                android:textSize="15sp"
+                android:letterSpacing="0.2"
+                android:includeFontPadding="false" />
+
+        </LinearLayout>
+
+        <!-- Generous, deliberate space before the primary message. -->
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="48dp" />
+
+        <!-- Headline: "Buy low. Sell high." in white, "Brag responsibly." immediately
+             below in the brand teal — same size and weight, left-aligned. -->
+        <TextView
+            android:id="@+id/headlineText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:fontFamily="outfit"
+            android:textFontWeight="700"
+            android:text="@string/onboarding_headline"
+            android:textColor="#FFFFFFFF"
+            android:textSize="37sp"
+            android:lineHeight="40sp"
+            android:includeFontPadding="false" />
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="24dp" />
+
+        <!-- Supporting copy: 70%-opacity white, regular weight. -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="@font/inter_regular"
+            android:textFontWeight="400"
+            android:text="@string/onboarding_subtext"
+            android:textColor="#B3FFFFFF"
+            android:textSize="18sp"
+            android:layout_marginStart="10dp"
+            android:lineHeight="30sp"
+            android:includeFontPadding="false" />
+
+        <!-- Flexible spacer: keeps the copy pinned to the top and the caption/button
+             pinned to the bottom, with the orb occupying the open space between. -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <!-- Bottom row: muted caption (with "clarity." in teal) on the left,
+             transparent teal-outlined next button on the right. -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="72dp">
+
+            <ImageButton
+                android:id="@+id/continueButton"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:background="@drawable/bg_onboarding_next_button"
+                android:foreground="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_onboarding_arrow"
+                android:scaleType="center"
+                android:contentDescription="@string/onboarding_continue_content_description" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_centerVertical="true"
+                android:layout_alignParentStart="true"
+                android:layout_toStartOf="@id/continueButton"
+                android:layout_marginEnd="20dp"
+                android:fontFamily="@font/inter_regular"
+                android:textFontWeight="400"
+                android:text="@string/onboarding_caption"
+                android:textColor="#B3FFFFFF"
+                android:textSize="15sp"
+                android:lineHeight="20sp"
+                android:includeFontPadding="false" />
+
+        </RelativeLayout>
+
+    </LinearLayout>
+
+</FrameLayout>
