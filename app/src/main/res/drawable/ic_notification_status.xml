@@ -1,0 +1,36 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFF">
+    <!-- Plain white silhouette (candlestick glyph) per Android's status-bar
+         icon guidelines - the system masks/tints this, so no gradients. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M5.25,4H6.75V8H5.25z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M4,8H8V16H4z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M5.25,16H6.75V20H5.25z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12.25,2H13.75V6H12.25z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M11,6H15V18H11z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12.25,18H13.75V22H12.25z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M19.25,7H20.75V9H19.25z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M18,9H22V15H18z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M19.25,15H20.75V17H19.25z" />
+</vector>
