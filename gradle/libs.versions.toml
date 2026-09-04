@@ -6,6 +6,7 @@ okhttp = "4.12.0"
 coroutines = "1.9.0"
 lifecycleRuntimeKtx = "2.8.7"
 securityCrypto = "1.1.0-alpha06"
+objectbox = "5.4.2"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -17,3 +18,7 @@ androidx-security-crypto = { module = "androidx.security:security-crypto", versi
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+# AGP 9's built-in Kotlin support needs this companion plugin for kapt
+# (ObjectBox's annotation processor generates MyObjectBox/*_ query classes).
+kotlin-kapt = { id = "com.android.legacy-kapt", version.ref = "agp" }
+objectbox = { id = "io.objectbox", version.ref = "objectbox" }

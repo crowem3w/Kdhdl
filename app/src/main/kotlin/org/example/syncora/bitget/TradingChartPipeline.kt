@@ -45,9 +45,20 @@ class TradingChartPipeline(
 
         const val MAX_QUEUED_TICKS = 2_000
         const val CACHE_PERSIST_INTERVAL_MS = 5_000L
+
+        // Cap on how many candles a single reconnect-gap backfill will
+        // request in one shot. Large enough to cover ordinary reconnects
+        // (minutes to hours of missed 1m bars) without needing the full
+        // multi-page pagination used for the initial deep backfill.
+        const val GAP_BACKFILL_MAX_CANDLES = 1_000
     }
 
     private val buffer = KlineBuffer(bufferCapacity)
+
+    // Bitget's REST `productType` param is lowercase ("usdt-futures") while
+    // the websocket `instType` is upper-snake ("USDT-FUTURES"); derive
+    // rather than duplicate so the two can never drift apart.
+    private val productType: String = instType.lowercase()
 
     private val _klines = MutableStateFlow<List<Kline>>(emptyList())
 
@@ -183,6 +194,7 @@ class TradingChartPipeline(
     private suspend fun onTicksArrived(batch: List<Kline>) {
         primeLock.withLock {
             if (primed) {
+                backfillGapIfNeeded(batch)
                 applyLive(batch)
             } else {
                 tempQueue.addAll(batch)
@@ -194,14 +206,65 @@ class TradingChartPipeline(
         }
     }
 
+    /**
+     * Detects a hole between the newest buffered candle and an incoming
+     * live batch - e.g. bars missed while the websocket was disconnected
+     * or the process was backgrounded - and patches it with a targeted REST
+     * fetch before the live batch is applied, so reconnects don't leave a
+     * blank stretch on the chart.
+     *
+     * Must be called while holding [primeLock] and only once [primed], so
+     * the buffer's "last candle" can't move out from under this check.
+     */
+    private suspend fun backfillGapIfNeeded(incomingBatch: List<Kline>) {
+        val barMs = _barDurationMillis.value
+        if (barMs <= 0) return
+
+        val earliestIncoming = incomingBatch.minOfOrNull { it.startTime } ?: return
+        val lastKnown = buffer.lastStartTimeOrNull() ?: return
+        val expectedNext = lastKnown + barMs
+
+        // Nothing missing: the batch picks up right where the buffer left
+        // off (or even overlaps/replaces the trailing candle, which is
+        // normal for in-progress-bar updates).
+        if (earliestIncoming <= expectedNext) return
+
+        val missingBars = (earliestIncoming - expectedNext) / barMs
+        Log.d(TAG, "Detected gap of $missingBars candle(s) before live tick; backfilling")
+
+        try {
+            val missing = restClient.fetchCandleRange(
+                instId = instId,
+                productType = productType,
+                granularity = _currentTimeframe.value.restParam,
+                startTime = expectedNext,
+                endTime = earliestIncoming - 1,
+                limit = GAP_BACKFILL_MAX_CANDLES,
+            )
+            if (missing.isNotEmpty()) {
+                _klines.value = buffer.applyUpdates(missing)
+            }
+        } catch (e: Exception) {
+            // Best-effort: leave the gap for now rather than blocking the
+            // live tick that triggered this check. A later reconnect or
+            // timeframe switch gets another chance to fill it.
+            Log.w(TAG, "Gap backfill failed for [$expectedNext, $earliestIncoming): ${e.message}")
+        }
+    }
+
     private suspend fun loadSnapshotWithRetry() {
         var attempt = 0
         while (true) {
             try {
-                val historical = restClient.fetchRecentCandles(
+                // Real backfill: walks /history-candles across as many
+                // pages as needed (not just a single capped REST call) to
+                // assemble up to `bufferCapacity` candles of genuine history
+                // for the current timeframe.
+                val historical = restClient.backfillCandles(
                     instId = instId,
+                    productType = productType,
                     granularity = _currentTimeframe.value.restParam,
-                    limit = bufferCapacity,
+                    targetCount = bufferCapacity,
                 )
                 applySnapshot(historical)
                 return

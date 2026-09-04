@@ -6,9 +6,10 @@ import org.example.syncora.bitget.BitgetFundingRateClient
 import org.example.syncora.bitget.BitgetLiveCredentialsStore
 import org.example.syncora.bitget.BitgetTradeSocket
 import org.example.syncora.bitget.DepthPipeline
-import org.example.syncora.bitget.FileKlineCacheStore
 import org.example.syncora.bitget.LiveTradingRepository
 import org.example.syncora.bitget.LocalPaperTradingStore
+import org.example.syncora.bitget.ObjectBoxKlineCacheStore
+import org.example.syncora.bitget.ObjectBoxStore
 import org.example.syncora.bitget.PaperTradingRepository
 import org.example.syncora.bitget.RiskSettingsStore
 import org.example.syncora.bitget.StopLossGuard
@@ -31,14 +32,28 @@ import org.example.syncora.bitget.TradingChartPipeline
  */
 class SyncoraApplication : Application() {
 
+    override fun onCreate() {
+        super.onCreate()
+        // Must happen before anything touches `pipeline` (or any other
+        // ObjectBox-backed store) below - ObjectBoxStore.init is idempotent
+        // and cheap to call defensively, but doing it up front here means
+        // every lazy val in this class can assume the store already exists.
+        ObjectBoxStore.init(this)
+    }
+
     val pipeline: TradingChartPipeline by lazy {
         TradingChartPipeline(
             instId = "BTCUSDT",
             instType = "USDT-FUTURES",
             initialTimeframe = Timeframe.DEFAULT,
-            bufferCapacity = 1000,
-            cacheStore = FileKlineCacheStore(
-                applicationContext,
+            // Was capped at 1000 (the largest single /candles page Bitget
+            // will return). Now that the pipeline paginates through
+            // /history-candles for anything beyond one page, this can be a
+            // real depth target: ~3 days of 1m bars for the default
+            // timeframe instead of ~16.7 hours.
+            bufferCapacity = 4_320,
+            cacheStore = ObjectBoxKlineCacheStore(
+                boxStore = ObjectBoxStore.requireStore(),
                 cacheKey = "BTCUSDT_USDT-FUTURES_${Timeframe.DEFAULT.wsChannel}",
             ),
         )

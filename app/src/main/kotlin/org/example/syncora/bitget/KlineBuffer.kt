@@ -18,6 +18,9 @@ class KlineBuffer(private val capacity: Int = 100) {
 
     fun snapshot(): List<Kline> = synchronized(lock) { deque.toList() }
 
+    /** startTime of the newest buffered candle, or null if the buffer is empty. Avoids a full snapshot copy just to check for gaps on every tick. */
+    fun lastStartTimeOrNull(): Long? = synchronized(lock) { deque.lastOrNull()?.startTime }
+
     fun clear() = synchronized(lock) { deque.clear() }
 
     private fun upsertLocked(candle: Kline) {
