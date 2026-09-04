@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Syncora</string>
+    <string name="stream_title">BTCUSDT Perpetual — Live Klines</string>
+    <string name="status_idle">Idle</string>
+
+    <string name="symbol_label">BTCUSDT.P</string>
+    <string name="contract_label">Perpetual</string>
+    <string name="live_label">Live</string>
+    <string name="connecting_label">Connecting…</string>
+    <string name="heatmap_selector_label">Heatmap (Bid/Ask)</string>
+    <string name="price_axis_label">Price (USDT)</string>
+    <string name="legend_low">Low</string>
+    <string name="legend_high">High</string>
+    <string name="timeframe_expand_content_description">More timeframes</string>
+    <string name="drawing_tools_content_description">Drawing tools</string>
+    <string name="paragraph_button_content_description">Paragraph</string>
+    <string name="chart_long_button_label">Long</string>
+    <string name="chart_short_button_label">Short</string>
+    <string name="chart_long_button_content_description">Long</string>
+    <string name="chart_short_button_content_description">Short</string>
+    <string name="connectivity_banner_retry">Retry</string>
+    <string name="connectivity_banner_dismiss">✕</string>
+    <string name="connectivity_banner_market_data">Can\'t reach Bitget\'s market data. If this persists, your network may be blocking it rather than a connection issue — try a VPN or a different network.</string>
+    <string name="connectivity_banner_order_book">Can\'t reach Bitget\'s order book feed. If this persists, your network may be blocking it — try a VPN or a different network.</string>
+
+    <string name="onboarding_wordmark">SYNCORA</string>
+    <string name="onboarding_headline">Buy low.\nSell high.\nBrag responsibly.</string>
+    <string name="onboarding_subtext">The simplest way to trade\nsmarter, together.</string>
+    <string name="onboarding_caption">Join thousands who trade with <font color="#26C7C3">clarity.</font></string>
+    <string name="onboarding_continue_content_description">Continue</string>
+    <string name="onboarding_logo_content_description">Syncora logo</string>
+
+    <string name="onboarding_battery_dialog_title">Keep the agent running in the background</string>
+    <string name="onboarding_battery_dialog_message">Syncora monitors BTCUSDT and your open positions using a background service. Some phones aggressively stop background apps to save battery, which can interrupt that monitoring. Allowing Syncora to ignore battery optimization keeps it running reliably.\n\nAny open position is also protected by a stop-loss placed directly on Bitget, independent of this setting.</string>
+    <string name="onboarding_battery_dialog_allow">Allow</string>
+    <string name="onboarding_battery_dialog_skip">Not now</string>
+
+    <string name="market_data_notification_channel_name">Market data &amp; agent status</string>
+    <string name="market_data_notification_channel_description">Persistent status of live market data and any open position</string>
+    <string name="market_data_notification_title">Syncora agent</string>
+    <string name="market_data_notification_stop_action">Stop</string>
+    <string name="market_data_notification_status_starting">Starting…</string>
+    <string name="market_data_notification_status_format">%1$s — %2$s</string>
+    <string name="market_data_notification_market_data_live">Monitoring BTCUSDT</string>
+    <string name="market_data_notification_market_data_connecting">Connecting…</string>
+    <string name="market_data_notification_market_data_offline">Market data offline</string>
+    <string name="market_data_notification_position_flat">flat</string>
+    <string name="market_data_notification_position_unknown">no live account connected</string>
+</resources>
