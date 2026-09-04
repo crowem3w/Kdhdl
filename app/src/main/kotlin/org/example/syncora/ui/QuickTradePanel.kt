@@ -30,39 +30,39 @@ import org.example.syncora.bitget.PendingLimitOrder
 import org.example.syncora.bitget.PositionSide
 import java.util.Locale
 
-/**
- * Full order-ticket-style "quick trade" drawer that lives directly under the
- * chart, modeled on a standard exchange order ticket (margin/leverage bar,
- * order type, cost-based sizing, TP/SL, Long/Short buttons) on the right,
- * plus a live order book on the left showing the top 5 bid and top 5 ask
- * price levels, with an open-positions list underneath it.
- *
- * It holds no trading state of its own beyond the form inputs themselves -
- * [MainActivity] drives visibility (via the scroll gesture) and feeds it
- * balance, mark price, order-book, and open-position updates through
- * [render], [renderMarkPrice], [renderOrderBook], and [renderOpenPositions].
- *
- * All of the "Cost", "Max open", and "Est. liq. price" math below mirrors
- * [PaperTradingRepository]'s own leverage clamp
- * ([PaperTradingRepository.MAX_LEVERAGE]) so the numbers shown here before
- * the user taps Open match exactly what the repository will actually
- * charge/allow.
- *
- * The drawer's own height is a fraction of the chart container (set by
- * [MainActivity]'s drag-to-reveal animation), so its content can end up
- * taller than the space it's given. Everything below the grab handle
- * therefore lives inside [scrollableContent], a [NestedScrollView]. Most of
- * the time its content fits and dragging anywhere on the drawer still
- * resizes it exactly as before; only once the content actually overflows
- * does [MainActivity] hand drags starting on the body to [scrollableContent]
- * instead, so it scrolls in place - the grab handle keeps working as the
- * resize target either way.
- *
- * The grab handle also gets its own direct touch handling via [onHandleDrag]
- * rather than relying solely on [ScrollRevealContainer]'s screen-wide
- * interception to notice a drag starting there - a drag on the handle
- * itself should never depend on ancestor-level gesture detection to work.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 class QuickTradePanel @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -71,15 +71,15 @@ class QuickTradePanel @JvmOverloads constructor(
 
     enum class OrderType { MARKET, LIMIT }
 
-    /** Cross margin (shared across all positions) vs isolated margin (capped to this position only). */
+    
     enum class MarginMode { CROSS, ISOLATED }
 
-    /**
-     * What the "Cost" box's number is denominated in. Defaults to [COST] -
-     * the notional-sizing behavior this panel already had before the unit
-     * picker existed - so switching units is purely a display/basis choice
-     * layered on top of the same typed-in amount.
-     */
+    
+
+
+
+
+
     enum class FuturesUnit(val label: String, val unitSuffix: String) {
         QUANTITY("Quantity", "BTC"),
         COST("Cost", "USDT"),
@@ -111,7 +111,7 @@ class QuickTradePanel @JvmOverloads constructor(
 
     private var callbacks: Callbacks? = null
 
-    // ---- form state ----
+    
     private var currentLeverage = 10
     private var currentOrderType = OrderType.MARKET
     private var currentMarginMode = MarginMode.CROSS
@@ -124,13 +124,13 @@ class QuickTradePanel @JvmOverloads constructor(
     private val futuresUnitOptionLabels = listOf("Quantity — BTC", "Cost — USDT", "Value — USDT")
     private var optionsPopup: PopupWindow? = null
 
-    // ---- latest data fed in from MainActivity ----
+    
     private var lastAvailableUsdt = 0.0
     private var lastMarkPrice: Double? = null
     private var lastBestBid: Double? = null
     private var lastBestAsk: Double? = null
 
-    // ---- views referenced after building ----
+    
     private lateinit var leverageInput: EditText
     private lateinit var effectiveLeverageCaption: TextView
     private lateinit var marginModePillText: TextView
@@ -175,21 +175,21 @@ class QuickTradePanel @JvmOverloads constructor(
 
     private lateinit var scrollView: NestedScrollView
 
-    /**
-     * The scrollable body of the drawer (everything except the grab handle).
-     * [MainActivity] hands this to [ScrollRevealContainer.excludedScrollableView],
-     * which only excludes it from the outer drag-to-reveal gesture while it
-     * actually has overflow content to scroll - see the class doc.
-     */
+    
+
+
+
+
+
     val scrollableContent: View
         get() = scrollView
 
-    /**
-     * Fires for a drag starting directly on the grab handle: reports the
-     * same [ScrollRevealContainer.DragPhase] sequence as the container-wide
-     * gesture so [MainActivity] can drive the exact same expand/collapse
-     * logic from either source.
-     */
+    
+
+
+
+
+
     var onHandleDrag: ((phase: ScrollRevealContainer.DragPhase, deltaY: Float) -> Unit)? = null
 
     private var handleDownY = 0f
@@ -229,9 +229,9 @@ class QuickTradePanel @JvmOverloads constructor(
                 body,
                 FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT),
             )
-            // Fills whatever height the panel is given by MainActivity's
-            // expand/collapse weight animation; scrolls internally once the
-            // controls below no longer fit in that height.
+            
+            
+            
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
         }
         return scrollView
@@ -241,7 +241,7 @@ class QuickTradePanel @JvmOverloads constructor(
         this.callbacks = callbacks
     }
 
-    /** Balance/equity feed - same entry point as before. */
+    
     fun render(balance: PaperAccountBalance?) {
         lastAvailableUsdt = balance?.available ?: 0.0
         availableValueText.text = if (balance != null) {
@@ -269,7 +269,7 @@ class QuickTradePanel @JvmOverloads constructor(
         refreshDerivedFields()
     }
 
-    /** Live mark price feed (from the kline pipeline's latest close). */
+    
     fun renderMarkPrice(price: Double?) {
         lastMarkPrice = price
         if (price != null) {
@@ -283,13 +283,13 @@ class QuickTradePanel @JvmOverloads constructor(
         refreshDerivedFields()
     }
 
-    /**
-     * Live order-book feed. Only the top 5 bid levels and top 5 ask levels
-     * are ever shown - [bids] and [asks] can be the full depth snapshot;
-     * this trims them down itself. [bids] must be sorted best (highest)
-     * first and [asks] best (lowest) first, which is how
-     * [org.example.syncora.bitget.DepthPipeline] already publishes them.
-     */
+    
+
+
+
+
+
+
     fun renderOrderBook(bids: List<DepthLevel>, asks: List<DepthLevel>) {
         val topBids = bids.take(5)
         val topAsks = asks.take(5)
@@ -299,7 +299,7 @@ class QuickTradePanel @JvmOverloads constructor(
         val maxSize = (topBids.asSequence() + topAsks.asSequence()).maxOfOrNull { it.size } ?: 0.0
 
         askRowsContainer.removeAllViews()
-        // Farthest ask at the top, best (lowest) ask directly above the spread.
+        
         topAsks.asReversed().forEach { level ->
             askRowsContainer.addView(
                 depthRow(
@@ -311,14 +311,14 @@ class QuickTradePanel @JvmOverloads constructor(
                 ),
             )
         }
-        // 5 blank placeholder rows if the book hasn't loaded yet, so the
-        // layout doesn't jump around while the socket connects.
+        
+        
         repeat((5 - topAsks.size).coerceAtLeast(0)) {
             askRowsContainer.addView(depthRow("--", "--", mutedColor, 0f, Color.TRANSPARENT))
         }
 
         bidRowsContainer.removeAllViews()
-        // Best (highest) bid directly below the spread, descending from there.
+        
         topBids.forEach { level ->
             bidRowsContainer.addView(
                 depthRow(
@@ -349,14 +349,14 @@ class QuickTradePanel @JvmOverloads constructor(
         refreshDerivedFields()
     }
 
-    /**
-     * Live open-positions feed, shown in the space freed up by trimming the
-     * order book from top-9+9 to top-5+5. Tapping a row prompts a confirm/
-     * cancel dialog ([showClosePositionConfirmation]) and, if confirmed,
-     * closes that position via [Callbacks.onClosePosition] - mirroring the
-     * close flow on the full account panel below the chart, just reachable
-     * without leaving the drawer.
-     */
+    
+
+
+
+
+
+
+
     fun renderOpenPositions(positions: List<PaperPosition>) {
         openPositionsContainer.removeAllViews()
         openPositionsEmptyText.visibility = if (positions.isEmpty()) View.VISIBLE else View.GONE
@@ -415,13 +415,13 @@ class QuickTradePanel @JvmOverloads constructor(
         return row
     }
 
-    /**
-     * Live pending-limit-orders feed, shown directly under Open positions.
-     * Tapping a row's Cancel button pulls the resting order via
-     * [Callbacks.onCancelPendingOrder] - mirroring the cancel flow on the
-     * full account panel below the chart, just reachable without leaving
-     * the drawer.
-     */
+    
+
+
+
+
+
+
     fun renderPendingOrders(orders: List<PendingLimitOrder>) {
         pendingOrdersContainer.removeAllViews()
         pendingOrdersEmptyText.visibility = if (orders.isEmpty()) View.VISIBLE else View.GONE
@@ -479,13 +479,13 @@ class QuickTradePanel @JvmOverloads constructor(
         return row
     }
 
-    /**
-     * Confirm/cancel prompt shown when a position row is tapped. Mirrors the
-     * wording style of [PaperTradePanel]'s reset-account confirmation - a
-     * plain title/message AlertDialog with a destructive-sounding positive
-     * action and a no-op Cancel - so closing a position from the drawer
-     * never happens on a single accidental tap.
-     */
+    
+
+
+
+
+
+
     private fun showClosePositionConfirmation(position: PaperPosition) {
         val sideLabel = if (position.side == PositionSide.LONG) "Long" else "Short"
         AlertDialog.Builder(context)
@@ -505,9 +505,9 @@ class QuickTradePanel @JvmOverloads constructor(
             .show()
     }
 
-    // ---------------------------------------------------------------------
-    // Grab handle (unchanged behavior)
-    // ---------------------------------------------------------------------
+    
+    
+    
 
     private fun buildGrabHandle(): View =
         FrameLayout(context).apply {
@@ -526,13 +526,13 @@ class QuickTradePanel @JvmOverloads constructor(
                 },
             )
             setOnTouchListener { _, event ->
-                // Use raw (screen) coordinates rather than event.y here: the
-                // handle's own bounds move live during the drag (the panel
-                // resizes on every MOVE via applyQuickTradeProgress), so
-                // measuring against this view's local y would have the
-                // handle chasing the finger and the delta collapsing toward
-                // zero. Screen coordinates stay stable regardless of how the
-                // handle itself gets relaid-out mid-gesture.
+                
+                
+                
+                
+                
+                
+                
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
                         handleDownY = event.rawY
@@ -557,9 +557,9 @@ class QuickTradePanel @JvmOverloads constructor(
             }
         }
 
-    // ---------------------------------------------------------------------
-    // Mode bar: Cross / leverage / position-mode pills
-    // ---------------------------------------------------------------------
+    
+    
+    
 
     private fun buildModeBar(): View {
         val row = LinearLayout(context).apply {
@@ -594,7 +594,7 @@ class QuickTradePanel @JvmOverloads constructor(
             setPadding(dp(10), dp(6), dp(10), dp(6))
         }
 
-    /** Same look as [pill] but tappable, showing which margin mode is active and opening the Cross/Isolated picker. */
+    
     private fun buildMarginModePill(): View {
         marginModePillText = TextView(context).apply {
             text = "${marginModeOptionLabels[currentMarginMode.ordinal]} ▾"
@@ -619,12 +619,12 @@ class QuickTradePanel @JvmOverloads constructor(
         return marginModePillText
     }
 
-    /**
-     * Small dropdown menu of [options] anchored below [anchor], styled to
-     * match the drawer's own dark surface/border palette. Used by both the
-     * cross/isolated margin-mode pill and the futures-unit picker on the
-     * cost box so the two selectors behave identically.
-     */
+    
+
+
+
+
+
     private fun showOptionsPopup(anchor: View, options: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit) {
         optionsPopup?.dismiss()
 
@@ -719,7 +719,7 @@ class QuickTradePanel @JvmOverloads constructor(
 
     private fun leverageDisplayText(value: Int): String = "${value}x"
 
-    /** Updates [leverageInput]'s text while suppressing its own watcher, keeping the cursor just before the trailing "x". */
+    
     private fun setLeverageText(target: EditText, text: String) {
         isUpdatingLeverageText = true
         target.setText(text)
@@ -745,21 +745,21 @@ class QuickTradePanel @JvmOverloads constructor(
         refreshDerivedFields()
     }
 
-    /** Selected leverage, clamped exactly the way [PaperTradingRepository] clamps it before sizing margin. */
+    
     private fun effectiveLeverage(): Int =
         currentLeverage.coerceIn(1, PaperTradingRepository.MAX_LEVERAGE)
 
-    // ---------------------------------------------------------------------
-    // Manual / Agent tabs
-    // ---------------------------------------------------------------------
+    
+    
+    
 
-    /**
-     * Switches the whole drawer body between the existing manual order
-     * ticket ([buildSplitRow] - order book, order form, open positions,
-     * pending orders) and a placeholder for agent-driven trading, wired up
-     * in a later change. Mirrors the "one child, swapped in place" pattern
-     * [PaperTradePanel.swapContent] uses.
-     */
+    
+
+
+
+
+
+
     private fun buildManualAgentTabs(): View {
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
@@ -800,14 +800,14 @@ class QuickTradePanel @JvmOverloads constructor(
         agentTabText.setTextColor(if (isAgentTabSelected) labelColor else mutedColor)
     }
 
-    /** The existing order-book + order-form + positions/pending-orders UI, unchanged. */
+    
     private lateinit var manualContentView: View
 
-    /**
-     * Intentionally empty for now - agent-driven trading has no UI yet.
-     * Reserves a little breathing room so the tab switch doesn't collapse
-     * the drawer to zero height.
-     */
+    
+
+
+
+
     private lateinit var agentContentView: View
 
     private fun buildModeContent(): View {
@@ -820,9 +820,9 @@ class QuickTradePanel @JvmOverloads constructor(
         return modeContentContainer
     }
 
-    // ---------------------------------------------------------------------
-    // Split row: order book + open positions (left) + order form (right)
-    // ---------------------------------------------------------------------
+    
+    
+    
 
     private fun buildSplitRow(): View {
         val row = LinearLayout(context).apply { orientation = HORIZONTAL }
@@ -840,9 +840,9 @@ class QuickTradePanel @JvmOverloads constructor(
         return row
     }
 
-    // ---------------------------------------------------------------------
-    // Order form column
-    // ---------------------------------------------------------------------
+    
+    
+    
 
     private fun buildFormColumn(): View {
         val col = LinearLayout(context).apply { orientation = VERTICAL }
@@ -981,9 +981,9 @@ class QuickTradePanel @JvmOverloads constructor(
         amountCol.addView(costAmountInput)
         box.addView(amountCol)
 
-        // Futures-unit picker, defaulting to "Cost" - sits on the right of
-        // the box (previously empty space) and opens the same style of
-        // dropdown as the Cross/Isolated pill.
+        
+        
+        
         futuresUnitButton = TextView(context).apply {
             text = "${currentFuturesUnit.label} ▾"
             textSize = 11.5f
@@ -1065,7 +1065,7 @@ class QuickTradePanel @JvmOverloads constructor(
         return row to input
     }
 
-    /** Adds a muted label / bold value row to [parent] and returns the value TextView so it can be updated later. */
+    
     private fun kvRow(parent: LinearLayout, label: String): TextView {
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
@@ -1118,24 +1118,24 @@ class QuickTradePanel @JvmOverloads constructor(
         }
 
     private fun applyOrderTypeStyle() {
-        // Kept as a hook: order type is now a single toggling label rather
-        // than a segmented control, styled directly in toggleOrderType().
+        
+        
     }
 
-    // ---------------------------------------------------------------------
-    // Order book column (top 5 bids + top 5 asks), with open positions
-    // filling the space freed up by trimming the book from 9+9 to 5+5.
-    // ---------------------------------------------------------------------
+    
+    
+    
+    
 
-    /**
-     * Compact account balance / unrealized PnL summary shown inline in the
-     * mode bar, to the right of the "S" pill, fed by the same
-     * [PaperAccountBalance] passed to [render] - equity for the balance
-     * line, [PaperAccountBalance.unrealizedPnl] (signed, colored
-     * bull/bear/muted) for the PnL line. [effectiveLeverageCaption] rides
-     * along underneath since it previously lived at the end of this same
-     * row.
-     */
+    
+
+
+
+
+
+
+
+
     private fun buildAccountSummaryBlock(): View {
         val block = LinearLayout(context).apply {
             orientation = VERTICAL
@@ -1244,7 +1244,7 @@ class QuickTradePanel @JvmOverloads constructor(
         bidRowsContainer = LinearLayout(context).apply { orientation = VERTICAL }
         col.addView(bidRowsContainer)
 
-        // Seed 5+5 empty rows immediately so the layout is stable before the first tick arrives.
+        
         repeat(5) { askRowsContainer.addView(depthRow("--", "--", mutedColor, 0f, Color.TRANSPARENT)) }
         repeat(5) { bidRowsContainer.addView(depthRow("--", "--", mutedColor, 0f, Color.TRANSPARENT)) }
 
@@ -1390,9 +1390,9 @@ class QuickTradePanel @JvmOverloads constructor(
         else -> String.format(Locale.US, "%.0f", value)
     }
 
-    // ---------------------------------------------------------------------
-    // Derived math shared by the estimate line, Max open, and Est. liq. price
-    // ---------------------------------------------------------------------
+    
+    
+    
 
     private fun refreshDerivedFields() {
         if (!::costAmountInput.isInitialized) return
@@ -1435,12 +1435,12 @@ class QuickTradePanel @JvmOverloads constructor(
         shortButtonSubtext.text = String.format(Locale.US, "%,.2f USDT", costUsdt)
     }
 
-    /**
-     * Converts whatever the person typed into [costAmountInput] - interpreted
-     * according to the currently selected [FuturesUnit] - into an equivalent
-     * USDT margin cost, the same basis all the downstream sizing math
-     * (estimate line, Max open, Est. liq. price, order submission) expects.
-     */
+    
+
+
+
+
+
     private fun enteredCostUsdt(effLeverage: Int): Double {
         val raw = costAmountInput.text?.toString()?.trim()?.toDoubleOrNull() ?: 0.0
         val refPrice = lastMarkPrice ?: 0.0

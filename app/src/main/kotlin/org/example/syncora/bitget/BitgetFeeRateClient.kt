@@ -12,13 +12,13 @@ import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/**
- * Bitget's real maker/taker fee rates for a USDT-margined perpetual, as
- * pulled from the API rather than assumed. [isAccountSpecific] tells the
- * caller whether this reflects the exchange's public standard tier or an
- * actual account's negotiated rate (VIP tier / BGB fee-burn discount /
- * promotion).
- */
+
+
+
+
+
+
+
 data class FeeRates(
     val makerRate: Double,
     val takerRate: Double,
@@ -26,32 +26,32 @@ data class FeeRates(
     val fetchedAt: Long,
 ) {
     companion object {
-        /**
-         * Bitget's published standard (non-VIP) tier for USDT-M perpetuals,
-         * used only until the first live refresh completes (or if every
-         * refresh attempt has failed) - see [PaperTradingRepository].
-         */
+        
+
+
+
+
         val DEFAULT = FeeRates(makerRate = 0.0002, takerRate = 0.0006, isAccountSpecific = false, fetchedAt = 0L)
     }
 }
 
-/**
- * Pulls maker/taker fee rates for `BTCUSDTP`-style USDT-margined perpetuals
- * directly from Bitget, so the paper trading engine can apply the same
- * trading cost a live order would actually incur.
- *
- * - [fetchStandardFeeRates] hits a public, unauthenticated endpoint (Bitget's
- *   contract-config listing) for the exchange's standard (non-VIP) tier.
- *   This is what a fresh paper account has no way to know without asking
- *   the exchange, and it requires no API key - consistent with paper
- *   trading never needing trading permissions.
- * - [fetchAccountFeeRates] is an optional enhancement: if the caller already
- *   has a Bitget API key configured elsewhere in the app (e.g. for Live
- *   Trading), this pulls that specific account's actual rate - VIP tier
- *   discounts, BGB discounts, or temporary promotions - via Bitget's
- *   authenticated trade-rate endpoint. Callers should treat failures here as
- *   non-fatal and fall back to [fetchStandardFeeRates].
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 class BitgetFeeRateClient(
     private val httpClient: OkHttpClient = OkHttpClient(),
 ) {

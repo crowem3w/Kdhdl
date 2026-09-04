@@ -25,17 +25,17 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * Self-contained "paper trading" panel: a fully local, on-device demo
- * account (no exchange, no API key) with a virtual USDT balance, open
- * positions with live PnL, and controls to open/close positions with
- * simulated market orders filled at the app's own live mark price.
- *
- * This view holds no trading state itself - it just renders whatever
- * [org.example.syncora.bitget.PaperTradingRepository] gives it and forwards
- * user actions back out through [Callbacks]. Everything it shows - the
- * account, its balance, its positions - lives only on this device.
- */
+
+
+
+
+
+
+
+
+
+
+
 class PaperTradePanel @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -49,9 +49,9 @@ class PaperTradePanel @JvmOverloads constructor(
         val onOpenPosition: (side: PositionSide, size: String, leverage: Int) -> Unit,
         val onClosePosition: (PaperPosition) -> Unit,
         val onCancelPendingOrder: (PendingLimitOrder) -> Unit = {},
-        // Latency simulation settings (design doc §6) - see
-        // org.example.syncora.bitget.LatencySimulator. Fired from the tappable
-        // "Latency: ..." row's settings dialog.
+        
+        
+        
         val onSetLatencyConfig: (LatencyConfig) -> Unit = {},
     )
 
@@ -112,11 +112,11 @@ class PaperTradePanel @JvmOverloads constructor(
         this.callbacks = callbacks
     }
 
-    /**
-     * Preselects which side the order-entry submit button will open, e.g.
-     * from the chart's Long/Short quick-action buttons. Updates the submit
-     * button's label and color to match.
-     */
+    
+
+
+
+
     fun setSide(side: PositionSide) {
         currentSide = side
         applySideStyle()
@@ -181,12 +181,12 @@ class PaperTradePanel @JvmOverloads constructor(
         contentSwitcher.addView(view)
     }
 
-    /**
-     * Shows the maker/taker rates currently applied to fills - real rates
-     * pulled from Bitget (see [org.example.syncora.bitget.BitgetFeeRateClient]),
-     * not an assumed flat fee - so the trader can see up front what a
-     * market order (taker) versus a resting limit order (maker) will cost.
-     */
+    
+
+
+
+
+
     private fun renderFeeRates(feeRates: FeeRates) {
         val makerPct = feeRates.makerRate * 100.0
         val takerPct = feeRates.takerRate * 100.0
@@ -200,14 +200,14 @@ class PaperTradePanel @JvmOverloads constructor(
         )
     }
 
-    /**
-     * Shows the delay currently being injected before a simulated
-     * market/marketable-limit order's fill is priced (see
-     * [org.example.syncora.bitget.LatencySimulator], design doc §6) - tap to
-     * change it. "Off" when latency simulation is disabled, in which case
-     * fills price against the book/mark price at decision time, same as if
-     * this feature didn't exist.
-     */
+    
+
+
+
+
+
+
+
     private fun renderLatency(config: LatencyConfig) {
         currentLatencyConfig = config
         latencyText.text = if (!config.enabled) {
@@ -288,7 +288,7 @@ class PaperTradePanel @JvmOverloads constructor(
         return row
     }
 
-    // ---- Header: title + context-sensitive action button ----
+    
 
     private fun buildHeaderRow(): View {
         val outer = LinearLayout(context).apply {
@@ -334,7 +334,7 @@ class PaperTradePanel @JvmOverloads constructor(
         return outer
     }
 
-    // ---- Empty state: no local account yet ----
+    
 
     private fun buildNoAccountView(): View =
         LinearLayout(context).apply {
@@ -369,7 +369,7 @@ class PaperTradePanel @JvmOverloads constructor(
             )
         }
 
-    // ---- Main trading content: balance, order entry, positions ----
+    
 
     private fun buildTradingContent(): View =
         LinearLayout(context).apply {
@@ -469,18 +469,18 @@ class PaperTradePanel @JvmOverloads constructor(
         row.addView(leverageInput)
         row.addView(submitOrderButton)
 
-        // Shows the maker/taker rates a fill will actually be charged (see
-        // PaperTradingRepository's fee simulation) - updated by
-        // [renderFeeRates] whenever the repository's live rate changes.
+        
+        
+        
         feeRateText = TextView(context).apply {
             textSize = 10.5f
             setTextColor(mutedColor)
             setPadding(dp(2), dp(6), dp(2), dp(0))
         }
 
-        // Shows the currently-simulated order latency (see
-        // [renderLatency]/[org.example.syncora.bitget.LatencySimulator]) -
-        // tappable to open the settings dialog.
+        
+        
+        
         latencyText = TextView(context).apply {
             textSize = 10.5f
             setTextColor(mutedColor)
@@ -610,7 +610,7 @@ class PaperTradePanel @JvmOverloads constructor(
         return row
     }
 
-    // ---- Account creation dialog ----
+    
 
     private fun showCreateAccountDialog() {
         val container = LinearLayout(context).apply {
@@ -652,7 +652,7 @@ class PaperTradePanel @JvmOverloads constructor(
         dialog.show()
     }
 
-    // ---- Deposit dialog (once per calendar month) ----
+    
 
     private fun showDepositDialog() {
         val nextAvailable = nextDepositAvailableAt
@@ -706,16 +706,16 @@ class PaperTradePanel @JvmOverloads constructor(
         dialog.show()
     }
 
-    // ---- Latency simulation settings (design doc §6) ----
+    
 
-    /**
-     * Lets the trader see and tune what [org.example.syncora.bitget.LatencySimulator]
-     * is doing to every simulated market/marketable-limit fill: a fixed
-     * delay plus an optional random jitter on top, applied before the
-     * fill's price is looked up, so results reflect market state a beat
-     * after the decision instead of at the exact instant of it - the same
-     * gap a real order's network/engine latency would introduce.
-     */
+    
+
+
+
+
+
+
+
     private fun showLatencySettingsDialog() {
         val config = currentLatencyConfig
         val container = LinearLayout(context).apply {
@@ -793,7 +793,7 @@ class PaperTradePanel @JvmOverloads constructor(
         dialog.show()
     }
 
-    // ---- Reset (long-press the account line) ----
+    
 
     private fun showResetAccountConfirmation() {
         AlertDialog.Builder(context)

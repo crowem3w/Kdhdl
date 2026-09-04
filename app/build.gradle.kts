@@ -3,7 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
-    // Order matters: kapt then ObjectBox, both after the application plugin.
+    
     alias(libs.plugins.kotlin.kapt)
     alias(libs.plugins.objectbox)
 }
@@ -19,10 +19,10 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Pin where ObjectBox's annotation processor generates MyObjectBox
-        // (defaults to inferring a package from @Entity classes, which is
-        // fragile once entities exist in more than one package - see
-        // ObjectBoxStore.kt, which imports MyObjectBox from this package).
+        
+        
+        
+        
         javaCompileOptions {
             annotationProcessorOptions {
                 arguments.put("objectbox.myObjectBoxPackage", "org.example.syncora.bitget")

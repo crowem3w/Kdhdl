@@ -22,17 +22,17 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-/**
- * The "Paper Trading" account overview screen shown from the § modal:
- * account identity, virtual balance, a rolling 30-day profitable-ratio
- * stat derived from [ClosedPaperTrade] history, a simulated-funds
- * disclaimer, and menu rows into the order-entry screen, trade history,
- * and a text export of the account.
- *
- * Like [PaperTradePanel], this is a dumb render target: it holds no
- * trading state of its own, just whatever [render] hands it, and forwards
- * user actions back out through [Callbacks] / [setNavigationCallbacks].
- */
+
+
+
+
+
+
+
+
+
+
+
 class PaperTradingAccountPanel @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -88,11 +88,11 @@ class PaperTradingAccountPanel @JvmOverloads constructor(
         this.callbacks = callbacks
     }
 
-    /**
-     * Re-wired every time the hosting [TradingModeDialog] is (re)built,
-     * since only one such dialog is ever visible at a time but this panel
-     * itself is a long-lived singleton (see [org.example.syncora.MainActivity]).
-     */
+    
+
+
+
+
     fun setNavigationCallbacks(
         onOpenHistory: () -> Unit,
         onExportReport: () -> Unit,
@@ -146,7 +146,7 @@ class PaperTradingAccountPanel @JvmOverloads constructor(
         contentSwitcher.addView(view)
     }
 
-    // ---- Empty state: no local account yet ----
+    
 
     private fun buildNoAccountView(): View =
         LinearLayout(context).apply {
@@ -182,7 +182,7 @@ class PaperTradingAccountPanel @JvmOverloads constructor(
             )
         }
 
-    // ---- Populated account overview ----
+    
 
     private fun buildAccountView(): View =
         LinearLayout(context).apply {
@@ -443,7 +443,7 @@ class PaperTradingAccountPanel @JvmOverloads constructor(
         return row
     }
 
-    // ---- Create-account / reset dialogs (mirrors PaperTradePanel) ----
+    
 
     private fun showCreateAccountDialog() {
         val container = LinearLayout(context).apply {

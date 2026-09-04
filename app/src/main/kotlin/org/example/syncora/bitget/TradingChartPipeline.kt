@@ -46,18 +46,18 @@ class TradingChartPipeline(
         const val MAX_QUEUED_TICKS = 2_000
         const val CACHE_PERSIST_INTERVAL_MS = 5_000L
 
-        // Cap on how many candles a single reconnect-gap backfill will
-        // request in one shot. Large enough to cover ordinary reconnects
-        // (minutes to hours of missed 1m bars) without needing the full
-        // multi-page pagination used for the initial deep backfill.
+        
+        
+        
+        
         const val GAP_BACKFILL_MAX_CANDLES = 1_000
     }
 
     private val buffer = KlineBuffer(bufferCapacity)
 
-    // Bitget's REST `productType` param is lowercase ("usdt-futures") while
-    // the websocket `instType` is upper-snake ("USDT-FUTURES"); derive
-    // rather than duplicate so the two can never drift apart.
+    
+    
+    
     private val productType: String = instType.lowercase()
 
     private val _klines = MutableStateFlow<List<Kline>>(emptyList())
@@ -185,25 +185,25 @@ class TradingChartPipeline(
         catchUpFromCacheIfNeeded(cached)
     }
 
-    /**
-     * Startup catch-up (forward gap-filling): cached candles reflect
-     * whatever was last received before the app went offline - closed,
-     * backgrounded, or without connectivity. The websocket only streams
-     * ticks going forward from the moment it (re)connects, so on its own
-     * it can never recover candles that were broadcast while nobody was
-     * listening; those bars would otherwise stay missing from the chart
-     * until the slower, multi-page [loadSnapshotWithRetry] backfill
-     * eventually completes.
-     *
-     * This walks the REST API forward from the last cached candle up to
-     * "now" and merges the result into the instantly-painted cache
-     * preview, so the chart looks caught up right away instead of showing
-     * a stale gap while waiting on the network.
-     *
-     * Scoped to the 1 minute timeframe for now - other timeframes still
-     * get caught up, just via the normal (slightly slower) snapshot fetch
-     * in [loadSnapshotWithRetry] rather than this instant cache patch-up.
-     */
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     private suspend fun catchUpFromCacheIfNeeded(cached: List<Kline>) {
         if (_currentTimeframe.value != Timeframe.ONE_MINUTE) return
         val lastCachedStart = cached.lastOrNull()?.startTime ?: return
@@ -212,22 +212,22 @@ class TradingChartPipeline(
         val expectedNext = lastCachedStart + barMs
         val now = System.currentTimeMillis()
 
-        // Less than a full bar behind - the cache is effectively current,
-        // nothing was missed while offline.
+        
+        
         if (expectedNext > now - barMs) return
 
         val missingBars = (now - expectedNext) / barMs
         Log.d(TAG, "Startup catch-up: cache is ~$missingBars 1m candle(s) behind; backfilling via REST")
 
-        // Reuse the same deep-history walk that the full startup snapshot
-        // uses (paginates through /history-candles beyond the first
-        // 1000-candle page) rather than a single bounded range fetch. A
-        // long offline gap - phone off overnight, no signal for a day,
-        // etc. - can easily exceed what one REST call returns, and a
-        // plain forward range fetch risks landing on the *oldest* part of
-        // the gap instead of the freshest candles the chart actually needs
-        // to display. Asking for the newest `bufferCapacity` candles
-        // outright sidesteps that entirely.
+        
+        
+        
+        
+        
+        
+        
+        
+        
         val refreshed = try {
             restClient.backfillCandles(
                 instId = instId,
@@ -236,17 +236,17 @@ class TradingChartPipeline(
                 targetCount = bufferCapacity,
             )
         } catch (e: Exception) {
-            // Best-effort: loadSnapshotWithRetry() will still bring the
-            // chart fully up to date shortly after; this just skips the
-            // instant cache fix-up for this attempt.
+            
+            
+            
             Log.w(TAG, "Startup catch-up backfill failed: ${e.message}")
             return
         }
         if (refreshed.isEmpty()) return
 
         primeLock.withLock {
-            // Bail if a real snapshot already primed the buffer, or the
-            // timeframe changed, while this REST call was in flight.
+            
+            
             if (primed || _currentTimeframe.value != Timeframe.ONE_MINUTE) return@withLock
 
             val merged = LinkedHashMap<Long, Kline>()
@@ -281,16 +281,16 @@ class TradingChartPipeline(
         }
     }
 
-    /**
-     * Detects a hole between the newest buffered candle and an incoming
-     * live batch - e.g. bars missed while the websocket was disconnected
-     * or the process was backgrounded - and patches it with a targeted REST
-     * fetch before the live batch is applied, so reconnects don't leave a
-     * blank stretch on the chart.
-     *
-     * Must be called while holding [primeLock] and only once [primed], so
-     * the buffer's "last candle" can't move out from under this check.
-     */
+    
+
+
+
+
+
+
+
+
+
     private suspend fun backfillGapIfNeeded(incomingBatch: List<Kline>) {
         val barMs = _barDurationMillis.value
         if (barMs <= 0) return
@@ -299,9 +299,9 @@ class TradingChartPipeline(
         val lastKnown = buffer.lastStartTimeOrNull() ?: return
         val expectedNext = lastKnown + barMs
 
-        // Nothing missing: the batch picks up right where the buffer left
-        // off (or even overlaps/replaces the trailing candle, which is
-        // normal for in-progress-bar updates).
+        
+        
+        
         if (earliestIncoming <= expectedNext) return
 
         val missingBars = (earliestIncoming - expectedNext) / barMs
@@ -320,9 +320,9 @@ class TradingChartPipeline(
                 _klines.value = buffer.applyUpdates(missing)
             }
         } catch (e: Exception) {
-            // Best-effort: leave the gap for now rather than blocking the
-            // live tick that triggered this check. A later reconnect or
-            // timeframe switch gets another chance to fill it.
+            
+            
+            
             Log.w(TAG, "Gap backfill failed for [$expectedNext, $earliestIncoming): ${e.message}")
         }
     }
@@ -331,10 +331,10 @@ class TradingChartPipeline(
         var attempt = 0
         while (true) {
             try {
-                // Real backfill: walks /history-candles across as many
-                // pages as needed (not just a single capped REST call) to
-                // assemble up to `bufferCapacity` candles of genuine history
-                // for the current timeframe.
+                
+                
+                
+                
                 val historical = restClient.backfillCandles(
                     instId = instId,
                     productType = productType,

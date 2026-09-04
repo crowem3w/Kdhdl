@@ -45,16 +45,16 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * Full-screen modal launched from the bottom-bar "data" button.
- *
- * Mirrors [TradingModeDialog]'s glass-card shell (same blurred backdrop,
- * translucent bordered card, header row with back/close controls) but opens
- * straight onto a vertical list of data categories - Order Book, OHLCV, Open
- * Interest, Funding Rates - each row showing a small leading icon plus a
- * title/description text block. Each row drills into its own bare screen;
- * the content for those screens is intentionally left empty for now.
- */
+
+
+
+
+
+
+
+
+
+
 class HistoricalDataDialog(
     context: Context,
     private val pipeline: TradingChartPipeline? = null,
@@ -98,8 +98,8 @@ class HistoricalDataDialog(
     )
 
     private companion object {
-        // Same glass-panel math as TradingModeDialog, kept in sync so the
-        // two modals read as one consistent design language.
+        
+        
         const val CARD_FILL_OPACITY_PERCENT = 0.75f
         val CARD_BASE_COLOR_RGB = Color.parseColor("#1C1C1E")
 
@@ -121,9 +121,9 @@ class HistoricalDataDialog(
     private val mutedColor = Color.parseColor("#B2B5BE")
     private val scrimColor = Color.parseColor("#99000000")
 
-    // Same teal used by the header's live/connecting dot (see MainActivity,
-    // R.drawable.bg_live_dot) so the OHLCV info sheet's "updates live"
-    // indicator reads as the same signal elsewhere in the app.
+    
+    
+    
     private val accentColor = Color.parseColor("#22D3C5")
     private val subCardColor = Color.parseColor("#14FFFFFF")
     private val subCardStroke = Color.parseColor("#1FFFFFFF")
@@ -137,9 +137,9 @@ class HistoricalDataDialog(
     private val optionsScreen by lazy { buildOptionsScreen() }
     private var currentScreen: Screen = Screen.OPTIONS
 
-    // Lives only as long as the dialog is on screen: cancelled in the
-    // dismiss listener below so the OHLCV screen's real-time collector
-    // (and any in-flight CSV export) never outlives the modal.
+    
+    
+    
     private val dialogScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var liveStatsJob: Job? = null
     private var backfillProgressJob: Job? = null
@@ -173,7 +173,7 @@ class HistoricalDataDialog(
         }
     }
 
-    // ---- Root scaffold: full-screen scrim + centered glass card ----
+    
 
     private fun buildRootView(): View {
         rootView = FrameLayout(context).apply {
@@ -198,7 +198,7 @@ class HistoricalDataDialog(
             clipToOutline = true
             elevation = dp(16).toFloat()
             isClickable = true
-            setOnClickListener { /* consume: don't dismiss when tapping inside the card */ }
+            setOnClickListener {  }
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -315,7 +315,7 @@ class HistoricalDataDialog(
         }
     }
 
-    // ---- Screen 1: vertical list of icon + title/description rows ----
+    
 
     private fun buildOptionsScreen(): View {
         val list = LinearLayout(context).apply {
@@ -391,7 +391,7 @@ class HistoricalDataDialog(
         return row
     }
 
-    // ---- Screen 2: OHLCV info sheet - live stats on the locally stored 1m candles + CSV export ----
+    
 
     private val csvTimestampFormat by lazy {
         SimpleDateFormat("yyyy-MM-dd'_'HHmmss", Locale.US).apply { timeZone = TimeZone.getDefault() }
@@ -455,11 +455,11 @@ class HistoricalDataDialog(
             container.addView(buildDeepArchiveSection(backfillJob))
         }
 
-        // Renders once immediately with whatever's in the buffer right now,
-        // then keeps refreshing for as long as this screen stays visible -
-        // klines is the same in-memory snapshot that gets periodically
-        // flushed to the on-device ObjectBox cache, so this reflects the
-        // locally stored data in real time as new 1m candles close.
+        
+        
+        
+        
+        
         liveStatsJob = pipeline.klines
             .onEach { candles ->
                 renderOhlcvStats(
@@ -476,14 +476,14 @@ class HistoricalDataDialog(
         return container
     }
 
-    /**
-     * Deep archive section of the OHLCV screen: a "Download full history"
-     * trigger, a progress row bound to [DeepHistoryBackfillJob.progress],
-     * and a second CSV export path that reads from [KlineArchiveStore]
-     * (via the job's own cacheKey) once a backfill has stored anything -
-     * separate from [exportOhlcvCsv] above, which only ever sees the live
-     * buffer's few-thousand-candle window.
-     */
+    
+
+
+
+
+
+
+
     private fun buildDeepArchiveSection(job: DeepHistoryBackfillJob): View {
         val section = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -712,13 +712,13 @@ class HistoricalDataDialog(
         }
     }
 
-    /**
-     * Writes every currently buffered/locally-cached 1m OHLCV candle out as
-     * a CSV file in the device's public Downloads folder via MediaStore
-     * (no storage permission needed on minSdk 30+), so the data is left
-     * sitting in normal on-device file storage rather than just shared
-     * through an app-to-app intent.
-     */
+    
+
+
+
+
+
+
     private fun exportOhlcvCsv(candles: List<Kline>, statusText: TextView) {
         if (candles.isEmpty()) {
             Toast.makeText(context, "No OHLCV data cached locally yet", Toast.LENGTH_SHORT).show()
@@ -737,12 +737,12 @@ class HistoricalDataDialog(
         }
     }
 
-    /**
-     * Same on-device CSV export as [exportOhlcvCsv], but reading from
-     * [DeepHistoryBackfillJob]'s archive store instead of the live buffer -
-     * the "actually-deep dataset" once a backfill has run (blueprint §3.5),
-     * rather than whatever few thousand candles the chart currently holds.
-     */
+    
+
+
+
+
+
     private fun exportArchiveCsv(job: DeepHistoryBackfillJob, statusText: TextView) {
         dialogScope.launch {
             val candles = withContext(Dispatchers.IO) { job.loadArchivedCandles() }
@@ -802,7 +802,7 @@ class HistoricalDataDialog(
         }
     }
 
-    // ---- Screens 3-5: bare placeholders, content intentionally left empty ----
+    
 
     private fun buildEmptyScreen(): View = FrameLayout(context).apply {
         layoutParams = ViewGroup.LayoutParams(

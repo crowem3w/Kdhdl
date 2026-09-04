@@ -29,31 +29,31 @@ import org.example.syncora.bitget.PaperTradingConnectionState
 import org.example.syncora.bitget.PipelineState
 import java.util.Locale
 
-/**
- * Owns the market-data / live-trading pipeline lifecycle at the process
- * level instead of at [org.example.syncora.MainActivity]'s lifecycle.
- *
- * Previously, [SyncoraApplication.ensureMarketDataStarted]/[SyncoraApplication.stopMarketData]
- * were called straight from `MainActivity.onStart()`/`onStop()`, which meant
- * every market-data socket, the live-trading poll loop, and the stop-loss
- * guard all died the instant the user backgrounded the app. This service
- * replaces that: it's what actually calls those two methods now (onCreate /
- * onDestroy), and it runs as a foreground service so Android gives it real
- * background-execution priority instead of freezing/killing it like an
- * ordinary background process.
- *
- * The persistent notification this posts is also the *reason* it's allowed
- * to keep running - a foreground service without a visible notification
- * isn't valid on modern Android - so it does double duty as the "agent
- * status" surface described in the redesign doc (§2.2): live pipeline
- * connectivity plus a plain-language summary of any open position.
- *
- * This is one layer of the doc's two-layer safety story. The *other* layer
- * - the one that matters if this service is killed anyway (OEM background
- * killers aren't 100% preventable even with the battery-exemption flow in
- * onboarding) - is [org.example.syncora.bitget.StopLossGuard], which places
- * its protection directly on Bitget's book, not in this process.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 class MarketDataForegroundService : Service() {
 
     private val app by lazy { application as SyncoraApplication }
@@ -75,8 +75,8 @@ class MarketDataForegroundService : Service() {
             },
         )
 
-        // The single place that now controls pipeline/live-poll/stop-loss-guard
-        // lifecycle - see SyncoraApplication's updated kdoc on these methods.
+        
+        
         app.ensureMarketDataStarted()
 
         observeStatusForNotification()
@@ -87,12 +87,12 @@ class MarketDataForegroundService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        // START_STICKY: if the OS kills this process under memory pressure,
-        // ask it to recreate the service (with a null intent) once resources
-        // free up, so market data / live position monitoring resumes on its
-        // own rather than staying dead until the user reopens the app. Any
-        // position open at the moment of the kill is meanwhile protected by
-        // StopLossGuard's already-placed exchange-side stop, not by this flag.
+        
+        
+        
+        
+        
+        
         return START_STICKY
     }
 
@@ -105,7 +105,7 @@ class MarketDataForegroundService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /** Keeps the persistent notification's text in sync with live pipeline/position state. */
+    
     private fun observeStatusForNotification() {
         notificationJob = combine(
             app.pipeline.pipelineState,
@@ -192,13 +192,13 @@ class MarketDataForegroundService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_STOP = "org.example.syncora.service.action.STOP"
 
-        /** Idempotent: safe to call from onStart() every time the app comes to the foreground. */
+        
         fun start(context: Context) {
             val intent = Intent(context, MarketDataForegroundService::class.java)
             ContextCompat.startForegroundService(context, intent)
         }
 
-        /** Fully tears down the pipelines/live polling/stop-loss guard - only call on explicit user request. */
+        
         fun stop(context: Context) {
             context.startService(Intent(context, MarketDataForegroundService::class.java).setAction(ACTION_STOP))
         }

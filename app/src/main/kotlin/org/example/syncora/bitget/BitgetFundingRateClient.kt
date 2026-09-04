@@ -12,15 +12,15 @@ import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/**
- * A single funding-rate reading for a perpetual.
- *
- * [fundingTimeMs] is the settlement timestamp the rate actually applies to
- * - set for every entry from [BitgetFundingRateClient.fetchFundingRateHistory]
- * (a rate that has already settled), and null from
- * [BitgetFundingRateClient.fetchCurrentFundingRate] (the live rate that
- * *will* settle at [nextSettlementMs], which hasn't happened yet).
- */
+
+
+
+
+
+
+
+
+
 data class FundingRateInfo(
     val symbol: String,
     val fundingRate: Double,
@@ -29,14 +29,14 @@ data class FundingRateInfo(
     val fetchedAt: Long = System.currentTimeMillis(),
 )
 
-/**
- * Pulls real funding-rate data for `BTCUSDTP`-style USDT-margined
- * perpetuals from Bitget's public market-data API - design doc §7
- * ("Funding Accrual"). Both endpoints here are unauthenticated public
- * market data, exactly like [BitgetFeeRateClient]'s standard-tier fetch -
- * no trading permissions required, same as the rest of this local paper
- * trading engine.
- */
+
+
+
+
+
+
+
+
 class BitgetFundingRateClient(
     private val httpClient: OkHttpClient = OkHttpClient(),
 ) {
@@ -45,14 +45,14 @@ class BitgetFundingRateClient(
         const val BASE_URL = "https://api.bitget.com"
     }
 
-    /**
-     * The live, not-yet-settled funding rate that will apply at the next
-     * settlement ([FundingRateInfo.nextSettlementMs]) - the best estimate
-     * of what an open position is about to be charged/paid, per doc §7
-     * step 1. This is what a settlement happening *right now* should use,
-     * since Bitget's history endpoint won't have that settlement's actual
-     * rate recorded until after it lands.
-     */
+    
+
+
+
+
+
+
+
     suspend fun fetchCurrentFundingRate(
         symbol: String = "BTCUSDT",
         productType: String = "usdt-futures",
@@ -68,15 +68,15 @@ class BitgetFundingRateClient(
         return FundingRateInfo(symbol = symbol, fundingRate = rate, fundingTimeMs = null, nextSettlementMs = nextUpdate)
     }
 
-    /**
-     * The actual settled rate for one specific past funding timestamp -
-     * used to catch up accurately (rather than approximating with
-     * whatever the live rate happens to be now) on settlements that
-     * occurred while the app wasn't running. Returns null instead of
-     * throwing if no history entry matches [atMs] exactly (e.g. it falls
-     * outside the window Bitget's history endpoint returns), so the
-     * caller can fall back to [fetchCurrentFundingRate].
-     */
+    
+
+
+
+
+
+
+
+
     suspend fun fetchSettledFundingRate(
         atMs: Long,
         symbol: String = "BTCUSDT",
@@ -84,7 +84,7 @@ class BitgetFundingRateClient(
         pageSize: Int = 100,
     ): FundingRateInfo? = fetchFundingRateHistory(symbol, productType, pageSize).firstOrNull { it.fundingTimeMs == atMs }
 
-    /** Most-recent-first list of actually-settled historical funding rates. */
+    
     suspend fun fetchFundingRateHistory(
         symbol: String = "BTCUSDT",
         productType: String = "usdt-futures",
