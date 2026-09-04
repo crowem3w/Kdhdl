@@ -182,6 +182,74 @@ class TradingChartPipeline(
                 _usingCache.value = true
             }
         }
+        catchUpFromCacheIfNeeded(cached)
+    }
+
+    /**
+     * Startup catch-up (forward gap-filling): cached candles reflect
+     * whatever was last received before the app went offline - closed,
+     * backgrounded, or without connectivity. The websocket only streams
+     * ticks going forward from the moment it (re)connects, so on its own
+     * it can never recover candles that were broadcast while nobody was
+     * listening; those bars would otherwise stay missing from the chart
+     * until the slower, multi-page [loadSnapshotWithRetry] backfill
+     * eventually completes.
+     *
+     * This walks the REST API forward from the last cached candle up to
+     * "now" and merges the result into the instantly-painted cache
+     * preview, so the chart looks caught up right away instead of showing
+     * a stale gap while waiting on the network.
+     *
+     * Scoped to the 1 minute timeframe for now - other timeframes still
+     * get caught up, just via the normal (slightly slower) snapshot fetch
+     * in [loadSnapshotWithRetry] rather than this instant cache patch-up.
+     */
+    private suspend fun catchUpFromCacheIfNeeded(cached: List<Kline>) {
+        if (_currentTimeframe.value != Timeframe.ONE_MINUTE) return
+        val lastCachedStart = cached.lastOrNull()?.startTime ?: return
+
+        val barMs = Timeframe.ONE_MINUTE.durationMillis
+        val expectedNext = lastCachedStart + barMs
+        val now = System.currentTimeMillis()
+
+        // Less than a full bar behind - the cache is effectively current,
+        // nothing was missed while offline.
+        if (expectedNext > now - barMs) return
+
+        val missingBars = (now - expectedNext) / barMs
+        Log.d(TAG, "Startup catch-up: cache is ~$missingBars 1m candle(s) behind; backfilling via REST")
+
+        val missing = try {
+            restClient.fetchCandleRange(
+                instId = instId,
+                productType = productType,
+                granularity = Timeframe.ONE_MINUTE.restParam,
+                startTime = expectedNext,
+                endTime = now,
+                limit = GAP_BACKFILL_MAX_CANDLES,
+            )
+        } catch (e: Exception) {
+            // Best-effort: loadSnapshotWithRetry() will still bring the
+            // chart fully up to date shortly after; this just skips the
+            // instant cache fix-up for this attempt.
+            Log.w(TAG, "Startup catch-up backfill failed: ${e.message}")
+            return
+        }
+        if (missing.isEmpty()) return
+
+        primeLock.withLock {
+            // Bail if a real snapshot already primed the buffer, or the
+            // timeframe changed, while this REST call was in flight.
+            if (primed || _currentTimeframe.value != Timeframe.ONE_MINUTE) return@withLock
+
+            val merged = LinkedHashMap<Long, Kline>()
+            for (candle in cached) merged[candle.startTime] = candle
+            for (candle in missing) merged[candle.startTime] = candle
+
+            _klines.value = merged.values.sortedBy { it.startTime }.takeLast(bufferCapacity)
+            _usingCache.value = true
+        }
+        Log.d(TAG, "Startup catch-up filled ${missing.size} candle(s) from cache")
     }
 
     private suspend fun persistCachePeriodically() {
