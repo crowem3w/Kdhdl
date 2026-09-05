@@ -11,33 +11,19 @@ import javax.microedition.khronos.opengles.GL10
 import kotlin.math.cos
 import kotlin.math.sin
 
-/**
- * Direct GLES2 port of the "Orb  " WebGL/OGL shader.
- *
- * The fragment shader body is left mathematically identical to the original
- * GLSL source so the visual result matches; the additions are a [saturation]
- * uniform used to desaturate the orb for a monochrome look, and [color1] /
- * [color2] / [color3] uniforms so callers can drive a custom brand palette
- * instead of the original violet/cyan/navy one.
- */
 internal class OrbRenderer : GLSurfaceView.Renderer {
 
-    // ---- Public, thread-safe-ish knobs (written from the UI thread, read from the GL thread) ----
     @Volatile var hue: Float = 0f
     @Volatile var hoverIntensity: Float = 0.3f
     @Volatile var rotateOnHover: Boolean = true
     @Volatile var forceHoverState: Boolean = false
-    @Volatile var saturation: Float = 0f // 0 = fully monochrome, 1 = original color
+    @Volatile var saturation: Float = 0f
     @Volatile var backgroundColor: FloatArray = floatArrayOf(0f, 0f, 0f)
 
-    // Base palette the orb cycles/mixes between. Defaults match the original
-    // violet/cyan/navy Orb.jsx palette; callers can override for a brand look
-    // (e.g. a white-core, teal-glow orb) without touching the shader itself.
     @Volatile var color1: FloatArray = floatArrayOf(0.611765f, 0.262745f, 0.996078f)
     @Volatile var color2: FloatArray = floatArrayOf(0.298039f, 0.760784f, 0.913725f)
     @Volatile var color3: FloatArray = floatArrayOf(0.062745f, 0.078431f, 0.600000f)
 
-    /** Updated by the view's touch listener; 1f while a touch is inside the orb, else 0f. */
     @Volatile var targetHover: Float = 0f
 
     private var program = 0
@@ -67,8 +53,6 @@ internal class OrbRenderer : GLSurfaceView.Renderer {
     private var lastFrameNanos = 0L
 
     init {
-        // A single oversized triangle that covers the whole clip-space viewport once
-        // rasterized, avoiding a seam down the middle of a two-triangle quad.
         val positions = floatArrayOf(
             -1f, -1f,
             3f, -1f,
@@ -190,9 +174,6 @@ internal class OrbRenderer : GLSurfaceView.Renderer {
             }
         """.trimIndent()
 
-        // Fragment shader: same math as the original Orb.jsx GLSL, plus a `saturation`
-        // uniform (1.0 = original colors, 0.0 = fully monochrome) and a final composite
-        // against backgroundColor so the surface can render fully opaque.
         val FRAGMENT_SRC = """
             precision highp float;
 

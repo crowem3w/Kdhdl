@@ -14,16 +14,6 @@ import androidx.core.content.res.ResourcesCompat
 import org.example.syncora.R
 import org.example.syncora.perf.PerformanceSnapshot
 
-/**
- * Horizontal readout of the three chart-rendering health metrics (FPS,
- * Touch/Input latency, CPU frame time), shown below the "Perpetual" label
- * in the header — outside the chart canvas entirely. Each row is rendered
- * much smaller and much thinner than the "Perpetual" label (13sp, default
- * weight) so it reads as a lightweight secondary readout rather than part
- * of the same typographic system. Within each row, the single-letter
- * initial (F / T / C) stays white while the number+unit value is colored
- * green when that signal is healthy and red when it's degraded.
- */
 class PerformanceHudView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -64,11 +54,6 @@ class PerformanceHudView @JvmOverloads constructor(
         }
     }
 
-    /**
-     * Splits a "<initial> <value>" label (e.g. "F 60fps") at its first
-     * space, keeping the initial white and coloring only the number+unit
-     * value green/red based on [healthy].
-     */
     private fun colorize(label: String, healthy: Boolean): SpannableString {
         val spannable = SpannableString(label)
         val splitIndex = label.indexOf(' ')

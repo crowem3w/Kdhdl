@@ -24,14 +24,6 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
 
-/**
- * Public, read-only trade-print stream (Bitget's `trade` channel) - no
- * account/order data, no trading permissions required. This is what feeds
- * [QueuePositionTracker]: watching how much volume actually trades through
- * a price level is how a real exchange's FIFO matching decides when a
- * resting limit order at that level gets filled, and it's the same signal
- * this paper engine uses instead of guessing.
- */
 class BitgetTradeSocket(
     private val instId: String = "BTCUSDT",
     private val instType: String = "USDT-FUTURES",
