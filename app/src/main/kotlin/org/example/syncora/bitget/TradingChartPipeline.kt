@@ -45,20 +45,9 @@ class TradingChartPipeline(
 
         const val MAX_QUEUED_TICKS = 2_000
         const val CACHE_PERSIST_INTERVAL_MS = 5_000L
-
-        
-        
-        
-        
-        const val GAP_BACKFILL_MAX_CANDLES = 1_000
     }
 
     private val buffer = KlineBuffer(bufferCapacity)
-
-    
-    
-    
-    private val productType: String = instType.lowercase()
 
     private val _klines = MutableStateFlow<List<Kline>>(emptyList())
 
@@ -182,81 +171,6 @@ class TradingChartPipeline(
                 _usingCache.value = true
             }
         }
-        catchUpFromCacheIfNeeded(cached)
-    }
-
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    private suspend fun catchUpFromCacheIfNeeded(cached: List<Kline>) {
-        if (_currentTimeframe.value != Timeframe.ONE_MINUTE) return
-        val lastCachedStart = cached.lastOrNull()?.startTime ?: return
-
-        val barMs = Timeframe.ONE_MINUTE.durationMillis
-        val expectedNext = lastCachedStart + barMs
-        val now = System.currentTimeMillis()
-
-        
-        
-        if (expectedNext > now - barMs) return
-
-        val missingBars = (now - expectedNext) / barMs
-        Log.d(TAG, "Startup catch-up: cache is ~$missingBars 1m candle(s) behind; backfilling via REST")
-
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        val refreshed = try {
-            restClient.backfillCandles(
-                instId = instId,
-                productType = productType,
-                granularity = Timeframe.ONE_MINUTE.restParam,
-                targetCount = bufferCapacity,
-            )
-        } catch (e: Exception) {
-            
-            
-            
-            Log.w(TAG, "Startup catch-up backfill failed: ${e.message}")
-            return
-        }
-        if (refreshed.isEmpty()) return
-
-        primeLock.withLock {
-            
-            
-            if (primed || _currentTimeframe.value != Timeframe.ONE_MINUTE) return@withLock
-
-            val merged = LinkedHashMap<Long, Kline>()
-            for (candle in cached) merged[candle.startTime] = candle
-            for (candle in refreshed) merged[candle.startTime] = candle
-
-            _klines.value = merged.values.sortedBy { it.startTime }.takeLast(bufferCapacity)
-            _usingCache.value = true
-        }
-        Log.d(TAG, "Startup catch-up refreshed ${refreshed.size} candle(s) from REST")
     }
 
     private suspend fun persistCachePeriodically() {
@@ -269,7 +183,6 @@ class TradingChartPipeline(
     private suspend fun onTicksArrived(batch: List<Kline>) {
         primeLock.withLock {
             if (primed) {
-                backfillGapIfNeeded(batch)
                 applyLive(batch)
             } else {
                 tempQueue.addAll(batch)
@@ -281,65 +194,14 @@ class TradingChartPipeline(
         }
     }
 
-    
-
-
-
-
-
-
-
-
-
-    private suspend fun backfillGapIfNeeded(incomingBatch: List<Kline>) {
-        val barMs = _barDurationMillis.value
-        if (barMs <= 0) return
-
-        val earliestIncoming = incomingBatch.minOfOrNull { it.startTime } ?: return
-        val lastKnown = buffer.lastStartTimeOrNull() ?: return
-        val expectedNext = lastKnown + barMs
-
-        
-        
-        
-        if (earliestIncoming <= expectedNext) return
-
-        val missingBars = (earliestIncoming - expectedNext) / barMs
-        Log.d(TAG, "Detected gap of $missingBars candle(s) before live tick; backfilling")
-
-        try {
-            val missing = restClient.fetchCandleRange(
-                instId = instId,
-                productType = productType,
-                granularity = _currentTimeframe.value.restParam,
-                startTime = expectedNext,
-                endTime = earliestIncoming - 1,
-                limit = GAP_BACKFILL_MAX_CANDLES,
-            )
-            if (missing.isNotEmpty()) {
-                _klines.value = buffer.applyUpdates(missing)
-            }
-        } catch (e: Exception) {
-            
-            
-            
-            Log.w(TAG, "Gap backfill failed for [$expectedNext, $earliestIncoming): ${e.message}")
-        }
-    }
-
     private suspend fun loadSnapshotWithRetry() {
         var attempt = 0
         while (true) {
             try {
-                
-                
-                
-                
-                val historical = restClient.backfillCandles(
+                val historical = restClient.fetchRecentCandles(
                     instId = instId,
-                    productType = productType,
                     granularity = _currentTimeframe.value.restParam,
-                    targetCount = bufferCapacity,
+                    limit = bufferCapacity,
                 )
                 applySnapshot(historical)
                 return

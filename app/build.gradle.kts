@@ -3,9 +3,6 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
-    
-    alias(libs.plugins.kotlin.kapt)
-    alias(libs.plugins.objectbox)
 }
 
 android {
@@ -18,16 +15,6 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
-
-        
-        
-        
-        
-        javaCompileOptions {
-            annotationProcessorOptions {
-                arguments.put("objectbox.myObjectBoxPackage", "org.example.syncora.bitget")
-            }
-        }
     }
 
     compileOptions {

@@ -18,11 +18,11 @@ class OnboardingActivity : AppCompatActivity() {
 
     private lateinit var orbView: OrbView
 
-    
-    
-    
-    
-    
+    // Registered up front (must happen before STARTED) even though the actual
+    // request is only launched from the "Allow" choice in the battery-exemption
+    // dialog below. The system settings screen doesn't return a meaningful
+    // result to act on either way - the user could still deny/undo it later in
+    // Settings - so onboarding proceeds to MainActivity regardless of outcome.
     private val batteryExemptionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             finishOnboardingAndContinue()
@@ -51,14 +51,14 @@ class OnboardingActivity : AppCompatActivity() {
         orbView.hue = 0f
         orbView.hoverIntensity = 0.1f
         orbView.rotateOnHover = true
-        
-        
+        // The onboarding screen has no explicit "hover" affordance to teach, so the orb
+        // animates on its own; a real touch still works too, since OrbView still tracks it.
         orbView.forceHoverState = true
 
-        
-        
-        
-        
+        // Brand palette: a bright, near-white teal and the brand teal (#26C7C3) mix in the
+        // outer glow, while a near-black teal anchors the shadow side. The shader's additive
+        // highlight naturally blows out to a white-hot core, so the orb reads as "white core,
+        // subtle teal outer glow" without needing to desaturate it toward gray.
         orbView.setColor1Hex("#26C7C3")
         orbView.setColor2Hex("#BFF6F2")
         orbView.setColor3Hex("#02201F")
@@ -69,12 +69,12 @@ class OnboardingActivity : AppCompatActivity() {
         }
     }
 
-    
-
-
-
-
-
+    /**
+     * Surfaces the battery-optimization exemption as an onboarding step
+     * (design doc §2.2) rather than assuming it. Shown at most once - if the
+     * device already ignores battery optimizations for this app, or this was
+     * already asked before, this just continues straight to MainActivity.
+     */
     private fun maybeRequestBatteryOptimizationExemption() {
         val prefs = OnboardingPreferences(this)
         val alreadyExempt = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(this)
@@ -103,8 +103,8 @@ class OnboardingActivity : AppCompatActivity() {
     }
 
     private fun finishOnboardingAndContinue() {
-        
-        
+        // Persist completion so Splash never routes back here on future opens —
+        // onboarding is a one-time, first-install experience only.
         OnboardingPreferences(this).hasCompletedOnboarding = true
         startActivity(Intent(this, MainActivity::class.java))
         finish()

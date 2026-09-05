@@ -8,36 +8,36 @@ import android.view.ViewConfiguration
 import android.widget.LinearLayout
 import kotlin.math.abs
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/**
+ * Root container for the chart screen. Detects vertical drag gestures
+ * happening anywhere *except* the chart's interactive plot area, and
+ * reports them live through [onVerticalDrag] so the caller can drive an
+ * on-screen, finger-following reveal animation (rather than a fire-once
+ * threshold).
+ *
+ * The plot area to exclude is described relative to
+ * [excludedInteractiveView] (the candlestick chart) via
+ * [excludedRightInsetPx] / [excludedBottomInsetPx], which carve the price
+ * axis (right strip) and time axis (bottom strip) back *out* of the
+ * exclusion - so drags starting on those strips are still reported even
+ * though they're visually inside the chart view's bounds. Everything
+ * outside the chart view entirely (header, banner, timeframe row, toolbar
+ * icons) is eligible by default.
+ *
+ * [excludedScrollableView], if set, carves out a second zone for a view
+ * that does its own vertical scrolling - e.g. the quick-trade drawer's body
+ * once it has more controls than fit in its allotted height. That zone is
+ * only actually excluded when the view has something to scroll (checked via
+ * [View.canScrollVertically] in both directions); when its content already
+ * fits, dragging over it still drives the reveal gesture like anywhere else,
+ * so nothing regresses on screens where the drawer never needs to scroll.
+ *
+ * Uses the standard "intercept once a real drag is detected" pattern (the
+ * same one ScrollView/RecyclerView use) so taps on buttons that happen to
+ * sit in an eligible zone - e.g. the timeframe pills - still register as
+ * normal clicks; only gestures that move past touch-slop vertically get
+ * stolen for the reveal.
+ */
 class ScrollRevealContainer @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -46,19 +46,19 @@ class ScrollRevealContainer @JvmOverloads constructor(
 
     enum class DragPhase { START, MOVE, END, CANCEL }
 
-    
+    /** The chart view whose plot area (minus axis strips) is off-limits to this gesture. */
     var excludedInteractiveView: View? = null
 
-    
+    /** Width of the price-axis strip (screen right edge of [excludedInteractiveView]) to carve back out of the exclusion. */
     var excludedRightInsetPx: Float = 0f
 
-    
+    /** Height of the time-axis strip (screen bottom edge of [excludedInteractiveView]) to carve back out of the exclusion. */
     var excludedBottomInsetPx: Float = 0f
 
-    
+    /** A second, self-scrolling view (e.g. the quick-trade drawer's body). Only excluded from this gesture while it actually has content to scroll - see class doc. */
     var excludedScrollableView: View? = null
 
-    
+    /** [deltaY] is event.y - downY in this container's local coordinates: positive means the finger moved down. */
     var onVerticalDrag: ((phase: DragPhase, deltaY: Float) -> Unit)? = null
 
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
@@ -133,8 +133,8 @@ class ScrollRevealContainer @JvmOverloads constructor(
         requireScrollable: Boolean = false,
     ): Boolean {
         if (target.visibility != View.VISIBLE) return false
-        
-        
+        // If the target has nothing to scroll in either direction, its bounds
+        // aren't excluded - let the reveal gesture handle drags there as usual.
         if (requireScrollable && !target.canScrollVertically(1) && !target.canScrollVertically(-1)) return false
         val containerLoc = IntArray(2)
         val targetLoc = IntArray(2)

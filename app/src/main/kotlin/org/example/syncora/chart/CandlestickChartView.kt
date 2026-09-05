@@ -432,19 +432,19 @@ class CandlestickChartView @JvmOverloads constructor(
             invalidate()
         }
 
-    
-
-
-
-
-
-
-
-
-
-
-
-
+    /**
+     * The long-press crosshair now has three states instead of just
+     * on/off: [isCrosshairDragging] while a finger is actively positioning
+     * it (either right after the long-press that created it, or after
+     * re-grabbing it - see [handleCrosshairDragTouch]); [isCrosshairLocked]
+     * once that finger lifts, when it stays drawn at its last position
+     * instead of disappearing; and visible (see [isCrosshairVisible])
+     * whenever either of those is true. [crosshairIntersectionX]/[Y] track
+     * where it was actually drawn last (the vertical line snaps to the
+     * nearest candle, so this can differ slightly from the raw touch
+     * point) - that's what a re-grab tap is measured against, not the raw
+     * coordinates.
+     */
     private var isCrosshairDragging = false
     private var isCrosshairLocked = false
     private val isCrosshairVisible: Boolean get() = isCrosshairDragging || isCrosshairLocked
@@ -875,11 +875,11 @@ class CandlestickChartView @JvmOverloads constructor(
 
                 if (isPinching) return false
 
-                
-                
-                
-                
-                
+                // A locked crosshair's own grab point is handled earlier, in
+                // handleCrosshairDragTouch's ACTION_DOWN check, which
+                // consumes the whole gesture before it ever reaches here -
+                // so any tap that does reach this point while locked is, by
+                // definition, a tap elsewhere, and closes it.
                 if (isCrosshairLocked) {
                     isCrosshairLocked = false
                     invalidate()
@@ -907,18 +907,18 @@ class CandlestickChartView @JvmOverloads constructor(
         },
     )
 
-    
-
-
-
-
-
-
-
-
-
-
-
+    /**
+     * Handles re-grabbing and re-dragging an already-[isCrosshairLocked]
+     * crosshair, entirely separately from [panGestureDetector]: a DOWN
+     * landing within [handleGrabRadiusPx] of where the crosshair was last
+     * drawn (see [crosshairIntersectionX]/[Y]) starts a drag and consumes
+     * the whole gesture (so the chart doesn't also try to pan underneath
+     * it); everything else about that DOWN is left alone so a miss falls
+     * through to the normal tap/long-press/scroll handling in
+     * [panGestureDetector] - a plain tap there closes the crosshair (see
+     * `onSingleTapConfirmed`), a hold starts a fresh one (see
+     * `onLongPress`), and a drag pans the chart as usual.
+     */
     private fun handleCrosshairDragTouch(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             if (!isCrosshairLocked || isCrosshairDragging) return false
@@ -953,10 +953,10 @@ class CandlestickChartView @JvmOverloads constructor(
         return true
     }
 
-    
+    /** Notified on every touch delivered to this view, for the performance HUD's latency readout. */
     var touchListener: (() -> Unit)? = null
 
-    
+    /** Notified after every completed draw pass with its wall-clock duration in nanoseconds. */
     var drawDurationListener: ((Long) -> Unit)? = null
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -1614,9 +1614,9 @@ class CandlestickChartView @JvmOverloads constructor(
         val x = ((index - leftIndex) * slotWidth).toFloat()
         canvas.drawLine(x, 0f, x, chartBottom, crosshairLinePaint)
 
-        
-        
-        
+        // Remembered so a later re-grab tap (see handleCrosshairDragTouch)
+        // is measured against where the lines were actually drawn, not the
+        // raw touch point that positioned them.
         crosshairIntersectionX = x
         crosshairIntersectionY = y
 

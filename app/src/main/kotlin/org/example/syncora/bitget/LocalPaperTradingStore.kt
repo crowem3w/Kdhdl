@@ -5,17 +5,17 @@ import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 
-
+/** One open position as persisted to disk - a plain snapshot, not the live [PaperPosition] (which also carries mark price/uPnL derived at render time). */
 data class PersistedPaperPosition(
     val side: PositionSide,
     val total: Double,
     val entryPrice: Double,
     val leverage: Int,
     val marginSize: Double,
-    
+    // See PaperPosition.feesPaidSoFar - accumulated entry/add-on fees only.
     val feesPaidSoFar: Double = 0.0,
-    
-    
+    // See PaperPosition.fundingPaidSoFar - net funding paid/received while
+    // this position has been open.
     val fundingPaidSoFar: Double = 0.0,
 )
 
@@ -25,39 +25,39 @@ data class PaperTradingSnapshot(
     val positions: List<PersistedPaperPosition>,
     val pendingOrders: List<PendingLimitOrder> = emptyList(),
     val closedTrades: List<ClosedPaperTrade> = emptyList(),
-    
-    
+    // Most-recent-first funding settlement history (design doc §7) - see
+    // PaperTradingRepository.fundingPayments.
     val fundingPayments: List<FundingPayment> = emptyList(),
-    
-    
-    
-    
-    
+    // The most recent funding timestamp this account has already settled
+    // against - null for an account that predates this feature or has
+    // never lived through a settlement yet. Lets the funding job catch up
+    // correctly on restart instead of re-charging (or skipping) a
+    // settlement (see FundingSchedule.settlementsBetween).
     val lastFundingSettledAt: Long? = null,
 )
 
-
-
-
-
-
-
+/**
+ * Persists the entire local paper trading account - the account record,
+ * its cash balance, and every open position - to this app's private
+ * on-device storage. There is exactly one paper trading account per
+ * install; nothing here is ever sent anywhere.
+ */
 class LocalPaperTradingStore(context: Context) {
     private companion object {
         const val TAG = "LocalPaperTradingStore"
         const val PREFS_NAME = "local_paper_trading"
         const val KEY_SNAPSHOT = "snapshot_json"
 
-        
-        
-        
+        // Trade history is capped so a long-lived local account doesn't
+        // grow its SharedPreferences blob without bound. This comfortably
+        // covers the "last 30 days" window the account screen reports on.
         const val MAX_CLOSED_TRADES = 500
 
-        
-        
-        
-        
-        
+        // Latency simulation settings (see LatencyConfig) - kept under
+        // their own keys rather than inside the account snapshot JSON,
+        // since this is a simulation preference, not account data: it
+        // should survive resetAccount()/clear() and should be readable
+        // even before any account has ever been created.
         const val KEY_LATENCY_ENABLED = "latency_enabled"
         const val KEY_LATENCY_BASE_DELAY_MS = "latency_base_delay_ms"
         const val KEY_LATENCY_JITTER_MS = "latency_jitter_ms"
@@ -263,12 +263,12 @@ class LocalPaperTradingStore(context: Context) {
         }
     }
 
-    
+    /** Wipes the local account entirely so the next [load] returns null. Deliberately leaves the latency settings ([loadLatencyConfig]/[saveLatencyConfig]) untouched - resetting the practice account shouldn't also silently reset a trader's simulation preferences. */
     fun clear() {
         prefs.edit().remove(KEY_SNAPSHOT).apply()
     }
 
-    
+    /** Loads the persisted latency-simulation settings (see [LatencyConfig]). Falls back to [LatencyConfig.DEFAULT] the first time, or if nothing was ever saved. */
     fun loadLatencyConfig(): LatencyConfig {
         if (!prefs.contains(KEY_LATENCY_ENABLED)) return LatencyConfig.DEFAULT
         return LatencyConfig(
@@ -278,7 +278,7 @@ class LocalPaperTradingStore(context: Context) {
         ).coerced()
     }
 
-    
+    /** Persists [config] so it survives app restarts - see [loadLatencyConfig]. */
     fun saveLatencyConfig(config: LatencyConfig) {
         val coerced = config.coerced()
         prefs.edit()

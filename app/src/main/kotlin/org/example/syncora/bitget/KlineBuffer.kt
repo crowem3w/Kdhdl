@@ -18,8 +18,6 @@ class KlineBuffer(private val capacity: Int = 100) {
 
     fun snapshot(): List<Kline> = synchronized(lock) { deque.toList() }
 
-    fun lastStartTimeOrNull(): Long? = synchronized(lock) { deque.lastOrNull()?.startTime }
-
     fun clear() = synchronized(lock) { deque.clear() }
 
     private fun upsertLocked(candle: Kline) {
