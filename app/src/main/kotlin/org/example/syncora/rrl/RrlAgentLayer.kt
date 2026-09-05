@@ -3,10 +3,12 @@ package org.example.syncora.rrl
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.example.syncora.bitget.DepthSnapshot
 import org.example.syncora.bitget.DepthUpdate
 import org.example.syncora.bitget.FeeRates
 import org.example.syncora.bitget.FundingRateInfo
 import org.example.syncora.bitget.Kline
+import org.example.syncora.bitget.PublicTrade
 
 /**
  * Cumulative performance summary, analogous to Table 1 of the paper
@@ -64,6 +66,15 @@ class RrlAgentLayer(
 
     fun onDepthUpdate(update: DepthUpdate) {
         featureExtractor.onDepthUpdate(update)
+    }
+
+    /** Preferred over [onDepthUpdate] when a merged, checksum-verified snapshot is available. */
+    fun onDepthSnapshot(snapshot: DepthSnapshot) {
+        featureExtractor.onDepthSnapshot(snapshot)
+    }
+
+    fun onTrade(trade: PublicTrade) {
+        featureExtractor.onTrade(trade)
     }
 
     fun onFundingRate(info: FundingRateInfo) {

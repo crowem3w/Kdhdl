@@ -14,6 +14,7 @@ import org.example.syncora.bitget.RiskSettingsStore
 import org.example.syncora.bitget.StopLossGuard
 import org.example.syncora.bitget.Timeframe
 import org.example.syncora.bitget.TradingChartPipeline
+import org.example.syncora.rrl.RrlDataPipeline
 
 class SyncoraApplication : Application() {
 
@@ -71,6 +72,17 @@ class SyncoraApplication : Application() {
         StopLossGuard(credentialsStore = liveCredentialsStore, riskSettingsStore = riskSettingsStore)
     }
 
+    val rrlPipeline: RrlDataPipeline by lazy {
+        RrlDataPipeline(
+            symbol = "BTCUSDT",
+            productType = "usdt-futures",
+            klinePipeline = pipeline,
+            depthPipeline = depthPipeline,
+            tradeSocket = tradeSocket,
+            feeRateCredentialsProvider = { liveCredentialsStore.load() },
+        )
+    }
+
     private var marketDataStarted = false
 
     fun ensureMarketDataStarted() {
@@ -81,6 +93,7 @@ class SyncoraApplication : Application() {
         tradeSocket.connect()
         liveTradingRepository.start()
         stopLossGuard.start(liveTradingRepository.positions)
+        rrlPipeline.start()
     }
 
     fun stopMarketData() {
@@ -90,5 +103,6 @@ class SyncoraApplication : Application() {
         tradeSocket.disconnect()
         liveTradingRepository.stop()
         stopLossGuard.stop()
+        rrlPipeline.stop()
     }
 }
