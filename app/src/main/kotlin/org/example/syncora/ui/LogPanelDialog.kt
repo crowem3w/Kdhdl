@@ -20,7 +20,6 @@ import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import java.text.SimpleDateFormat
@@ -41,7 +40,8 @@ import org.example.syncora.log.LogSource
  * This is the one place the whole app's activity is traced end to end - agent training and
  * decisions, trade execution outcomes, and account/Bitget live connectivity - so it can be
  * inspected and (informally) recorded during a session. Meaning is carried entirely by color
- * (semantic per [LogLevel]); there are no icons anywhere in the terminal.
+ * (semantic per [LogLevel]); there are no icons anywhere in the terminal, and no extra chrome -
+ * the glass card itself is the terminal surface.
  */
 class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalTheme) {
 
@@ -54,7 +54,7 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
         const val BACKDROP_BLUR_PERCENT = 0.85f
         const val MAX_BACKDROP_BLUR_DP = 100
 
-        // Charcoal-black glass base with the faintest cool undertones (frame around the terminal).
+        // Charcoal-black glass base with the faintest cool undertones.
         val GLASS_TOP_TINT = Color.parseColor("#2A2E3E")      // barely-there blue undertone
         val GLASS_BASE_TINT = Color.parseColor("#141519")     // frosted charcoal-black
         val GLASS_BOTTOM_TINT = Color.parseColor("#231B30")   // barely-there purple undertone
@@ -67,11 +67,6 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
         val GLOW_COLOR = Color.parseColor("#331C1A3D")
         val SCRIM_COLOR = Color.parseColor("#8A000000")
 
-        // Terminal surface sits slightly darker/flatter than the glass frame around it, like a
-        // console cut into the glass.
-        val TERMINAL_BG = Color.parseColor("#DE0A0B0F")
-        val DIVIDER_COLOR = Color.parseColor("#26FFFFFF")
-        val TITLE_COLOR = Color.parseColor("#EAECEF")
         val MUTED_COLOR = Color.parseColor("#8A8D98")
         val TIMESTAMP_COLOR = Color.parseColor("#5B5E68")
 
@@ -98,8 +93,6 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
     private lateinit var terminalOutput: TextView
     private lateinit var terminalScroll: ScrollView
     private lateinit var emptyStateText: TextView
-    private lateinit var statusDot: View
-    private lateinit var countText: TextView
 
     private fun dp(value: Number): Int = (value.toFloat() * context.resources.displayMetrics.density).toInt()
 
@@ -182,9 +175,8 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
             }
         }
 
-        // The frosted glass card: header + divider + scrollable terminal body.
-        val card = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
+        // The frosted glass card IS the terminal - no separate header, controls, or inner frame.
+        val card = FrameLayout(context).apply {
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 intArrayOf(
@@ -209,7 +201,6 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
             }
             isClickable = true
             setOnClickListener { /* absorb clicks, keep dialog open */ }
-            setPadding(dp(14), dp(12), dp(14), dp(14))
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(CARD_HEIGHT_DP),
@@ -220,116 +211,21 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
             }
         }
 
-        card.addView(buildHeaderRow())
-        card.addView(View(context).apply {
-            setBackgroundColor(DIVIDER_COLOR)
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
-                topMargin = dp(10); bottomMargin = dp(10)
-            }
-        })
-        card.addView(buildTerminalBody())
+        card.addView(buildTerminalContent())
 
         root.addView(glow)
         root.addView(card)
         return root
     }
 
-    private fun buildHeaderRow(): View {
-        val row = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        statusDot = View(context).apply {
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(LEVEL_SUCCESS)
-            }
-            layoutParams = LinearLayout.LayoutParams(dp(7), dp(7)).apply {
-                marginEnd = dp(8)
-            }
-        }
-
-        val titleText = TextView(context).apply {
-            text = "ACTIVITY LOG"
-            textSize = 13f
-            letterSpacing = 0.06f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(TITLE_COLOR)
-        }
-
-        countText = TextView(context).apply {
-            text = "0"
-            textSize = 11.5f
-            typeface = Typeface.MONOSPACE
-            setTextColor(MUTED_COLOR)
-            setPadding(dp(8), 0, 0, 0)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-
-        val clearButton = TextView(context).apply {
-            text = "CLEAR"
-            textSize = 11f
-            letterSpacing = 0.04f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(MUTED_COLOR)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#66090C11"))
-                cornerRadius = dpf(8)
-            }
-            setPadding(dp(10), dp(5), dp(10), dp(5))
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { AppLog.clear() }
-        }
-
-        val closeButton = TextView(context).apply {
-            text = "✕"
-            textSize = 15f
-            setTextColor(MUTED_COLOR)
-            setPadding(dp(10), dp(4), dp(0), dp(4))
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { dismiss() }
-        }
-
-        row.addView(statusDot)
-        row.addView(titleText)
-        row.addView(countText)
-        row.addView(clearButton)
-        row.addView(closeButton)
-        return row
-    }
-
-    private fun buildTerminalBody(): View {
-        val cornerRadiusPx = dpf(8)
-
-        val container = FrameLayout(context).apply {
-            background = GradientDrawable().apply {
-                setColor(TERMINAL_BG)
-                cornerRadius = cornerRadiusPx
-                setStroke(dp(BORDER_WIDTH_DP).coerceAtLeast(1), Color.parseColor("#22FFFFFF"))
-            }
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, cornerRadiusPx)
-                }
-            }
-            clipToOutline = true
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1f,
-            )
-        }
-
+    private fun buildTerminalContent(): View {
         terminalOutput = TextView(context).apply {
             typeface = Typeface.MONOSPACE
             textSize = 11f
             setLineSpacing(dpf(3), 1f)
             setTextColor(LEVEL_INFO)
             setTextIsSelectable(true)
-            setPadding(dp(10), dp(10), dp(10), dp(10))
+            setPadding(dp(14), dp(14), dp(14), dp(14))
         }
 
         terminalScroll = ScrollView(context).apply {
@@ -350,14 +246,15 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
             setPadding(dp(24), dp(24), dp(24), dp(24))
         }
 
-        container.addView(terminalScroll)
-        container.addView(emptyStateText)
-        return container
+        val content = FrameLayout(context).apply {
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+        content.addView(terminalScroll)
+        content.addView(emptyStateText)
+        return content
     }
 
     private fun renderEntries(entries: List<LogEntry>) {
-        countText.text = entries.size.toString()
-
         if (entries.isEmpty()) {
             emptyStateText.visibility = View.VISIBLE
             terminalScroll.visibility = View.GONE
