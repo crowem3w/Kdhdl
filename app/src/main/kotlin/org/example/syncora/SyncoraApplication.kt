@@ -15,6 +15,8 @@ import org.example.syncora.bitget.RiskSettingsStore
 import org.example.syncora.bitget.StopLossGuard
 import org.example.syncora.bitget.Timeframe
 import org.example.syncora.bitget.TradingChartPipeline
+import org.example.syncora.log.AppLog
+import org.example.syncora.log.LogLevel
 import org.example.syncora.rrl.RrlDataPipeline
 
 class SyncoraApplication : Application() {
@@ -102,6 +104,7 @@ class SyncoraApplication : Application() {
     fun ensureMarketDataStarted() {
         if (marketDataStarted) return
         marketDataStarted = true
+        AppLog.system(LogLevel.INFO, "Syncora starting - connecting market data feeds")
         pipeline.start()
         depthPipeline.start()
         tradeSocket.connect()
@@ -113,6 +116,7 @@ class SyncoraApplication : Application() {
 
     fun stopMarketData() {
         marketDataStarted = false
+        AppLog.system(LogLevel.INFO, "Market data and trading feeds stopped")
         pipeline.stop()
         depthPipeline.stop()
         tradeSocket.disconnect()

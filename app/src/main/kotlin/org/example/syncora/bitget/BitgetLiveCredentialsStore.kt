@@ -3,6 +3,8 @@ package org.example.syncora.bitget
 import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import org.example.syncora.log.AppLog
+import org.example.syncora.log.LogLevel
 
 class BitgetLiveCredentialsStore(context: Context) {
 
@@ -38,10 +40,13 @@ class BitgetLiveCredentialsStore(context: Context) {
             .putString(KEY_SECRET_KEY, credentials.secretKey)
             .putString(KEY_PASSPHRASE, credentials.passphrase)
             .apply()
+        // Never log key material itself - only that a change happened.
+        AppLog.account(LogLevel.INFO, "Bitget live API key saved")
     }
 
     fun clear() {
         prefs.edit().clear().apply()
+        AppLog.account(LogLevel.INFO, "Bitget live API key removed")
     }
 
     companion object {

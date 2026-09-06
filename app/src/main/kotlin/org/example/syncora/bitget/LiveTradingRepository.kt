@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.example.syncora.log.AppLog
+import org.example.syncora.log.LogLevel
 
 class LiveTradingRepository(
     private val credentialsStore: BitgetLiveCredentialsStore,
@@ -70,9 +72,11 @@ class LiveTradingRepository(
         }
         if (!hasCredentials()) {
             _connectionState.value = PaperTradingConnectionState.NOT_CONFIGURED
+            AppLog.account(LogLevel.WARNING, "Live account selected but no Bitget API key is saved yet")
             return
         }
         _connectionState.value = PaperTradingConnectionState.LOADING
+        AppLog.account(LogLevel.INFO, "Connecting to Bitget live account ($symbol)...")
         pollJob = scope.launch { pollLoop() }
     }
 
@@ -93,6 +97,7 @@ class LiveTradingRepository(
     }
 
     private suspend fun refreshOnce() {
+        val previousState = _connectionState.value
         try {
             val latestBalance = client.fetchAccountBalance()
             val latestPositions = client.fetchAllPositions()
@@ -100,16 +105,25 @@ class LiveTradingRepository(
             _positions.value = latestPositions
             _connectionState.value = PaperTradingConnectionState.LIVE
             _lastError.value = null
+            if (previousState != PaperTradingConnectionState.LIVE) {
+                AppLog.account(LogLevel.SUCCESS, "Bitget live account connected - balance and positions syncing")
+            }
             if (_userId.value == null) {
                 runCatching { client.fetchUserId() }.getOrNull()?.let { _userId.value = it }
             }
         } catch (e: BitgetNotAuthenticatedException) {
             _connectionState.value = PaperTradingConnectionState.NOT_CONFIGURED
             _userId.value = null
+            if (previousState != PaperTradingConnectionState.NOT_CONFIGURED) {
+                AppLog.account(LogLevel.WARNING, "Bitget live account not authenticated - check the saved API key")
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Refresh failed: ${e.message}")
             _connectionState.value = PaperTradingConnectionState.ERROR
             _lastError.value = friendlyErrorMessage(e)
+            if (previousState != PaperTradingConnectionState.ERROR) {
+                AppLog.account(LogLevel.ERROR, "Bitget live connectivity lost: ${friendlyErrorMessage(e)}")
+            }
         }
     }
 
@@ -117,15 +131,18 @@ class LiveTradingRepository(
         if (!active) {
             return PaperTradingResult.Failure("Switch to Live trading mode to trade this account")
         }
+        AppLog.trading(LogLevel.INFO, "Submitting LIVE $side order - $symbol size=$sizeInBaseCoin leverage=${leverage}x")
         return try {
             client.setLeverage(symbol, leverage)
             val order = client.openPosition(
                 OrderTicket(symbol = symbol, side = side, sizeInBaseCoin = sizeInBaseCoin, leverage = leverage),
             )
             refreshOnce()
+            AppLog.trading(LogLevel.SUCCESS, "LIVE $side order filled - $symbol size=$sizeInBaseCoin (order ${order.orderId})")
             PaperTradingResult.Success(order)
         } catch (e: Exception) {
             Log.w(TAG, "Open position failed: ${e.message}")
+            AppLog.trading(LogLevel.ERROR, "LIVE $side order rejected - $symbol: ${friendlyErrorMessage(e)}")
             PaperTradingResult.Failure(friendlyErrorMessage(e), e)
         }
     }
@@ -134,6 +151,7 @@ class LiveTradingRepository(
         if (!active) {
             return PaperTradingResult.Failure("Switch to Live trading mode to trade this account")
         }
+        AppLog.trading(LogLevel.INFO, "Closing LIVE position - ${position.symbol} ${position.side} size=${position.total}")
         return try {
             val order = client.closePosition(
                 symbol = position.symbol,
@@ -141,9 +159,11 @@ class LiveTradingRepository(
                 sizeInBaseCoin = position.total.toString(),
             )
             refreshOnce()
+            AppLog.trading(LogLevel.SUCCESS, "LIVE position closed - ${position.symbol} (order ${order.orderId})")
             PaperTradingResult.Success(order)
         } catch (e: Exception) {
             Log.w(TAG, "Close position failed: ${e.message}")
+            AppLog.trading(LogLevel.ERROR, "LIVE close failed - ${position.symbol}: ${friendlyErrorMessage(e)}")
             PaperTradingResult.Failure(friendlyErrorMessage(e), e)
         }
     }

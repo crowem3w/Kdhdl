@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
+import org.example.syncora.log.AppLog
+import org.example.syncora.log.LogLevel
 
 class StopLossGuard(
     private val credentialsStore: BitgetLiveCredentialsStore,
@@ -58,7 +60,12 @@ class StopLossGuard(
 
         for (position in openPositions) {
             if (position.total <= 0.0) continue
-            ensureProtected(position)
+            try {
+                ensureProtected(position)
+            } catch (e: Exception) {
+                AppLog.trading(LogLevel.ERROR, "Stop-loss guard failed for ${position.side} ${position.symbol}: ${e.message}")
+                throw e
+            }
         }
     }
 
@@ -98,6 +105,10 @@ class StopLossGuard(
         )
         guarded[position.side] = GuardedState(position.total, now)
         Log.i(TAG, "Placed dead-man's-switch stop-loss: ${position.side} ${position.total} @ $triggerPrice")
+        AppLog.trading(
+            LogLevel.SUCCESS,
+            "Stop-loss placed - ${position.side} ${position.symbol} size=${position.total} trigger=${formatPrice(triggerPrice)}",
+        )
     }
 
     private fun formatPrice(price: Double): String = String.format(Locale.US, "%.1f", price)

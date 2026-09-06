@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.util.UUID
+import org.example.syncora.log.AppLog
+import org.example.syncora.log.LogLevel
 
 class PaperTradingRepository(
     private val store: LocalPaperTradingStore,
@@ -364,6 +366,7 @@ class PaperTradingRepository(
             val usedMargin = openPositions.values.sumOf { it.marginSize } + pendingLimitOrders.values.sumOf { it.marginReserved }
             val available = walletBalance - usedMargin
             if (marginRequired + fee > available) {
+                AppLog.trading(LogLevel.ERROR, "PAPER $side order rejected - $symbol: insufficient available balance")
                 return PaperTradingResult.Failure("Insufficient available balance for this order")
             }
 
@@ -386,6 +389,7 @@ class PaperTradingRepository(
 
         persist()
         recomputeAndPublish()
+        AppLog.trading(LogLevel.SUCCESS, "PAPER $side order filled - $symbol size=$size @ $fillPrice")
         return PaperTradingResult.Success(simulatedOrder(fillInfo, appliedLatencyMs))
     }
 
@@ -613,6 +617,10 @@ class PaperTradingRepository(
 
         persist()
         recomputeAndPublish()
+        AppLog.trading(
+            if (realizedPnl >= 0) LogLevel.SUCCESS else LogLevel.WARNING,
+            "PAPER position closed - $symbol ${position.side} @ $exitPrice (pnl=${"%.2f".format(realizedPnl)})",
+        )
         return PaperTradingResult.Success(simulatedOrder(bookWalk, execution.appliedDelayMs))
     }
 

@@ -21,6 +21,8 @@ import org.example.syncora.bitget.DepthPipeline
 import org.example.syncora.bitget.FundingSchedule
 import org.example.syncora.bitget.Kline
 import org.example.syncora.bitget.TradingChartPipeline
+import org.example.syncora.log.AppLog
+import org.example.syncora.log.LogLevel
 
 
 
@@ -106,17 +108,26 @@ class RrlDataPipeline(
 
         klineJob = klinePipeline.klines
             .onEach { snapshot -> onKlineSnapshot(snapshot) }
-            .catch { e -> Log.e(TAG, "Error feeding kline into RRL agent; dropping bar", e) }
+            .catch { e ->
+                Log.e(TAG, "Error feeding kline into RRL agent; dropping bar", e)
+                AppLog.agent(LogLevel.ERROR, "Kline feed error, bar dropped: ${e.message}")
+            }
             .launchIn(scope)
 
         depthJob = depthPipeline.depth
             .onEach { snapshot -> if (active) agent.onDepthSnapshot(snapshot) }
-            .catch { e -> Log.e(TAG, "Error feeding depth snapshot into RRL agent; dropping update", e) }
+            .catch { e ->
+                Log.e(TAG, "Error feeding depth snapshot into RRL agent; dropping update", e)
+                AppLog.agent(LogLevel.ERROR, "Depth feed error, update dropped: ${e.message}")
+            }
             .launchIn(scope)
 
         tradeJob = tradeSocket.trades
             .onEach { trade -> if (active) agent.onTrade(trade) }
-            .catch { e -> Log.e(TAG, "Error feeding trade into RRL agent; dropping print", e) }
+            .catch { e ->
+                Log.e(TAG, "Error feeding trade into RRL agent; dropping print", e)
+                AppLog.agent(LogLevel.ERROR, "Trade feed error, print dropped: ${e.message}")
+            }
             .launchIn(scope)
 
         fundingJob = scope.launch { runFundingLoop() }
@@ -174,7 +185,10 @@ class RrlDataPipeline(
     private suspend fun refreshFundingRate() {
         runCatching { fundingRateClient.fetchCurrentFundingRate(symbol = symbol, productType = productType) }
             .onSuccess { agent.onFundingRate(it) }
-            .onFailure { e -> Log.w(TAG, "Funding rate refresh failed: ${e.message}") }
+            .onFailure { e ->
+                Log.w(TAG, "Funding rate refresh failed: ${e.message}")
+                AppLog.agent(LogLevel.WARNING, "Funding rate refresh failed: ${e.message}")
+            }
     }
 
     private suspend fun runFeeRateLoop() {
@@ -197,6 +211,9 @@ class RrlDataPipeline(
         }
         runCatching { feeRateClient.fetchStandardFeeRates(symbol = symbol, productType = productType) }
             .onSuccess { agent.onFeeRates(it) }
-            .onFailure { e -> Log.w(TAG, "Fee rate refresh failed: ${e.message}") }
+            .onFailure { e ->
+                Log.w(TAG, "Fee rate refresh failed: ${e.message}")
+                AppLog.agent(LogLevel.WARNING, "Fee rate refresh failed: ${e.message}")
+            }
     }
 }

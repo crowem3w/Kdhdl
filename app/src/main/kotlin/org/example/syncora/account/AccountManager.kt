@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.example.syncora.bitget.BitgetLiveCredentialsStore
 import org.example.syncora.bitget.LiveTradingRepository
 import org.example.syncora.bitget.PaperTradingRepository
+import org.example.syncora.log.AppLog
+import org.example.syncora.log.LogLevel
 import org.example.syncora.rrl.RrlDataPipeline
 
 /**
@@ -79,6 +81,7 @@ class AccountManager(
      */
     fun selectLive(): AccountSelectionResult {
         if (liveCredentialsStore.load() == null) {
+            AppLog.account(LogLevel.WARNING, "Cannot switch to Live - no Bitget API key saved yet")
             return AccountSelectionResult.LiveCredentialsMissing
         }
         applyMode(AccountMode.LIVE, persist = true)
@@ -114,6 +117,15 @@ class AccountManager(
 
         _activeMode.value = mode
         if (persist) persistMode(mode)
+
+        val verb = if (persist) "switched to" else "restored to"
+        when (mode) {
+            AccountMode.PAPER -> AppLog.account(LogLevel.INFO, "Account $verb PAPER - trading and training active on the paper account")
+            AccountMode.LIVE -> AppLog.account(LogLevel.INFO, "Account $verb LIVE - trading and training active on the Bitget live account")
+            AccountMode.NONE -> if (persist) {
+                AppLog.account(LogLevel.WARNING, "Account deselected - trading and training paused")
+            }
+        }
     }
 
     private fun persistMode(mode: AccountMode) {

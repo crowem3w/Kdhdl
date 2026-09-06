@@ -18,6 +18,8 @@ import org.example.syncora.bitget.FeeRates
 import org.example.syncora.bitget.FundingRateInfo
 import org.example.syncora.bitget.Kline
 import org.example.syncora.bitget.PublicTrade
+import org.example.syncora.log.AppLog
+import org.example.syncora.log.LogLevel
 
 
 
@@ -68,6 +70,8 @@ class RrlAgentLayer(
     private var previousTimestampMs: Long = -1L
     private var latestFundingRate: Double = 0.0
     private var lastMidPrice: Double? = null
+    private var warmupLogged = false
+    private var lastLoggedPositionSign = 0
 
     private val _signal = MutableStateFlow<RrlStepResult?>(null)
     val signal: StateFlow<RrlStepResult?> = _signal.asStateFlow()
@@ -103,9 +107,11 @@ class RrlAgentLayer(
                     try {
                         checkpointStore.save(checkpoint)
                         _checkpointStatus.value = CheckpointStatus.SAVED
+                        AppLog.agent(LogLevel.SUCCESS, "Checkpoint saved (step ${checkpoint.performance.steps})")
                     } catch (e: Exception) {
                         Log.w(TAG, "Checkpoint autosave failed: ${e.message}")
                         _checkpointStatus.value = CheckpointStatus.SAVE_FAILED
+                        AppLog.agent(LogLevel.ERROR, "Checkpoint autosave failed: ${e.message}")
                     }
                 }
             }
@@ -118,6 +124,8 @@ class RrlAgentLayer(
         fundingGate.reset()
         previousTimestampMs = -1L
         lastMidPrice = null
+        warmupLogged = false
+        lastLoggedPositionSign = 0
         _signal.value = null
         _performance.value = RrlPerformanceSummary()
     }
@@ -177,11 +185,13 @@ class RrlAgentLayer(
         if (checkpoint.configFingerprint != config.fingerprint()) {
             Log.w(TAG, "Ignoring checkpoint saved under a different RrlAgentConfig")
             _checkpointStatus.value = CheckpointStatus.RESTORE_FAILED
+            AppLog.agent(LogLevel.WARNING, "Checkpoint ignored - saved under a different agent configuration")
             return false
         }
         if (!agent.restoreState(checkpoint.learnerState)) {
             Log.w(TAG, "Checkpoint's learner state is incompatible with the current agent dimensions")
             _checkpointStatus.value = CheckpointStatus.RESTORE_FAILED
+            AppLog.agent(LogLevel.ERROR, "Checkpoint restore failed - incompatible learner state")
             return false
         }
 
@@ -192,6 +202,7 @@ class RrlAgentLayer(
         exchangeFeeRate = checkpoint.exchangeFeeRate
         _performance.value = checkpoint.performance
         _checkpointStatus.value = CheckpointStatus.SAVED
+        AppLog.agent(LogLevel.SUCCESS, "Checkpoint restored (resuming from step ${checkpoint.performance.steps})")
         return true
     }
 
@@ -231,6 +242,10 @@ class RrlAgentLayer(
     fun onKline(kline: Kline): RrlStepResult? {
         featureExtractor.onKline(kline)
         if (!featureExtractor.isWarmedUp()) return null
+        if (!warmupLogged) {
+            warmupLogged = true
+            AppLog.agent(LogLevel.SUCCESS, "Agent warmed up - live training and decisions now active")
+        }
 
         val (bid, ask) = featureExtractor.currentBidAsk() ?: return null
         val mid = 0.5 * (bid + ask)
@@ -258,8 +273,37 @@ class RrlAgentLayer(
         previousTimestampMs = timestampMs
         _signal.value = result
         updatePerformance(result)
+        logDecision(result)
         enqueueCheckpointSave()
         return result
+    }
+
+    private fun logDecision(result: RrlStepResult) {
+        // High-frequency per-bar telemetry stays at DEBUG (dim, non-intrusive) so the terminal
+        // isn't dominated by it; a position flip (long/flat/short) is a real decision and is
+        // surfaced at INFO so it stands out in the activity feed.
+        val sign = when {
+            result.position > 0.05 -> 1
+            result.position < -0.05 -> -1
+            else -> 0
+        }
+        if (sign != lastLoggedPositionSign) {
+            lastLoggedPositionSign = sign
+            val stance = when (sign) {
+                1 -> "LONG"
+                -1 -> "SHORT"
+                else -> "FLAT"
+            }
+            AppLog.agent(
+                LogLevel.INFO,
+                "Agent decision: $stance (position=${"%.3f".format(result.position)}, expectedReturn=${"%.5f".format(result.expectedReturn)})",
+            )
+        } else {
+            AppLog.agent(
+                LogLevel.DEBUG,
+                "step position=${"%.3f".format(result.position)} reward=${"%.5f".format(result.reward)}",
+            )
+        }
     }
 
     
