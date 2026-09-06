@@ -25,7 +25,7 @@ import org.example.syncora.R
 class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalTheme) {
 
     private companion object {
-        const val CARD_CORNER_RADIUS_DP = 26
+        const val CARD_CORNER_RADIUS_DP = 12
         const val GLOW_EXTRA_DP = 22
         const val CARD_HEIGHT_DP = 260
         const val BORDER_WIDTH_DP = 0.5f

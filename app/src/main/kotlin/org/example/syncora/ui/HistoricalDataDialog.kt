@@ -68,7 +68,7 @@ class HistoricalDataDialog(context: Context) : Dialog(context, R.style.TradingMo
         const val BACKDROP_BLUR_PERCENT = 0.80f
         const val MAX_BACKDROP_BLUR_DP = 100
 
-        const val CARD_CORNER_RADIUS_DP = 14
+        const val CARD_CORNER_RADIUS_DP = 12
     }
 
     private val cardColor = Color.argb(
