@@ -8,14 +8,12 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import org.example.syncora.bitget.DepthLevel
 import org.example.syncora.bitget.PaperAccountBalance
 import org.example.syncora.bitget.PaperPosition
 import org.example.syncora.bitget.PendingLimitOrder
 import org.example.syncora.bitget.PositionSide
-import org.example.syncora.chart.AgentPerformanceChartView
-import org.example.syncora.chart.AgentPerformancePoint
-import org.example.syncora.rrl.RrlStepResult
 
 class QuickTradePanel @JvmOverloads constructor(
     context: Context,
@@ -53,84 +51,41 @@ class QuickTradePanel @JvmOverloads constructor(
 
     private var handleDownY = 0f
 
-    private lateinit var scrollView: View
+    private lateinit var scrollView: ScrollView
+
+    /** The RRL agent's UI layer: import/export plus its tunable parameters. */
+    val agentControlPanel: RrlAgentControlPanel = RrlAgentControlPanel(context)
 
     val scrollableContent: View
         get() = scrollView
-
-    private lateinit var leftColumn: LinearLayout
-    private lateinit var rightColumn: LinearLayout
-    private lateinit var performanceChart: AgentPerformanceChartView
-
-    /** Left column container (order entry / controls), exposed for populating this panel's content. */
-    val leftColumnContent: LinearLayout
-        get() = leftColumn
-
-    /** Right column container, exposed for populating any content below the performance chart. */
-    val rightColumnContent: LinearLayout
-        get() = rightColumn
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     init {
         orientation = VERTICAL
         addView(buildGrabHandle())
-        scrollView = buildColumns()
+        scrollView = ScrollView(context).apply {
+            isFillViewport = true
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f)
+            addView(
+                LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), dp(6), dp(12), dp(16))
+                    addView(agentControlPanel)
+                },
+            )
+        }
         addView(scrollView)
     }
 
-    private fun buildColumns(): View {
-        val columns = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f)
-        }
-
-        leftColumn = LinearLayout(context).apply { orientation = VERTICAL }
-        rightColumn = LinearLayout(context).apply { orientation = VERTICAL }
-
-        performanceChart = AgentPerformanceChartView(context).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(132)).apply {
-                bottomMargin = dp(10)
-            }
-        }
-        rightColumn.addView(performanceChart)
-
-        columns.addView(
-            leftColumn,
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
-                marginEnd = dp(6)
-            },
-        )
-        columns.addView(
-            rightColumn,
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
-                marginStart = dp(6)
-            },
-        )
-        return columns
+    /** Wires the RRL agent's import/export and parameter controls. */
+    fun bindAgentPanel(callbacks: RrlAgentControlPanel.Callbacks) {
+        agentControlPanel.bind(callbacks)
     }
 
-    /** Renders the agent's performance metrics as a gradient line chart above the right column. */
-    fun renderAgentPerformance(
-        points: List<AgentPerformancePoint>,
-        xAxisLabel: String,
-        yAxisLabel: String,
-    ) {
-        performanceChart.submit(points, xAxisLabel, yAxisLabel)
-    }
-
-    /** Convenience overload: plots the agent's cumulative reward across a series of RRL steps. */
-    fun renderAgentPerformance(
-        steps: List<RrlStepResult>,
-        xAxisLabel: String = "Step",
-        yAxisLabel: String = "Cumulative Reward",
-    ) {
-        var cumulative = 0f
-        val points = steps.mapIndexed { index, step ->
-            cumulative += step.reward.toFloat()
-            AgentPerformancePoint(index.toFloat(), cumulative)
-        }
-        renderAgentPerformance(points, xAxisLabel, yAxisLabel)
+    /** Reflects the agent's current tunable settings into the UI. */
+    fun renderAgentSettings(state: RrlAgentControlPanel.AgentSettingsState) {
+        agentControlPanel.render(state)
     }
 
     fun bind(callbacks: Callbacks) {
