@@ -1,6 +1,7 @@
 package org.example.syncora
 
 import android.app.Application
+import org.example.syncora.account.AccountManager
 import org.example.syncora.bitget.BitgetFeeRateClient
 import org.example.syncora.bitget.BitgetFundingRateClient
 import org.example.syncora.bitget.BitgetLiveCredentialsStore
@@ -83,6 +84,19 @@ class SyncoraApplication : Application() {
         )
     }
 
+    // Single source of truth for which account (Paper or Live) is active. Trading, training, and
+    // fine-tuning all read from this instead of being started/stopped directly - this is what makes
+    // the two accounts mutually exclusive and prevents accidental live execution.
+    val accountManager: AccountManager by lazy {
+        AccountManager(
+            context = applicationContext,
+            liveCredentialsStore = liveCredentialsStore,
+            liveTradingRepository = liveTradingRepository,
+            paperTradingRepository = paperTradingRepository,
+            rrlDataPipeline = rrlPipeline,
+        )
+    }
+
     private var marketDataStarted = false
 
     fun ensureMarketDataStarted() {
@@ -91,7 +105,8 @@ class SyncoraApplication : Application() {
         pipeline.start()
         depthPipeline.start()
         tradeSocket.connect()
-        liveTradingRepository.start()
+        // Applies whichever account (Paper/Live/none) was last selected; never starts both.
+        accountManager.restoreActiveMode()
         stopLossGuard.start(liveTradingRepository.positions)
         rrlPipeline.start()
     }
@@ -102,6 +117,7 @@ class SyncoraApplication : Application() {
         depthPipeline.stop()
         tradeSocket.disconnect()
         liveTradingRepository.stop()
+        paperTradingRepository.stop()
         stopLossGuard.stop()
         rrlPipeline.stop()
     }

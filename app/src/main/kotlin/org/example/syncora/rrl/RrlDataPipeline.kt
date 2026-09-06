@@ -22,21 +22,21 @@ import org.example.syncora.bitget.FundingSchedule
 import org.example.syncora.bitget.Kline
 import org.example.syncora.bitget.TradingChartPipeline
 
-/**
- * Wires the app's existing live market-data pipelines
- * ([TradingChartPipeline], [DepthPipeline], [BitgetTradeSocket]) plus
- * REST polling for funding ([BitgetFundingRateClient]) and exchange fees
- * ([BitgetFeeRateClient]) into an [RrlAgentLayer], so the crypto agent of
- * Borrageiro, Firoozye & Barucca steps once per closed kline bar using the
- * order book, transaction and funding information described in section
- * III-B1 of the paper.
- *
- * This class owns no sockets itself; it only subscribes to flows already
- * exposed by the pipelines passed in, mirroring how
- * [org.example.syncora.bitget.PaperTradingRepository] consumes the same
- * shared data sources. Callers are expected to start/stop those underlying
- * pipelines separately (see [org.example.syncora.SyncoraApplication]).
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 class RrlDataPipeline(
     private val symbol: String = "BTCUSDT",
     private val productType: String = "usdt-futures",
@@ -45,7 +45,7 @@ class RrlDataPipeline(
     private val tradeSocket: BitgetTradeSocket,
     private val fundingRateClient: BitgetFundingRateClient = BitgetFundingRateClient(),
     private val feeRateClient: BitgetFeeRateClient = BitgetFeeRateClient(),
-    /** Optional: when non-null and it returns credentials, account-specific fee rates are used. */
+    
     private val feeRateCredentialsProvider: (() -> BitgetCredentials?)? = null,
     config: RrlAgentConfig = RrlAgentConfig(),
 ) {
@@ -56,10 +56,26 @@ class RrlDataPipeline(
 
     private val agent = RrlAgentLayer(config)
 
-    /** f_t and its full reward/utility decomposition for the most recently closed bar. */
+    @Volatile
+    private var active = false
+
+    /**
+     * Controls whether the training/fine-tuning agent is allowed to learn from live market data right now.
+     * Set by [org.example.syncora.account.AccountManager] so that training and fine-tuning are always
+     * scoped to whichever account (Paper or Live) is currently selected, and pause entirely when no
+     * account is selected. Market-data collection (klines/depth/trades/funding) keeps flowing regardless;
+     * only the agent's learning step is gated, so resuming picks up cleanly without losing buffered state.
+     */
+    fun setActive(enabled: Boolean) {
+        active = enabled
+    }
+
+    fun isActive(): Boolean = active
+
+    
     val signal: StateFlow<RrlStepResult?> = agent.signal
 
-    /** Running cumulative performance summary, analogous to Table 1 of the paper. */
+    
     val performance: StateFlow<RrlPerformanceSummary> = agent.performance
 
     private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
@@ -73,16 +89,16 @@ class RrlDataPipeline(
     private var fundingJob: Job? = null
     private var feeJob: Job? = null
 
-    /** startTime of the last closed bar fed to the agent, to avoid double-stepping. */
+    
     private var lastClosedBarStartTime: Long = -1L
 
-    /**
-     * Starts subscribing to the underlying market-data flows and stepping
-     * the agent. Does not start [klinePipeline], [depthPipeline] or
-     * [tradeSocket] themselves; the caller controls their lifecycle since
-     * they are typically shared with other consumers (charts, paper/live
-     * trading).
-     */
+    
+
+
+
+
+
+
     fun start() {
         stop()
         agent.reset()
@@ -94,12 +110,12 @@ class RrlDataPipeline(
             .launchIn(scope)
 
         depthJob = depthPipeline.depth
-            .onEach { snapshot -> agent.onDepthSnapshot(snapshot) }
+            .onEach { snapshot -> if (active) agent.onDepthSnapshot(snapshot) }
             .catch { e -> Log.e(TAG, "Error feeding depth snapshot into RRL agent; dropping update", e) }
             .launchIn(scope)
 
         tradeJob = tradeSocket.trades
-            .onEach { trade -> agent.onTrade(trade) }
+            .onEach { trade -> if (active) agent.onTrade(trade) }
             .catch { e -> Log.e(TAG, "Error feeding trade into RRL agent; dropping print", e) }
             .launchIn(scope)
 
@@ -107,7 +123,7 @@ class RrlDataPipeline(
         feeJob = scope.launch { runFeeRateLoop() }
     }
 
-    /** Stops all subscriptions. Does not reset the agent's learned state; call [reset] for that. */
+    
     fun stop() {
         klineJob?.cancel(); klineJob = null
         depthJob?.cancel(); depthJob = null
@@ -116,35 +132,35 @@ class RrlDataPipeline(
         feeJob?.cancel(); feeJob = null
     }
 
-    /** Resets the agent's reservoir, learned weights and running statistics to a cold start. */
+    
     fun reset() {
         agent.reset()
         lastClosedBarStartTime = -1L
     }
 
-    /**
-     * [klinePipeline] exposes a rolling buffer whose last element is the bar
-     * currently forming (it is updated in place until a new bar begins, see
-     * [org.example.syncora.bitget.KlineBuffer]). The second-to-last element
-     * is therefore always a fully closed bar once it exists; feed exactly
-     * once per distinct closed bar, matching "one call to step per sampling
-     * interval" in [RecurrentReinforcementLearner].
-     */
+    
+
+
+
+
+
+
+
     private fun onKlineSnapshot(klines: List<Kline>) {
         if (klines.size < 2) return
         val closed = klines[klines.size - 2]
         if (closed.startTime > lastClosedBarStartTime) {
             lastClosedBarStartTime = closed.startTime
-            agent.onKline(closed)
+            if (active) agent.onKline(closed)
         }
     }
 
-    /**
-     * Funding is only meaningful right at an 8-hourly settlement boundary
-     * (eq. 4); poll immediately on start for a warm value, then again right
-     * after each boundary, mirroring
-     * [org.example.syncora.bitget.PaperTradingRepository.runFundingLoop].
-     */
+    
+
+
+
+
+
     private suspend fun runFundingLoop() {
         refreshFundingRate()
         while (scope.isActive) {

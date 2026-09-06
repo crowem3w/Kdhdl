@@ -19,11 +19,11 @@ import org.example.syncora.bitget.FundingRateInfo
 import org.example.syncora.bitget.Kline
 import org.example.syncora.bitget.PublicTrade
 
-/**
- * Cumulative performance summary, analogous to Table 1 of the paper
- * (position / execution / carry / pnl columns, summed and expressed as an
- * online information ratio estimate).
- */
+
+
+
+
+
 data class RrlPerformanceSummary(
     val steps: Int = 0,
     val averagePosition: Double = 0.0,
@@ -34,26 +34,26 @@ data class RrlPerformanceSummary(
     val informationRatio: Double = 0.0,
 )
 
-/**
- * Wires live market data (klines, order-book depth and funding rate) into
- * the [EchoStateReservoir] + [RecurrentReinforcementLearner] pipeline
- * described in the paper, and exposes the resulting position signal and
- * performance decomposition as [StateFlow]s for the UI layer, in the same
- * spirit as [org.example.syncora.bitget.DepthPipeline] and
- * [org.example.syncora.bitget.LiveTradingRepository].
- *
- * The agent steps once per kline close (the paper samples every five
- * minutes; any kline interval works here). Depth and funding updates are
- * cached and folded into the next kline-driven step.
- */
+
+
+
+
+
+
+
+
+
+
+
+
 class RrlAgentLayer(
     private val config: RrlAgentConfig = RrlAgentConfig(),
-    /**
-     * When non-null, the agent's learned state is autosaved to this store
-     * after every bar (see [enqueueCheckpointSave]) and can be reloaded with
-     * [restoreFromCheckpoint]. When null, checkpointing is disabled entirely
-     * and the agent behaves exactly as before.
-     */
+    
+
+
+
+
+
     private val checkpointStore: RrlCheckpointStore? = null,
 ) {
     private companion object {
@@ -75,7 +75,7 @@ class RrlAgentLayer(
     private val _performance = MutableStateFlow(RrlPerformanceSummary())
     val performance: StateFlow<RrlPerformanceSummary> = _performance.asStateFlow()
 
-    /** Status of the background autosave, e.g. for a small "saved"/"saving" indicator in the UI. */
+    
     enum class CheckpointStatus { DISABLED, IDLE, SAVING, SAVED, SAVE_FAILED, RESTORE_FAILED }
 
     private val _checkpointStatus = MutableStateFlow(
@@ -88,10 +88,10 @@ class RrlAgentLayer(
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + exceptionHandler)
 
-    // Capacity 1 + CONFLATED: if a save is still in flight when the next bar arrives, the new
-    // snapshot simply replaces the pending one rather than queuing up. Since a checkpoint only
-    // ever needs to reflect the *latest* state, dropped intermediate snapshots cost nothing, and
-    // this guarantees autosaving per bar can never block or fall behind market-data processing.
+    
+    
+    
+    
     private val pendingSaves: Channel<RrlAgentCheckpoint>? =
         checkpointStore?.let { Channel(capacity = Channel.CONFLATED) }
 
@@ -112,7 +112,7 @@ class RrlAgentLayer(
         }
     }
 
-    /** Resets the agent, running statistics and cached market state to a cold start. */
+    
     fun reset() {
         agent.reset()
         fundingGate.reset()
@@ -122,51 +122,51 @@ class RrlAgentLayer(
         _performance.value = RrlPerformanceSummary()
     }
 
-    /**
-     * Cancels the background autosave coroutine. Call this when the layer is
-     * being torn down (e.g. its owning screen/service is destroyed) so it
-     * doesn't leak. Safe to call even if checkpointing is disabled.
-     */
+    
+
+
+
+
     fun stop() {
         pendingSaves?.close()
         scope.cancel()
     }
 
-    /**
-     * Attempts to load and apply a previously autosaved checkpoint, resuming
-     * online learning where it left off instead of the cold start [reset]
-     * produces. Returns `true` if a compatible checkpoint was found and
-     * applied; `false` if there was none, it was unreadable, or it was
-     * produced by a structurally different [RrlAgentConfig] -- in any of
-     * those cases the agent is left exactly as it was before the call.
-     *
-     * Call this once, before the first [onKline], typically right after
-     * constructing the layer.
-     */
+    
+
+
+
+
+
+
+
+
+
+
     suspend fun restoreFromCheckpoint(): Boolean {
         val store = checkpointStore ?: return false
         val checkpoint = store.load() ?: return false
         return applyCheckpoint(checkpoint)
     }
 
-    /**
-     * Imports and applies a checkpoint from a user-picked file, e.g. the
-     * result of an `ActivityResultContracts.OpenDocument()` launch in the
-     * hosting Activity/Fragment. Unlike [restoreFromCheckpoint], [uri] need
-     * not be this layer's own managed checkpoint file -- it can be one the
-     * user renamed, moved, received via a share sheet, or copied over from
-     * another device, which is what makes an exported checkpoint genuinely
-     * importable rather than only self-resumable.
-     *
-     * Requires checkpointing to be enabled (a non-null store was passed to
-     * the constructor), since reading an arbitrary content [Uri] needs a
-     * [android.content.ContentResolver], which only the store holds.
-     *
-     * Returns `true` if the file was readable and matched this agent's
-     * [RrlAgentConfig]; `false` otherwise, leaving current state untouched.
-     * On success, the next autosave still writes to this layer's own
-     * canonical checkpoint location as normal, not back to [uri].
-     */
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     suspend fun restoreFromUri(uri: Uri): Boolean {
         val store = checkpointStore ?: return false
         val checkpoint = store.loadFrom(uri) ?: return false
@@ -195,7 +195,7 @@ class RrlAgentLayer(
         return true
     }
 
-    /** Deletes the persisted checkpoint, if any. Does not affect the agent's current in-memory state. */
+    
     suspend fun clearCheckpoint() {
         checkpointStore?.delete()
     }
@@ -204,7 +204,7 @@ class RrlAgentLayer(
         featureExtractor.onDepthUpdate(update)
     }
 
-    /** Preferred over [onDepthUpdate] when a merged, checksum-verified snapshot is available. */
+    
     fun onDepthSnapshot(snapshot: DepthSnapshot) {
         featureExtractor.onDepthSnapshot(snapshot)
     }
@@ -222,12 +222,12 @@ class RrlAgentLayer(
         exchangeFeeRate = feeRates.takerRate
     }
 
-    /**
-     * Advances the agent by one bar. Returns null if the reservoir has not
-     * yet warmed up (insufficient price/order-book history), matching the
-     * paper's expectation that the model is "driven for long enough" before
-     * its output can be trusted.
-     */
+    
+
+
+
+
+
     fun onKline(kline: Kline): RrlStepResult? {
         featureExtractor.onKline(kline)
         if (!featureExtractor.isWarmedUp()) return null
@@ -262,11 +262,11 @@ class RrlAgentLayer(
         return result
     }
 
-    /**
-     * Builds a snapshot of the agent's current state and hands it to the
-     * background autosave coroutine (see [pendingSaves]). A no-op when
-     * checkpointing is disabled.
-     */
+    
+
+
+
+
     private fun enqueueCheckpointSave() {
         val pending = pendingSaves ?: return
         val checkpoint = RrlAgentCheckpoint(

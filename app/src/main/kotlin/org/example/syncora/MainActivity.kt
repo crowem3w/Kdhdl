@@ -28,6 +28,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import org.example.syncora.account.AccountMode
+import org.example.syncora.account.AccountSelectionResult
 import org.example.syncora.bitget.ClosedPaperTrade
 import org.example.syncora.bitget.FeeRates
 import org.example.syncora.bitget.Kline
@@ -77,6 +79,7 @@ class MainActivity : AppCompatActivity() {
     private val paperTradingRepository by lazy { app.paperTradingRepository }
     private val liveCredentialsStore by lazy { app.liveCredentialsStore }
     private val liveTradingRepository by lazy { app.liveTradingRepository }
+    private val accountManager by lazy { app.accountManager }
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {  }
@@ -193,6 +196,34 @@ class MainActivity : AppCompatActivity() {
                 paperHistoryContent = paperTradingHistoryPanel,
                 liveTradingContent = liveTradePanel,
                 onExportReport = { exportPaperTradingReport() },
+                onSelectPaper = {
+                    accountManager.selectPaper()
+                    Toast.makeText(
+                        this,
+                        "Paper account active. Live trading is paused.",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                },
+                onSelectLive = {
+                    when (accountManager.selectLive()) {
+                        is AccountSelectionResult.Success -> {
+                            Toast.makeText(
+                                this,
+                                "Live account active. Paper trading is paused.",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            true
+                        }
+                        is AccountSelectionResult.LiveCredentialsMissing -> {
+                            Toast.makeText(
+                                this,
+                                "Add a Bitget live API key first to switch to Live trading",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            false
+                        }
+                    }
+                },
             ).show()
         }
         connectivityBanner = findViewById(R.id.connectivityBanner)
@@ -862,7 +893,11 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         MarketDataForegroundService.start(this)
-        paperTradingRepository.start()
+        // Only resume the paper account's background jobs if it's actually the active account -
+        // otherwise it stays paused, exactly as AccountManager left it.
+        if (accountManager.isActive(AccountMode.PAPER)) {
+            paperTradingRepository.start()
+        }
         performanceMonitor.start()
     }
 

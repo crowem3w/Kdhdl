@@ -1,11 +1,11 @@
 package org.example.syncora.rrl
 
-/**
- * Minimal dense linear-algebra helpers used by [EchoStateReservoir] and
- * [RrlWeightOptimizer]. The dimensions involved (a few hundred at most: the
- * paper uses nHidden = 100, nBack = 10) do not warrant an external
- * linear-algebra dependency.
- */
+
+
+
+
+
+
 internal object Matrix {
 
     fun dot(a: DoubleArray, b: DoubleArray): Double {
@@ -14,7 +14,7 @@ internal object Matrix {
         return sum
     }
 
-    /** Matrix-vector product: (rows x cols) * (cols) -> (rows) */
+    
     fun multiply(matrix: Array<DoubleArray>, vector: DoubleArray): DoubleArray {
         val rows = matrix.size
         val out = DoubleArray(rows)
@@ -27,7 +27,7 @@ internal object Matrix {
         return out
     }
 
-    /** Quadratic form v^T * M * v. */
+    
     fun quadraticForm(vector: DoubleArray, matrix: Array<DoubleArray>): Double =
         dot(vector, multiply(matrix, vector))
 

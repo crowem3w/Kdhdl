@@ -43,11 +43,31 @@ class LiveTradingRepository(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var pollJob: Job? = null
 
+    @Volatile
+    private var active = false
+
+    /**
+     * Controls whether this account is the one currently selected by [org.example.syncora.account.AccountManager].
+     * When set to false, polling is paused (via [stop]) and order-placement methods are rejected. Stored
+     * credentials are left untouched, so live trading resumes exactly where it left off when re-activated -
+     * this is what prevents accidental live execution while Paper mode is selected.
+     */
+    fun setActive(enabled: Boolean) {
+        active = enabled
+        if (!enabled) stop()
+    }
+
+    fun isActive(): Boolean = active
+
     fun hasCredentials(): Boolean = credentialsStore.load() != null
 
     fun start() {
         stop()
         _userId.value = null
+        if (!active) {
+            _connectionState.value = PaperTradingConnectionState.NOT_CONFIGURED
+            return
+        }
         if (!hasCredentials()) {
             _connectionState.value = PaperTradingConnectionState.NOT_CONFIGURED
             return
@@ -94,6 +114,9 @@ class LiveTradingRepository(
     }
 
     suspend fun openPosition(side: PositionSide, sizeInBaseCoin: String, leverage: Int): PaperTradingResult<PlacedOrder> {
+        if (!active) {
+            return PaperTradingResult.Failure("Switch to Live trading mode to trade this account")
+        }
         return try {
             client.setLeverage(symbol, leverage)
             val order = client.openPosition(
@@ -108,6 +131,9 @@ class LiveTradingRepository(
     }
 
     suspend fun closePosition(position: PaperPosition): PaperTradingResult<PlacedOrder> {
+        if (!active) {
+            return PaperTradingResult.Failure("Switch to Live trading mode to trade this account")
+        }
         return try {
             val order = client.closePosition(
                 symbol = position.symbol,

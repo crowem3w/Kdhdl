@@ -95,6 +95,22 @@ class PaperTradingRepository(
 
     private val queueTracker = QueuePositionTracker()
 
+    @Volatile
+    private var active = false
+
+    /**
+     * Controls whether this account is the one currently selected by [org.example.syncora.account.AccountManager].
+     * When set to false, background jobs are paused (via [stop]) and trade-execution methods are rejected,
+     * but persisted balance/positions/history are left untouched so the account resumes exactly where it
+     * left off when re-activated.
+     */
+    fun setActive(enabled: Boolean) {
+        active = enabled
+        if (!enabled) stop()
+    }
+
+    fun isActive(): Boolean = active
+
     fun hasAccount(): Boolean = _account.value != null
 
     fun start() {
@@ -312,6 +328,9 @@ class PaperTradingRepository(
     }
 
     suspend fun openPosition(side: PositionSide, sizeInBaseCoin: String, leverage: Int): PaperTradingResult<PlacedOrder> {
+        if (!active) {
+            return PaperTradingResult.Failure("Switch to Paper trading mode to trade this account")
+        }
         if (_account.value == null) {
             return PaperTradingResult.Failure("Create a paper trading account first")
         }
@@ -411,6 +430,9 @@ class PaperTradingRepository(
         leverage: Int,
         limitPriceInput: String,
     ): PaperTradingResult<PlacedOrder> {
+        if (!active) {
+            return PaperTradingResult.Failure("Switch to Paper trading mode to trade this account")
+        }
         if (_account.value == null) {
             return PaperTradingResult.Failure("Create a paper trading account first")
         }
@@ -539,6 +561,9 @@ class PaperTradingRepository(
     }
 
     suspend fun closePosition(position: PaperPosition): PaperTradingResult<PlacedOrder> {
+        if (!active) {
+            return PaperTradingResult.Failure("Switch to Paper trading mode to trade this account")
+        }
         if (_account.value == null) {
             return PaperTradingResult.Failure("Create a paper trading account first")
         }

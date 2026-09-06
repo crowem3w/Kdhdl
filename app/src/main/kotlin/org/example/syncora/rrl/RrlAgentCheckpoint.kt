@@ -3,38 +3,38 @@ package org.example.syncora.rrl
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * A full, point-in-time snapshot of an [RrlAgentLayer]'s learned and cached
- * state, suitable for persisting via [RrlCheckpointStore] and restoring on a
- * later app launch (see [RrlAgentLayer.restoreFromCheckpoint]) so that
- * online learning resumes from where it left off, instead of restarting the
- * echo-state / extended-Kalman-filter cold start of [RecurrentReinforcementLearner.reset].
- *
- * [configFingerprint] records the [RrlAgentConfig] this checkpoint was
- * produced under. The reservoir's fixed W^input/W^hidden/W^back matrices are
- * *not* persisted here -- only [RrlAgentConfig.seed] plus the rest of the
- * config is needed to regenerate them deterministically -- so this
- * checkpoint's arrays are only meaningful when reloaded into an agent with a
- * matching fingerprint. [RrlAgentLayer] checks this before restoring.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 data class RrlAgentCheckpoint(
     val formatVersion: Int = FORMAT_VERSION,
     val configFingerprint: String,
-    /** Wall-clock time (System.currentTimeMillis()) this checkpoint was captured. */
+    
     val savedAtMs: Long,
-    /** The learner's reservoir/EKF/recurrent state; see [RrlLearnerState]. */
+    
     val learnerState: RrlLearnerState,
-    /** [FundingSettlementGate.snapshot], so funding isn't double-paid or missed across a restore. */
+    
     val fundingLastSettlementSeen: Long,
-    /** The last kline timestamp processed, used to re-arm the funding settlement gate correctly. */
+    
     val previousTimestampMs: Long,
-    /** The last observed mid-price, used to compute the next bar's Delta p_t correctly. */
+    
     val lastMidPrice: Double?,
-    /** The funding rate most recently observed from the exchange. */
+    
     val latestFundingRate: Double,
-    /** The exchange taker fee rate most recently observed (an operational input, not learned). */
+    
     val exchangeFeeRate: Double,
-    /** Cumulative performance-to-date, so the UI doesn't reset to zero across a restore. */
+    
     val performance: RrlPerformanceSummary,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
