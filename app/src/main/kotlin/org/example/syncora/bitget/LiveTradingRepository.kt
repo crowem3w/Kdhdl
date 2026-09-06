@@ -46,6 +46,12 @@ class LiveTradingRepository(
     @Volatile
     private var active = false
 
+    /**
+     * Controls whether this account is the one currently selected by [org.example.syncora.account.AccountManager].
+     * When set to false, polling is paused (via [stop]) and order-placement methods are rejected. Stored
+     * credentials are left untouched, so live trading resumes exactly where it left off when re-activated -
+     * this is what prevents accidental live execution while Paper mode is selected.
+     */
     fun setActive(enabled: Boolean) {
         active = enabled
         if (!enabled) stop()

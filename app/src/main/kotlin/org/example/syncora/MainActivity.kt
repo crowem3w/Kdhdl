@@ -52,9 +52,9 @@ import org.example.syncora.onboarding.OnboardingPreferences
 import org.example.syncora.perf.PerformanceMonitor
 import org.example.syncora.ui.DrawingContextToolbar
 import org.example.syncora.ui.DrawingToolsPanel
+import org.example.syncora.ui.LogPanelDialog
 import org.example.syncora.ui.HistoricalDataDialog
 import org.example.syncora.ui.LiveTradePanel
-import org.example.syncora.ui.LogPanelDialog
 import org.example.syncora.ui.NeumorphicInsetFrameDrawable
 import org.example.syncora.ui.NeumorphicPillDrawable
 import org.example.syncora.ui.PaperTradePanel
@@ -107,9 +107,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var priceSkeleton: SkeletonLoadingView
     private lateinit var changeSkeleton: SkeletonLoadingView
     private lateinit var drawingToolsButton: ImageView
-    private lateinit var logPanelButton: ImageView
     private lateinit var timeframeExpandButton: ImageView
+    private lateinit var logPanelButton: ImageView
     private lateinit var drawingContextToolbar: DrawingContextToolbar
+    private val logPanelDialog by lazy { LogPanelDialog(this) }
     private val paperTradePanel by lazy { PaperTradePanel(this) }
     private val paperTradingAccountPanel by lazy { PaperTradingAccountPanel(this) }
     private val paperTradingHistoryPanel by lazy { PaperTradingHistoryPanel(this) }
@@ -185,13 +186,13 @@ class MainActivity : AppCompatActivity() {
         priceSkeleton = findViewById(R.id.priceSkeleton)
         changeSkeleton = findViewById(R.id.changeSkeleton)
         drawingToolsButton = findViewById(R.id.drawingToolsButton)
-        logPanelButton = findViewById(R.id.logPanelButton)
-        logPanelButton.setOnClickListener {
-            LogPanelDialog(this).show()
-        }
         timeframeExpandButton = findViewById(R.id.timeframeExpandButton)
         timeframeExpandButton.setOnClickListener {
             HistoricalDataDialog(this).show()
+        }
+        logPanelButton = findViewById(R.id.logPanelButton)
+        logPanelButton.setOnClickListener {
+            logPanelDialog.show()
         }
         drawingContextToolbar = findViewById(R.id.drawingContextToolbar)
         paragraphButton = findViewById(R.id.paragraphButton)

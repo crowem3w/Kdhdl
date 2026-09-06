@@ -7,7 +7,7 @@
     <string name="connecting_label">Connecting…</string>
     <string name="timeframe_expand_content_description">More timeframes</string>
     <string name="drawing_tools_content_description">Drawing tools</string>
-    <string name="log_panel_content_description">Log panel</string>
+    <string name="log_panel_content_description">LogPanel</string>
     <string name="paragraph_button_content_description">Paragraph</string>
     <string name="connectivity_banner_retry">Retry</string>
     <string name="connectivity_banner_dismiss">✕</string>
