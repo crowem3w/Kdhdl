@@ -29,4 +29,12 @@ internal class FundingSettlementGate {
     fun reset() {
         lastSettlementSeen = -1L
     }
+
+    /** Returns the last settlement boundary seen, for checkpointing. */
+    fun snapshot(): Long = lastSettlementSeen
+
+    /** Restores a previously snapshotted settlement boundary, e.g. from a checkpoint. */
+    fun restore(savedLastSettlementSeen: Long) {
+        lastSettlementSeen = savedLastSettlementSeen
+    }
 }

@@ -51,3 +51,33 @@ data class RrlStepResult(
     /** lambda used for this step's utility. */
     val riskAppetite: Double,
 )
+
+/**
+ * A snapshot of every piece of state [RecurrentReinforcementLearner.step]
+ * carries from one call to the next: the echo-state reservoir's dynamical
+ * state, the extended-Kalman-filter readout weights and precision matrix,
+ * and the small amount of recurrent bookkeeping the learner itself owns.
+ * See [RecurrentReinforcementLearner.snapshotState] / `restoreState` and
+ * [RrlAgentCheckpoint], which persists this alongside [RrlAgentLayer]'s own
+ * cached market state.
+ */
+data class RrlLearnerState(
+    /** x_t, the echo-state reservoir's internal dynamical state. */
+    val reservoirState: DoubleArray,
+    /** w^out_t, the learned readout weights (eq. 10). */
+    val optimizerWeights: DoubleArray,
+    /** P_t, the EKF's approximate inverse-Hessian precision matrix (Algorithm 1). */
+    val optimizerPrecision: Array<DoubleArray>,
+    /** Circular buffer of the last n_back desired positions, oldest first (eq. 11). */
+    val pastPositions: DoubleArray,
+    /** f_{t-1}, the previous step's desired position. */
+    val previousPosition: Double,
+    /** z_{t-1}, the previous step's augmented reservoir state; null before the first step. */
+    val previousZ: DoubleArray?,
+    /** df_{t-1}/dw_{t-1}^out, used by the recursive term of eq. 12 on the next step. */
+    val previousDfDw: DoubleArray,
+    /** mu_t, the online exponentially-weighted expected net return (eq. 7). */
+    val expectedReturn: Double,
+    /** sigma_t^2, the online exponentially-weighted variance of net returns (eq. 7). */
+    val returnVariance: Double,
+)

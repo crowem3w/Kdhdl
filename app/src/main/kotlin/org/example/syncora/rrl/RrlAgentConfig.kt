@@ -54,4 +54,26 @@ data class RrlAgentConfig(
     val seed: Long = 42L,
 ) {
     enum class RiskAppetiteMode { FIXED, INFORMATION_RATIO }
+
+    /**
+     * A stable hash of every field that determines the *shape and meaning*
+     * of a learned [RrlAgentCheckpoint]: dimensions, the reservoir's random
+     * seed, and the learning/utility hyper-parameters. [exchangeFeeRate] is
+     * deliberately excluded, since it is a runtime-refreshed operational
+     * input (see its doc comment) rather than part of the agent's structure.
+     *
+     * Used to reject a checkpoint saved under a different configuration: the
+     * reservoir's fixed W^input/W^hidden/W^back matrices aren't persisted
+     * (they're cheap to regenerate from [seed]), so a saved x_t/w^out/P only
+     * means the same thing if this fingerprint still matches.
+     */
+    fun fingerprint(): String {
+        val fields = listOf(
+            nInput, nHidden, nBack, sparsity, spectralRadius, signFlipProbability,
+            ridgePenalty, kalmanDecay, emaDecay, riskAppetiteMode, fixedRiskAppetite,
+            annualisationFactor, benchmarkReturn, gateOnExpectedReturn, seed,
+        ).joinToString("|")
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(fields.toByteArray())
+        return digest.joinToString(separator = "") { "%02x".format(it) }
+    }
 }

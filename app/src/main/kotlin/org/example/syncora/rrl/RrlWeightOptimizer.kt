@@ -63,4 +63,22 @@ class RrlWeightOptimizer(
         weights = DoubleArray(dimension)
         precision = Matrix.identity(dimension, 1.0 / ridgePenalty)
     }
+
+    /** Returns a defensive copy of P_t, the current inverse-Hessian precision matrix. */
+    fun snapshotPrecision(): Array<DoubleArray> = Array(dimension) { precision[it].copyOf() }
+
+    /**
+     * Restores previously snapshotted weights and precision matrix, e.g. from
+     * a checkpoint. Both must match this optimiser's [dimension].
+     */
+    fun restoreState(savedWeights: DoubleArray, savedPrecision: Array<DoubleArray>) {
+        require(savedWeights.size == dimension) {
+            "expected weights of size $dimension, got ${savedWeights.size}"
+        }
+        require(savedPrecision.size == dimension && savedPrecision.all { it.size == dimension }) {
+            "expected a ${dimension}x$dimension precision matrix"
+        }
+        weights = savedWeights.copyOf()
+        precision = Array(dimension) { savedPrecision[it].copyOf() }
+    }
 }

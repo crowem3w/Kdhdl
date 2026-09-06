@@ -60,6 +60,28 @@ class EchoStateReservoir(
     }
 
     /**
+     * Returns a copy of the current internal state x_t. W^input, W^hidden and
+     * W^back are deliberately excluded: they are fixed and fully determined
+     * by the constructor arguments (in particular [seed]), so a checkpoint
+     * only needs to persist the *dynamic* part of the reservoir and can
+     * regenerate the fixed matrices by reconstructing with the same config.
+     */
+    fun snapshotState(): DoubleArray = state.copyOf()
+
+    /**
+     * Restores a previously snapshotted internal state x_t. The caller is
+     * responsible for ensuring [savedState] was produced by a reservoir with
+     * the same [nHidden] (and ideally the same full configuration, since the
+     * fixed matrices it will be combined with must match too).
+     */
+    fun restoreState(savedState: DoubleArray) {
+        require(savedState.size == nHidden) {
+            "expected reservoir state of size $nHidden, got ${savedState.size}"
+        }
+        state = savedState.copyOf()
+    }
+
+    /**
      * Advances the reservoir one step and returns the augmented state
      * z_t = [u_t, x_t, yhat_t] (eq. 5).
      *

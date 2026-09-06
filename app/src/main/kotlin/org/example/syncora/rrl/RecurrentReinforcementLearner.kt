@@ -165,4 +165,50 @@ class RecurrentReinforcementLearner(private val config: RrlAgentConfig) {
             riskAppetite = riskAppetite,
         )
     }
+
+    /**
+     * Captures everything needed to resume online learning exactly where it
+     * left off: the reservoir's dynamical state x_t, the EKF readout weights
+     * w^out and precision matrix P_t, and the small amount of recurrent
+     * bookkeeping (the past-positions buffer, z_{t-1}, df_t/dw_{t-1} and the
+     * running return mean/variance) that [step] threads from one call to the
+     * next. Does *not* include the reservoir's fixed W^input/W^hidden/W^back
+     * matrices; see [EchoStateReservoir.snapshotState].
+     */
+    fun snapshotState(): RrlLearnerState = RrlLearnerState(
+        reservoirState = reservoir.snapshotState(),
+        optimizerWeights = optimizer.weights.copyOf(),
+        optimizerPrecision = optimizer.snapshotPrecision(),
+        pastPositions = DoubleArray(pastPositions.size) { pastPositions[it] },
+        previousPosition = previousPosition,
+        previousZ = previousZ?.copyOf(),
+        previousDfDw = previousDfDw.copyOf(),
+        expectedReturn = expectedReturn,
+        returnVariance = returnVariance,
+    )
+
+    /**
+     * Restores a previously captured [RrlLearnerState], e.g. loaded from a
+     * checkpoint. Returns `false` and leaves this instance untouched if
+     * [saved]'s array dimensions don't match this learner's configuration
+     * (which would indicate it was produced by a differently-configured
+     * agent); returns `true` if the restore was applied.
+     */
+    fun restoreState(saved: RrlLearnerState): Boolean {
+        if (saved.reservoirState.size != config.nHidden) return false
+        if (saved.pastPositions.size != config.nBack) return false
+        if (saved.optimizerWeights.size != reservoir.augmentedSize) return false
+        if (saved.previousDfDw.size != reservoir.augmentedSize) return false
+        if (saved.previousZ != null && saved.previousZ.size != reservoir.augmentedSize) return false
+
+        reservoir.restoreState(saved.reservoirState)
+        optimizer.restoreState(saved.optimizerWeights, saved.optimizerPrecision)
+        for (i in pastPositions.indices) pastPositions[i] = saved.pastPositions[i]
+        previousPosition = saved.previousPosition
+        previousZ = saved.previousZ?.copyOf()
+        previousDfDw = saved.previousDfDw.copyOf()
+        expectedReturn = saved.expectedReturn
+        returnVariance = saved.returnVariance
+        return true
+    }
 }
