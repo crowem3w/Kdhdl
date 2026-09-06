@@ -1,5 +1,6 @@
 package org.example.syncora.rrl
 
+import android.net.Uri
 import android.util.Log
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -145,7 +146,34 @@ class RrlAgentLayer(
     suspend fun restoreFromCheckpoint(): Boolean {
         val store = checkpointStore ?: return false
         val checkpoint = store.load() ?: return false
+        return applyCheckpoint(checkpoint)
+    }
 
+    /**
+     * Imports and applies a checkpoint from a user-picked file, e.g. the
+     * result of an `ActivityResultContracts.OpenDocument()` launch in the
+     * hosting Activity/Fragment. Unlike [restoreFromCheckpoint], [uri] need
+     * not be this layer's own managed checkpoint file -- it can be one the
+     * user renamed, moved, received via a share sheet, or copied over from
+     * another device, which is what makes an exported checkpoint genuinely
+     * importable rather than only self-resumable.
+     *
+     * Requires checkpointing to be enabled (a non-null store was passed to
+     * the constructor), since reading an arbitrary content [Uri] needs a
+     * [android.content.ContentResolver], which only the store holds.
+     *
+     * Returns `true` if the file was readable and matched this agent's
+     * [RrlAgentConfig]; `false` otherwise, leaving current state untouched.
+     * On success, the next autosave still writes to this layer's own
+     * canonical checkpoint location as normal, not back to [uri].
+     */
+    suspend fun restoreFromUri(uri: Uri): Boolean {
+        val store = checkpointStore ?: return false
+        val checkpoint = store.loadFrom(uri) ?: return false
+        return applyCheckpoint(checkpoint)
+    }
+
+    private fun applyCheckpoint(checkpoint: RrlAgentCheckpoint): Boolean {
         if (checkpoint.configFingerprint != config.fingerprint()) {
             Log.w(TAG, "Ignoring checkpoint saved under a different RrlAgentConfig")
             _checkpointStatus.value = CheckpointStatus.RESTORE_FAILED

@@ -66,15 +66,43 @@ class RrlCheckpointStore(
     suspend fun load(): RrlAgentCheckpoint? = withContext(Dispatchers.IO) {
         try {
             val uri = findExistingUri() ?: return@withContext null
-            val text = resolver.openInputStream(uri)?.use { input ->
-                BufferedReader(InputStreamReader(input)).readText()
-            } ?: return@withContext null
-            if (text.isBlank()) return@withContext null
-            RrlAgentCheckpoint.fromJson(JSONObject(text))
+            readCheckpoint(uri)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to load RRL checkpoint '$checkpointKey': ${e.message}")
             null
         }
+    }
+
+    /**
+     * Reads and parses a checkpoint from an arbitrary [uri] -- typically one
+     * returned by a Storage Access Framework picker
+     * (`ActivityResultContracts.OpenDocument`) after the user chose a file
+     * that isn't necessarily this store's own managed one. This is what
+     * makes an exported checkpoint actually *importable*: a file renamed,
+     * moved out of `Downloads/Syncora/`, shared from another app, or copied
+     * over from a different device can still be loaded, as long as its JSON
+     * is a valid [RrlAgentCheckpoint].
+     *
+     * Does not touch this store's own managed file or overwrite anything;
+     * the caller (see [RrlAgentLayer.restoreFromUri]) decides whether and
+     * how to apply the result. A subsequent autosave will still write to
+     * this store's own canonical location as normal.
+     */
+    suspend fun loadFrom(uri: Uri): RrlAgentCheckpoint? = withContext(Dispatchers.IO) {
+        try {
+            readCheckpoint(uri)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to import RRL checkpoint from $uri: ${e.message}")
+            null
+        }
+    }
+
+    private fun readCheckpoint(uri: Uri): RrlAgentCheckpoint? {
+        val text = resolver.openInputStream(uri)?.use { input ->
+            BufferedReader(InputStreamReader(input)).readText()
+        } ?: return null
+        if (text.isBlank()) return null
+        return RrlAgentCheckpoint.fromJson(JSONObject(text))
     }
 
     /** True if a checkpoint file currently exists for this key. */
