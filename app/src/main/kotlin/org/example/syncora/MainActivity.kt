@@ -81,6 +81,7 @@ class MainActivity : AppCompatActivity() {
     private val liveCredentialsStore by lazy { app.liveCredentialsStore }
     private val liveTradingRepository by lazy { app.liveTradingRepository }
     private val accountManager by lazy { app.accountManager }
+    private val rrlPipeline by lazy { app.rrlPipeline }
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {  }
@@ -355,6 +356,13 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 launch { watchConnectivity() }
+
+                // Application layer for the Agent tab: stream the RRL agent's live signal and
+                // running performance into QuickTradePanel. The panel itself decides whether to
+                // act on a new signal (only when its Auto-Trade switch is on), driving the same
+                // onOpenPosition/onClosePosition callbacks wired below as the manual ticket.
+                launch { rrlPipeline.signal.collect { quickTradePanel.renderAgentSignal(it) } }
+                launch { rrlPipeline.performance.collect { quickTradePanel.renderAgentPerformance(it) } }
             }
         }
     }
