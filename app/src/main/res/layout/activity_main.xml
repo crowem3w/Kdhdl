@@ -249,6 +249,20 @@
                 android:layout_gravity="top|start"
                 android:visibility="gone" />
 
+            <ImageView
+                android:id="@+id/logPanelButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="bottom|start"
+                android:layout_marginBottom="20dp"
+                android:padding="9dp"
+                android:src="@drawable/ic_log_panel"
+                android:tint="#B2B5BE"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="@string/log_panel_content_description" />
+
             <FrameLayout
                 android:id="@+id/quickTradeHandleIndicator"
                 android:layout_width="56dp"

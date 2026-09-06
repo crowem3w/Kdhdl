@@ -54,6 +54,7 @@ import org.example.syncora.ui.DrawingContextToolbar
 import org.example.syncora.ui.DrawingToolsPanel
 import org.example.syncora.ui.HistoricalDataDialog
 import org.example.syncora.ui.LiveTradePanel
+import org.example.syncora.ui.LogPanelDialog
 import org.example.syncora.ui.NeumorphicInsetFrameDrawable
 import org.example.syncora.ui.NeumorphicPillDrawable
 import org.example.syncora.ui.PaperTradePanel
@@ -106,6 +107,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var priceSkeleton: SkeletonLoadingView
     private lateinit var changeSkeleton: SkeletonLoadingView
     private lateinit var drawingToolsButton: ImageView
+    private lateinit var logPanelButton: ImageView
     private lateinit var timeframeExpandButton: ImageView
     private lateinit var drawingContextToolbar: DrawingContextToolbar
     private val paperTradePanel by lazy { PaperTradePanel(this) }
@@ -183,6 +185,10 @@ class MainActivity : AppCompatActivity() {
         priceSkeleton = findViewById(R.id.priceSkeleton)
         changeSkeleton = findViewById(R.id.changeSkeleton)
         drawingToolsButton = findViewById(R.id.drawingToolsButton)
+        logPanelButton = findViewById(R.id.logPanelButton)
+        logPanelButton.setOnClickListener {
+            LogPanelDialog(this).show()
+        }
         timeframeExpandButton = findViewById(R.id.timeframeExpandButton)
         timeframeExpandButton.setOnClickListener {
             HistoricalDataDialog(this).show()
