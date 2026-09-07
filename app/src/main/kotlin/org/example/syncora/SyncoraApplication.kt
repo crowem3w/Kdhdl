@@ -86,9 +86,9 @@ class SyncoraApplication : Application() {
         )
     }
 
-    // Single source of truth for which account (Paper or Live) is active. Trading, training, and
-    // fine-tuning all read from this instead of being started/stopped directly - this is what makes
-    // the two accounts mutually exclusive and prevents accidental live execution.
+    
+    
+    
     val accountManager: AccountManager by lazy {
         AccountManager(
             context = applicationContext,
@@ -108,7 +108,7 @@ class SyncoraApplication : Application() {
         pipeline.start()
         depthPipeline.start()
         tradeSocket.connect()
-        // Applies whichever account (Paper/Live/none) was last selected; never starts both.
+        
         accountManager.restoreActiveMode()
         stopLossGuard.start(liveTradingRepository.positions)
         rrlPipeline.start()

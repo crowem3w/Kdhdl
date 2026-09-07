@@ -100,12 +100,12 @@ class PaperTradingRepository(
     @Volatile
     private var active = false
 
-    /**
-     * Controls whether this account is the one currently selected by [org.example.syncora.account.AccountManager].
-     * When set to false, background jobs are paused (via [stop]) and trade-execution methods are rejected,
-     * but persisted balance/positions/history are left untouched so the account resumes exactly where it
-     * left off when re-activated.
-     */
+    
+
+
+
+
+
     fun setActive(enabled: Boolean) {
         active = enabled
         if (!enabled) stop()

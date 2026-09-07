@@ -40,7 +40,7 @@ class BitgetLiveCredentialsStore(context: Context) {
             .putString(KEY_SECRET_KEY, credentials.secretKey)
             .putString(KEY_PASSPHRASE, credentials.passphrase)
             .apply()
-        // Never log key material itself - only that a change happened.
+        
         AppLog.account(LogLevel.INFO, "Bitget live API key saved")
     }
 

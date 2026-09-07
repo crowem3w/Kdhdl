@@ -34,15 +34,15 @@ import org.example.syncora.log.LogEntry
 import org.example.syncora.log.LogLevel
 import org.example.syncora.log.LogSource
 
-/**
- * Centered "LogPanel" modal: a live, terminal-style feed of [AppLog] activity.
- *
- * This is the one place the whole app's activity is traced end to end - agent training and
- * decisions, trade execution outcomes, and account/Bitget live connectivity - so it can be
- * inspected and (informally) recorded during a session. Meaning is carried entirely by color
- * (semantic per [LogLevel]); there are no icons anywhere in the terminal, and no extra chrome -
- * the glass card itself is the terminal surface.
- */
+
+
+
+
+
+
+
+
+
 class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalTheme) {
 
     private companion object {
@@ -54,10 +54,10 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
         const val BACKDROP_BLUR_PERCENT = 0.85f
         const val MAX_BACKDROP_BLUR_DP = 100
 
-        // Charcoal-black glass base with the faintest cool undertones.
-        val GLASS_TOP_TINT = Color.parseColor("#2A2E3E")      // barely-there blue undertone
-        val GLASS_BASE_TINT = Color.parseColor("#141519")     // frosted charcoal-black
-        val GLASS_BOTTOM_TINT = Color.parseColor("#231B30")   // barely-there purple undertone
+        
+        val GLASS_TOP_TINT = Color.parseColor("#2A2E3E")      
+        val GLASS_BASE_TINT = Color.parseColor("#141519")     
+        val GLASS_BOTTOM_TINT = Color.parseColor("#231B30")   
 
         const val GLASS_TOP_ALPHA = 0.55f
         const val GLASS_BASE_ALPHA = 0.72f
@@ -70,15 +70,15 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
         val MUTED_COLOR = Color.parseColor("#8A8D98")
         val TIMESTAMP_COLOR = Color.parseColor("#5B5E68")
 
-        // --- Semantic level colors: this IS the color coding, there are no icons. ---
-        val LEVEL_DEBUG = Color.parseColor("#6B6F7B")     // dim gray
-        val LEVEL_INFO = Color.parseColor("#5AC8FA")      // cool cyan/blue
-        val LEVEL_SUCCESS = Color.parseColor("#3DD68C")   // green
-        val LEVEL_WARNING = Color.parseColor("#F5A623")   // amber
-        val LEVEL_ERROR = Color.parseColor("#FF5C5C")     // red
+        
+        val LEVEL_DEBUG = Color.parseColor("#6B6F7B")     
+        val LEVEL_INFO = Color.parseColor("#5AC8FA")      
+        val LEVEL_SUCCESS = Color.parseColor("#3DD68C")   
+        val LEVEL_WARNING = Color.parseColor("#F5A623")   
+        val LEVEL_ERROR = Color.parseColor("#FF5C5C")     
 
-        // Source tags get a muted, desaturated variant of the same palette so the eye still
-        // reads level color as the primary signal.
+        
+        
         val SOURCE_AGENT = Color.parseColor("#B98CFF")
         val SOURCE_TRADING = Color.parseColor("#5AC8FA")
         val SOURCE_ACCOUNT = Color.parseColor("#F5A623")
@@ -155,7 +155,7 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
         val cornerRadiusPx = dpf(CARD_CORNER_RADIUS_DP)
         val glowCornerRadiusPx = dpf(CARD_CORNER_RADIUS_DP + GLOW_EXTRA_DP / 2)
 
-        // Ambient glow halo sitting behind the glass card for soft separation from the chart.
+        
         val glow = View(context).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
@@ -175,7 +175,7 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
             }
         }
 
-        // The frosted glass card IS the terminal - no separate header, controls, or inner frame.
+        
         val card = FrameLayout(context).apply {
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
@@ -200,7 +200,7 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
                 outlineSpotShadowColor = Color.parseColor("#1A1030")
             }
             isClickable = true
-            setOnClickListener { /* absorb clicks, keep dialog open */ }
+            setOnClickListener {  }
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(CARD_HEIGHT_DP),
@@ -276,23 +276,23 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
     private fun appendLine(builder: SpannableStringBuilder, entry: LogEntry) {
         val start = builder.length
 
-        // Timestamp - always muted, never carries semantic meaning.
+        
         builder.append(TIME_FORMAT.format(entry.timestampMs))
         builder.append("  ")
 
-        // Source tag - fixed width-ish, colored per source so the eye can track a lane.
+        
         val tagStart = builder.length
         builder.append(sourceTag(entry.source))
         builder.setSpan(ForegroundColorSpan(sourceColor(entry.source)), tagStart, builder.length, 0)
         builder.setSpan(StyleSpan(Typeface.BOLD), tagStart, builder.length, 0)
         builder.append(" ")
 
-        // Message - colored by level. This is the primary semantic color coding in the terminal.
+        
         val msgStart = builder.length
         builder.append(entry.message)
         builder.setSpan(ForegroundColorSpan(levelColor(entry.level)), msgStart, builder.length, 0)
 
-        // Timestamp span applied last so it isn't overridden by the wider spans above.
+        
         builder.setSpan(ForegroundColorSpan(TIMESTAMP_COLOR), start, tagStart, 0)
     }
 

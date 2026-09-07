@@ -28,14 +28,14 @@ class TradingModeDialog(
     private val paperHistoryContent: View,
     private val liveTradingContent: View,
     private val onExportReport: () -> Unit,
-    /** Called when the user opens the Paper Trading screen. Activates the Paper account (pauses Live). */
+    
     private val onSelectPaper: () -> Unit,
-    /**
-     * Called when the user opens the Live Trading screen. Must attempt to activate the Live account
-     * (pausing Paper) and return whether it succeeded - e.g. false if no API credentials are saved yet.
-     * Navigation only proceeds to the Live screen on success, so the dialog never shows a "connected"
-     * live screen for an account that isn't actually the active one.
-     */
+    
+
+
+
+
+
     private val onSelectLive: () -> Boolean,
 ) : Dialog(context, R.style.TradingModalTheme) {
 

@@ -18,6 +18,8 @@ import org.example.syncora.bitget.PaperAccountBalance
 import org.example.syncora.bitget.PaperPosition
 import org.example.syncora.bitget.PendingLimitOrder
 import org.example.syncora.bitget.PositionSide
+import org.example.syncora.rrl.RrlPerformanceSummary
+import org.example.syncora.rrl.RrlStepResult
 
 class QuickTradePanel @JvmOverloads constructor(
     context: Context,
@@ -49,7 +51,7 @@ class QuickTradePanel @JvmOverloads constructor(
         val onCancelPendingOrder: (PendingLimitOrder) -> Unit = {},
     )
 
-    /** One adjustable RRL agent parameter (or the max leverage cap) rendered in the left column. */
+    
     private data class AgentParamField(
         val key: String,
         val label: String,
@@ -68,8 +70,9 @@ class QuickTradePanel @JvmOverloads constructor(
     private var handleDownY = 0f
 
     private lateinit var scrollView: View
+    private lateinit var agentStatePanel: AgentStatePanelView
 
-    /** EditText for each agent parameter field, keyed by [AgentParamField.key]. */
+    
     private val agentParamFields = LinkedHashMap<String, EditText>()
 
     val scrollableContent: View
@@ -77,7 +80,7 @@ class QuickTradePanel @JvmOverloads constructor(
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-    /** Current value of an agent parameter field, or null if the field is unknown/not yet built. */
+    
     fun agentParamValue(key: String): String? = agentParamFields[key]?.text?.toString()
 
     private val agentParamDefs: List<AgentParamField> = listOf(
@@ -243,6 +246,16 @@ class QuickTradePanel @JvmOverloads constructor(
 
     fun renderPendingOrders(orders: List<PendingLimitOrder>) = Unit
 
+    /** Live agent step + cumulative performance, rendered into the right-hand column. */
+    fun renderAgentState(step: RrlStepResult?, performance: RrlPerformanceSummary) {
+        agentStatePanel.render(step, performance)
+    }
+
+    /** Clears the accumulated chart history, e.g. when the agent is reset/re-parameterised. */
+    fun resetAgentState() {
+        agentStatePanel.reset()
+    }
+
     private fun buildTwoColumnBody(): View {
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
@@ -255,12 +268,12 @@ class QuickTradePanel @JvmOverloads constructor(
         }
         agentParamDefs.forEach { field -> leftColumn.addView(buildAgentParamRow(field)) }
 
-        val rightColumn = View(context).apply {
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+        agentStatePanel = AgentStatePanelView(context).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
 
         row.addView(leftColumn)
-        row.addView(rightColumn)
+        row.addView(agentStatePanel)
 
         return ScrollView(context).apply {
             isFillViewport = true

@@ -20,11 +20,11 @@ import android.widget.ScrollView
 import android.widget.TextView
 import org.example.syncora.R
 
-/**
- * Single-screen info modal describing one adjustable agent parameter: what it does, and its
- * default value. Reuses the same card/blur/scrim styling as [TradingModeDialog] and
- * [HistoricalDataDialog] for visual consistency across the app's modals.
- */
+
+
+
+
+
 class RrlParameterInfoDialog(
     context: Context,
     private val paramLabel: String,

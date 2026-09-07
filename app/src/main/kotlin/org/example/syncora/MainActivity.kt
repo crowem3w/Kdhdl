@@ -81,6 +81,7 @@ class MainActivity : AppCompatActivity() {
     private val liveCredentialsStore by lazy { app.liveCredentialsStore }
     private val liveTradingRepository by lazy { app.liveTradingRepository }
     private val accountManager by lazy { app.accountManager }
+    private val rrlPipeline by lazy { app.rrlPipeline }
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {  }
@@ -652,6 +653,20 @@ class MainActivity : AppCompatActivity() {
                 },
             ),
         )
+
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    combine(
+                        rrlPipeline.signal,
+                        rrlPipeline.performance,
+                    ) { step, performance -> step to performance }
+                        .collect { (step, performance) ->
+                            quickTradePanel.renderAgentState(step, performance)
+                        }
+                }
+            }
+        }
     }
 
     private fun setupQuickTradeScrollGesture() {
@@ -900,8 +915,8 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         MarketDataForegroundService.start(this)
-        // Only resume the paper account's background jobs if it's actually the active account -
-        // otherwise it stays paused, exactly as AccountManager left it.
+        
+        
         if (accountManager.isActive(AccountMode.PAPER)) {
             paperTradingRepository.start()
         }

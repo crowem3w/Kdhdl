@@ -61,13 +61,13 @@ class RrlDataPipeline(
     @Volatile
     private var active = false
 
-    /**
-     * Controls whether the training/fine-tuning agent is allowed to learn from live market data right now.
-     * Set by [org.example.syncora.account.AccountManager] so that training and fine-tuning are always
-     * scoped to whichever account (Paper or Live) is currently selected, and pause entirely when no
-     * account is selected. Market-data collection (klines/depth/trades/funding) keeps flowing regardless;
-     * only the agent's learning step is gated, so resuming picks up cleanly without losing buffered state.
-     */
+    
+
+
+
+
+
+
     fun setActive(enabled: Boolean) {
         active = enabled
     }

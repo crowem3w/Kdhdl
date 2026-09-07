@@ -279,9 +279,9 @@ class RrlAgentLayer(
     }
 
     private fun logDecision(result: RrlStepResult) {
-        // High-frequency per-bar telemetry stays at DEBUG (dim, non-intrusive) so the terminal
-        // isn't dominated by it; a position flip (long/flat/short) is a real decision and is
-        // surfaced at INFO so it stands out in the activity feed.
+        
+        
+        
         val sign = when {
             result.position > 0.05 -> 1
             result.position < -0.05 -> -1
