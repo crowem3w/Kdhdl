@@ -10,8 +10,10 @@ import android.util.AttributeSet
 import android.view.Gravity
 import android.view.View
 import android.widget.GridLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import org.example.syncora.R
 import org.example.syncora.rrl.RrlPerformanceSummary
 import org.example.syncora.rrl.RrlStepResult
 import kotlin.collections.ArrayDeque
@@ -93,6 +95,98 @@ class AgentStatePanelView @JvmOverloads constructor(
             },
         )
         addView(buildLegend())
+        addView(buildCheckpointRow())
+    }
+
+    /** Which action a tap on the checkpoint control currently performs. */
+    enum class CheckpointAction { EXPORT, IMPORT }
+
+    private var checkpointMode = CheckpointAction.EXPORT
+    private lateinit var checkpointIcon: ImageView
+    private lateinit var checkpointLabel: TextView
+
+    /** Tap on the icon/label: export the current checkpoint, or open a picker to import one. */
+    var onCheckpointAction: ((CheckpointAction) -> Unit)? = null
+
+    /** Long-press while in Import mode: fall back to restoring the last autosaved checkpoint. */
+    var onRestoreLastAutosave: (() -> Unit)? = null
+
+    /**
+     * One-line, frameless export/import control anchored to the bottom of this (right-hand)
+     * column only. Tapping the icon/label runs [checkpointMode]'s action; the chevron flips
+     * between Export and Import. Long-pressing while in Import mode restores the last autosave
+     * without needing to pick a file.
+     */
+    private fun buildCheckpointRow(): View {
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(14), 0, 0)
+        }
+
+        val actionArea = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
+        }
+        checkpointIcon = ImageView(context).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(16), dp(16)).apply { marginEnd = dp(6) }
+        }
+        checkpointLabel = TextView(context).apply {
+            textSize = 12f
+            setTextColor(labelColor)
+        }
+        actionArea.addView(checkpointIcon)
+        actionArea.addView(checkpointLabel)
+        actionArea.setOnClickListener { onCheckpointAction?.invoke(checkpointMode) }
+        actionArea.setOnLongClickListener {
+            if (checkpointMode == CheckpointAction.IMPORT) {
+                onRestoreLastAutosave?.invoke()
+                true
+            } else {
+                false
+            }
+        }
+
+        val spacer = View(context).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(1), 1f)
+        }
+
+        val chevron = ImageView(context).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(20), dp(20))
+            setImageResource(R.drawable.ic_chevron_down)
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+            setOnClickListener {
+                checkpointMode = if (checkpointMode == CheckpointAction.EXPORT) {
+                    CheckpointAction.IMPORT
+                } else {
+                    CheckpointAction.EXPORT
+                }
+                updateCheckpointModeUi()
+            }
+        }
+
+        row.addView(actionArea)
+        row.addView(spacer)
+        row.addView(chevron)
+        updateCheckpointModeUi()
+        return row
+    }
+
+    private fun updateCheckpointModeUi() {
+        when (checkpointMode) {
+            CheckpointAction.EXPORT -> {
+                checkpointIcon.setImageResource(R.drawable.ic_checkpoint_export)
+                checkpointLabel.text = "Export"
+            }
+            CheckpointAction.IMPORT -> {
+                checkpointIcon.setImageResource(R.drawable.ic_checkpoint_import)
+                checkpointLabel.text = "Import"
+            }
+        }
     }
 
     private fun addStatCell(grid: GridLayout, label: String, row: Int, col: Int): StatCell {

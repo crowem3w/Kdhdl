@@ -50,6 +50,7 @@ import org.example.syncora.chart.DrawingTool
 import org.example.syncora.onboarding.OnboardingActivity
 import org.example.syncora.onboarding.OnboardingPreferences
 import org.example.syncora.perf.PerformanceMonitor
+import org.example.syncora.ui.AgentStatePanelView
 import org.example.syncora.ui.DrawingContextToolbar
 import org.example.syncora.ui.DrawingToolsPanel
 import org.example.syncora.ui.LogPanelDialog
@@ -85,6 +86,32 @@ class MainActivity : AppCompatActivity() {
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {  }
+
+    private val exportCheckpointLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            if (uri == null) return@registerForActivityResult
+            lifecycleScope.launch {
+                val success = rrlPipeline.exportCheckpoint(uri)
+                Toast.makeText(
+                    this@MainActivity,
+                    if (success) "Checkpoint exported" else "Export failed - see log panel",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+
+    private val importCheckpointLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri == null) return@registerForActivityResult
+            lifecycleScope.launch {
+                val success = rrlPipeline.importCheckpoint(uri)
+                Toast.makeText(
+                    this@MainActivity,
+                    if (success) "Checkpoint imported" else "Import failed - file may not match current agent settings",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
 
     private lateinit var candleChart: CandlestickChartView
     private lateinit var depthHeatmap: DepthHeatmapView
@@ -653,6 +680,28 @@ class MainActivity : AppCompatActivity() {
                 },
             ),
         )
+
+        quickTradePanel.onCheckpointAction = { action ->
+            when (action) {
+                AgentStatePanelView.CheckpointAction.EXPORT -> {
+                    val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                    exportCheckpointLauncher.launch("rrl_checkpoint_$timestamp.json")
+                }
+                AgentStatePanelView.CheckpointAction.IMPORT -> {
+                    importCheckpointLauncher.launch(arrayOf("application/json"))
+                }
+            }
+        }
+        quickTradePanel.onRestoreLastAutosave = {
+            lifecycleScope.launch {
+                val success = rrlPipeline.restoreLastAutosave()
+                Toast.makeText(
+                    this@MainActivity,
+                    if (success) "Restored last autosaved checkpoint" else "No autosave found to restore",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {

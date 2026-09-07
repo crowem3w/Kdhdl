@@ -181,6 +181,20 @@ class RrlAgentLayer(
         return applyCheckpoint(checkpoint)
     }
 
+    
+    suspend fun exportTo(uri: Uri): Boolean {
+        val store = checkpointStore ?: return false
+        return try {
+            store.saveTo(uri, buildCheckpoint())
+            AppLog.agent(LogLevel.SUCCESS, "Checkpoint exported (step ${_performance.value.steps})")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Checkpoint export failed: ${e.message}")
+            AppLog.agent(LogLevel.ERROR, "Checkpoint export failed: ${e.message}")
+            false
+        }
+    }
+
     private fun applyCheckpoint(checkpoint: RrlAgentCheckpoint): Boolean {
         if (checkpoint.configFingerprint != config.fingerprint()) {
             Log.w(TAG, "Ignoring checkpoint saved under a different RrlAgentConfig")
@@ -313,19 +327,20 @@ class RrlAgentLayer(
 
     private fun enqueueCheckpointSave() {
         val pending = pendingSaves ?: return
-        val checkpoint = RrlAgentCheckpoint(
-            configFingerprint = config.fingerprint(),
-            savedAtMs = System.currentTimeMillis(),
-            learnerState = agent.snapshotState(),
-            fundingLastSettlementSeen = fundingGate.snapshot(),
-            previousTimestampMs = previousTimestampMs,
-            lastMidPrice = lastMidPrice,
-            latestFundingRate = latestFundingRate,
-            exchangeFeeRate = exchangeFeeRate,
-            performance = _performance.value,
-        )
-        pending.trySend(checkpoint)
+        pending.trySend(buildCheckpoint())
     }
+
+    private fun buildCheckpoint(): RrlAgentCheckpoint = RrlAgentCheckpoint(
+        configFingerprint = config.fingerprint(),
+        savedAtMs = System.currentTimeMillis(),
+        learnerState = agent.snapshotState(),
+        fundingLastSettlementSeen = fundingGate.snapshot(),
+        previousTimestampMs = previousTimestampMs,
+        lastMidPrice = lastMidPrice,
+        latestFundingRate = latestFundingRate,
+        exchangeFeeRate = exchangeFeeRate,
+        performance = _performance.value,
+    )
 
     private fun updatePerformance(result: RrlStepResult) {
         val previous = _performance.value

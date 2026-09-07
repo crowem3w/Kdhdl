@@ -1,5 +1,6 @@
 package org.example.syncora.rrl
 
+import android.net.Uri
 import android.util.Log
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -50,13 +51,26 @@ class RrlDataPipeline(
     
     private val feeRateCredentialsProvider: (() -> BitgetCredentials?)? = null,
     config: RrlAgentConfig = RrlAgentConfig(),
+    checkpointStore: RrlCheckpointStore? = null,
 ) {
     private companion object {
         const val TAG = "RrlDataPipeline"
         const val FEE_RATE_REFRESH_INTERVAL_MS = 15 * 60_000L
     }
 
-    private val agent = RrlAgentLayer(config)
+    private val agent = RrlAgentLayer(config, checkpointStore)
+
+    
+    val checkpointStatus: StateFlow<RrlAgentLayer.CheckpointStatus> = agent.checkpointStatus
+
+    
+    suspend fun exportCheckpoint(uri: Uri): Boolean = agent.exportTo(uri)
+
+    
+    suspend fun importCheckpoint(uri: Uri): Boolean = agent.restoreFromUri(uri)
+
+    
+    suspend fun restoreLastAutosave(): Boolean = agent.restoreFromCheckpoint()
 
     @Volatile
     private var active = false

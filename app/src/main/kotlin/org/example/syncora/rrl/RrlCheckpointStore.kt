@@ -97,6 +97,15 @@ class RrlCheckpointStore(
         }
     }
 
+    
+    suspend fun saveTo(uri: Uri, checkpoint: RrlAgentCheckpoint) {
+        withContext(Dispatchers.IO) {
+            val json = checkpoint.toJson().toString()
+            resolver.openOutputStream(uri, "wt")?.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+                ?: throw java.io.IOException("Could not open output stream for $uri")
+        }
+    }
+
     private fun readCheckpoint(uri: Uri): RrlAgentCheckpoint? {
         val text = resolver.openInputStream(uri)?.use { input ->
             BufferedReader(InputStreamReader(input)).readText()

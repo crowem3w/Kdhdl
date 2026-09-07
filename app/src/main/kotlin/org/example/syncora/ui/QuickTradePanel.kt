@@ -256,6 +256,16 @@ class QuickTradePanel @JvmOverloads constructor(
         agentStatePanel.reset()
     }
 
+    /** Tap on the checkpoint icon/label in the right-hand column: export or import per current mode. */
+    var onCheckpointAction: ((AgentStatePanelView.CheckpointAction) -> Unit)?
+        get() = agentStatePanel.onCheckpointAction
+        set(value) { agentStatePanel.onCheckpointAction = value }
+
+    /** Long-press on the checkpoint control while in Import mode: restore the last autosave. */
+    var onRestoreLastAutosave: (() -> Unit)?
+        get() = agentStatePanel.onRestoreLastAutosave
+        set(value) { agentStatePanel.onRestoreLastAutosave = value }
+
     private fun buildTwoColumnBody(): View {
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL

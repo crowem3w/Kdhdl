@@ -17,6 +17,7 @@ import org.example.syncora.bitget.Timeframe
 import org.example.syncora.bitget.TradingChartPipeline
 import org.example.syncora.log.AppLog
 import org.example.syncora.log.LogLevel
+import org.example.syncora.rrl.RrlCheckpointStore
 import org.example.syncora.rrl.RrlDataPipeline
 
 class SyncoraApplication : Application() {
@@ -75,6 +76,10 @@ class SyncoraApplication : Application() {
         StopLossGuard(credentialsStore = liveCredentialsStore, riskSettingsStore = riskSettingsStore)
     }
 
+    val rrlCheckpointStore: RrlCheckpointStore by lazy {
+        RrlCheckpointStore(applicationContext, checkpointKey = "BTCUSDT")
+    }
+
     val rrlPipeline: RrlDataPipeline by lazy {
         RrlDataPipeline(
             symbol = "BTCUSDT",
@@ -83,6 +88,7 @@ class SyncoraApplication : Application() {
             depthPipeline = depthPipeline,
             tradeSocket = tradeSocket,
             feeRateCredentialsProvider = { liveCredentialsStore.load() },
+            checkpointStore = rrlCheckpointStore,
         )
     }
 
