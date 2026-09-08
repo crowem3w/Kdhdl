@@ -624,6 +624,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupQuickTradePanel() {
+        lifecycleScope.launch {
+            val restored = rrlPipeline.restoreLastAutosave()
+            if (restored) {
+                Toast.makeText(this@MainActivity, "Resumed agent from last session", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         quickTradePanel.bind(
             QuickTradePanel.Callbacks(
                 onOpenPosition = { side, sizeUsdt, leverage, orderType, limitPrice, takeProfitPrice, stopLossPrice ->
