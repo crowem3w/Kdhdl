@@ -131,7 +131,7 @@ class AgentStatePanelView @JvmOverloads constructor(
             isFocusable = true
         }
         checkpointIcon = ImageView(context).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(16), dp(16)).apply { marginEnd = dp(6) }
+            layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(6) }
         }
         checkpointLabel = TextView(context).apply {
             textSize = 12f
