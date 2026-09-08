@@ -54,6 +54,19 @@ class AgentStatePanelView @JvmOverloads constructor(
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
+    /** Which action a tap on the checkpoint control currently performs. */
+    enum class CheckpointAction { EXPORT, IMPORT }
+
+    private var checkpointMode = CheckpointAction.EXPORT
+    private lateinit var checkpointIcon: ImageView
+    private lateinit var checkpointLabel: TextView
+
+    /** Tap on the icon/label: export the current checkpoint, or open a picker to import one. */
+    var onCheckpointAction: ((CheckpointAction) -> Unit)? = null
+
+    /** Long-press while in Import mode: fall back to restoring the last autosaved checkpoint. */
+    var onRestoreLastAutosave: (() -> Unit)? = null
+
     init {
         orientation = VERTICAL
         setPadding(dp(8), dp(10), dp(14), dp(14))
@@ -97,19 +110,6 @@ class AgentStatePanelView @JvmOverloads constructor(
         addView(buildLegend())
         addView(buildCheckpointRow())
     }
-
-    /** Which action a tap on the checkpoint control currently performs. */
-    enum class CheckpointAction { EXPORT, IMPORT }
-
-    private var checkpointMode = CheckpointAction.EXPORT
-    private lateinit var checkpointIcon: ImageView
-    private lateinit var checkpointLabel: TextView
-
-    /** Tap on the icon/label: export the current checkpoint, or open a picker to import one. */
-    var onCheckpointAction: ((CheckpointAction) -> Unit)? = null
-
-    /** Long-press while in Import mode: fall back to restoring the last autosaved checkpoint. */
-    var onRestoreLastAutosave: (() -> Unit)? = null
 
     /**
      * One-line, frameless export/import control anchored to the bottom of this (right-hand)
