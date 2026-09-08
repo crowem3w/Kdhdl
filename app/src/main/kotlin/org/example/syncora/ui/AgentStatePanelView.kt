@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.util.AttributeSet
 import android.view.Gravity
@@ -136,10 +137,14 @@ class AgentStatePanelView @JvmOverloads constructor(
         checkpointLabel = TextView(context).apply {
             textSize = 12f
             setTextColor(labelColor)
+            setTypeface(typeface, Typeface.BOLD)
         }
         actionArea.addView(checkpointIcon)
         actionArea.addView(checkpointLabel)
-        actionArea.setOnClickListener { onCheckpointAction?.invoke(checkpointMode) }
+        actionArea.setOnClickListener {
+            checkpointLabel.setTypeface(checkpointLabel.typeface, Typeface.NORMAL)
+            onCheckpointAction?.invoke(checkpointMode)
+        }
         actionArea.setOnLongClickListener {
             if (checkpointMode == CheckpointAction.IMPORT) {
                 onRestoreLastAutosave?.invoke()
@@ -149,7 +154,7 @@ class AgentStatePanelView @JvmOverloads constructor(
             }
         }
 
-        val spacer = View(context).apply {
+        val leftSpacer = View(context).apply {
             layoutParams = LinearLayout.LayoutParams(0, dp(1), 1f)
         }
 
@@ -169,14 +174,20 @@ class AgentStatePanelView @JvmOverloads constructor(
             }
         }
 
+        val rightSpacer = View(context).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(1), 1f)
+        }
+
         row.addView(actionArea)
-        row.addView(spacer)
+        row.addView(leftSpacer)
         row.addView(chevron)
+        row.addView(rightSpacer)
         updateCheckpointModeUi()
         return row
     }
 
     private fun updateCheckpointModeUi() {
+        checkpointLabel.setTypeface(checkpointLabel.typeface, Typeface.BOLD)
         when (checkpointMode) {
             CheckpointAction.EXPORT -> {
                 checkpointIcon.setImageResource(R.drawable.ic_checkpoint_export)
