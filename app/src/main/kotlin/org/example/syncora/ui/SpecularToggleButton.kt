@@ -235,46 +235,58 @@ half4 main(float2 fragCoord) {
     private fun labelFor(paused: Boolean) = if (paused) "Resume Agent" else "Pause Agent"
 
     private fun drawShine(canvas: Canvas, radius: Float, lineColor: Int) {
-        val shader = runtimeShader
-        if (shader != null) {
-            shader.setFloatUniform("uCenter", (rect.left + rect.right) / 2f, (rect.top + rect.bottom) / 2f)
-            shader.setFloatUniform("uHalfSize", rect.width() / 2f, rect.height() / 2f)
-            shader.setFloatUniform("uRadius", radius)
-            shader.setFloatUniform("uAngle", angle)
-            shader.setFloatUniform("uPx", density)
-            shader.setFloatUniform("uLineColor", Color.red(lineColor) / 255f, Color.green(lineColor) / 255f, Color.blue(lineColor) / 255f)
-            shader.setFloatUniform(
-                "uBaseColor",
-                Color.red(baseStrokeColor) / 255f,
-                Color.green(baseStrokeColor) / 255f,
-                Color.blue(baseStrokeColor) / 255f,
-            )
-            shader.setFloatUniform("uIntensity", bright)
-            shader.setFloatUniform("uShineSize", SHINE_SIZE_DEG * (PI.toFloat() / 180f))
-            shader.setFloatUniform("uShineFade", SHINE_FADE_DEG * (PI.toFloat() / 180f))
-            shader.setFloatUniform("uThickness", strokeWidthPx * 1.5f)
-            shader.setFloatUniform("uBaseWidth", density)
-
-            shaderFillPaint.shader = shader
-            canvas.drawRoundRect(rect, radius, radius, shaderFillPaint)
+        // Explicit SDK_INT gate (not just a null-check on `runtimeShader`) so Android Lint's
+        // NewApi detector can prove the RuntimeShader calls are unreachable below API 33 -
+        // a null-check alone doesn't satisfy its version-check flow analysis.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            drawShaderShine(canvas, radius, lineColor)
         } else {
-            // Fallback for API 30-32: a rotating SweepGradient stroke approximates the same rim
-            // highlight - two symmetric bright bands 180 degrees apart, matching the
-            // abs(dot(normal, light)) symmetry of the original shader.
-            val cx = (rect.left + rect.right) / 2f
-            val cy = (rect.top + rect.bottom) / 2f
-            val r = Color.red(lineColor); val g = Color.green(lineColor); val b = Color.blue(lineColor)
-            val dim = Color.argb((30 * bright).toInt().coerceIn(0, 255), r, g, b)
-            val hot = Color.argb((235 * bright).toInt().coerceIn(0, 255), r, g, b)
-            val sweep = SweepGradient(
-                cx, cy,
-                intArrayOf(dim, hot, dim, dim, hot, dim, dim),
-                floatArrayOf(0f, 0.05f, 0.12f, 0.5f, 0.55f, 0.62f, 1f),
-            )
-            sweep.setLocalMatrix(Matrix().apply { postRotate(Math.toDegrees(angle.toDouble()).toFloat(), cx, cy) })
-            sweepStrokePaint.shader = sweep
-            canvas.drawRoundRect(rect, radius, radius, sweepStrokePaint)
+            drawSweepGradientShine(canvas, radius, lineColor)
         }
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun drawShaderShine(canvas: Canvas, radius: Float, lineColor: Int) {
+        val shader = runtimeShader ?: return
+        shader.setFloatUniform("uCenter", (rect.left + rect.right) / 2f, (rect.top + rect.bottom) / 2f)
+        shader.setFloatUniform("uHalfSize", rect.width() / 2f, rect.height() / 2f)
+        shader.setFloatUniform("uRadius", radius)
+        shader.setFloatUniform("uAngle", angle)
+        shader.setFloatUniform("uPx", density)
+        shader.setFloatUniform("uLineColor", Color.red(lineColor) / 255f, Color.green(lineColor) / 255f, Color.blue(lineColor) / 255f)
+        shader.setFloatUniform(
+            "uBaseColor",
+            Color.red(baseStrokeColor) / 255f,
+            Color.green(baseStrokeColor) / 255f,
+            Color.blue(baseStrokeColor) / 255f,
+        )
+        shader.setFloatUniform("uIntensity", bright)
+        shader.setFloatUniform("uShineSize", SHINE_SIZE_DEG * (PI.toFloat() / 180f))
+        shader.setFloatUniform("uShineFade", SHINE_FADE_DEG * (PI.toFloat() / 180f))
+        shader.setFloatUniform("uThickness", strokeWidthPx * 1.5f)
+        shader.setFloatUniform("uBaseWidth", density)
+
+        shaderFillPaint.shader = shader
+        canvas.drawRoundRect(rect, radius, radius, shaderFillPaint)
+    }
+
+    // Fallback for API 30-32: a rotating SweepGradient stroke approximates the same rim
+    // highlight - two symmetric bright bands 180 degrees apart, matching the
+    // abs(dot(normal, light)) symmetry of the original shader.
+    private fun drawSweepGradientShine(canvas: Canvas, radius: Float, lineColor: Int) {
+        val cx = (rect.left + rect.right) / 2f
+        val cy = (rect.top + rect.bottom) / 2f
+        val r = Color.red(lineColor); val g = Color.green(lineColor); val b = Color.blue(lineColor)
+        val dim = Color.argb((30 * bright).toInt().coerceIn(0, 255), r, g, b)
+        val hot = Color.argb((235 * bright).toInt().coerceIn(0, 255), r, g, b)
+        val sweep = SweepGradient(
+            cx, cy,
+            intArrayOf(dim, hot, dim, dim, hot, dim, dim),
+            floatArrayOf(0f, 0.05f, 0.12f, 0.5f, 0.55f, 0.62f, 1f),
+        )
+        sweep.setLocalMatrix(Matrix().apply { postRotate(Math.toDegrees(angle.toDouble()).toFloat(), cx, cy) })
+        sweepStrokePaint.shader = sweep
+        canvas.drawRoundRect(rect, radius, radius, sweepStrokePaint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
