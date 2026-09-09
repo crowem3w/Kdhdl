@@ -20,6 +20,8 @@ import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import java.text.SimpleDateFormat
@@ -84,15 +86,27 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
         val SOURCE_ACCOUNT = Color.parseColor("#F5A623")
         val SOURCE_SYSTEM = Color.parseColor("#8A8D98")
 
+        const val HEADER_HEIGHT_DP = 44
+        val HEADER_TITLE_COLOR = Color.parseColor("#E8E9ED")
+        val ICON_INACTIVE_TINT = Color.parseColor("#8A96A3")
+        val ICON_ACTIVE_TINT = Color.parseColor("#B98CFF")
+        val ICON_ACTIVE_BG = Color.parseColor("#2A2233")
+
         private val TIME_FORMAT = SimpleDateFormat("HH:mm:ss", Locale.US)
     }
 
     private val dialogScope = CoroutineScope(Dispatchers.Main.immediate)
     private var collectJob: Job? = null
 
+    private lateinit var headerTitle: TextView
+    private lateinit var agentLogIcon: ImageView
     private lateinit var terminalOutput: TextView
     private lateinit var terminalScroll: ScrollView
     private lateinit var emptyStateText: TextView
+
+    
+    private var latestEntries: List<LogEntry> = emptyList()
+    private var showingAgentLogOnly = false
 
     private fun dp(value: Number): Int = (value.toFloat() * context.resources.displayMetrics.density).toInt()
 
@@ -110,7 +124,10 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
         super.onStart()
         collectJob?.cancel()
         collectJob = dialogScope.launch {
-            AppLog.entries.collect { entries -> renderEntries(entries) }
+            AppLog.entries.collect { entries ->
+                latestEntries = entries
+                renderVisibleEntries()
+            }
         }
     }
 
@@ -118,6 +135,7 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
         super.onStop()
         collectJob?.cancel()
         collectJob = null
+        showingAgentLogOnly = false
     }
 
     private fun applyWindowBlur() {
@@ -211,11 +229,98 @@ class LogPanelDialog(context: Context) : Dialog(context, R.style.TradingModalThe
             }
         }
 
-        card.addView(buildTerminalContent())
+        val cardContent = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+        cardContent.addView(buildHeader())
+        cardContent.addView(
+            buildTerminalContent(),
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
+        )
+        card.addView(cardContent)
 
         root.addView(glow)
         root.addView(card)
         return root
+    }
+
+    private fun buildHeader(): View {
+        val header = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), 0, dp(10), 0)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(HEADER_HEIGHT_DP))
+        }
+
+        headerTitle = TextView(context).apply {
+            text = "Logs"
+            setTextColor(HEADER_TITLE_COLOR)
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        agentLogIcon = ImageView(context).apply {
+            setImageResource(R.drawable.ic_agent_log)
+            setColorFilter(ICON_INACTIVE_TINT)
+            contentDescription = context.getString(R.string.agent_log_content_description)
+            val iconPaddingPx = dp(7)
+            setPadding(iconPaddingPx, iconPaddingPx, iconPaddingPx, iconPaddingPx)
+            isClickable = true
+            isFocusable = true
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dpf(8)
+                setColor(Color.TRANSPARENT)
+            }
+            layoutParams = LinearLayout.LayoutParams(dp(30), dp(30))
+            setOnClickListener { toggleAgentLogFilter() }
+        }
+
+        header.addView(headerTitle)
+        header.addView(agentLogIcon)
+        return header
+    }
+
+    private fun toggleAgentLogFilter() {
+        showingAgentLogOnly = !showingAgentLogOnly
+        updateHeaderForFilterState()
+        renderVisibleEntries()
+    }
+
+    private fun updateHeaderForFilterState() {
+        if (showingAgentLogOnly) {
+            headerTitle.text = "Agent Log"
+            agentLogIcon.setColorFilter(ICON_ACTIVE_TINT)
+            agentLogIcon.background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dpf(8)
+                setColor(ICON_ACTIVE_BG)
+            }
+        } else {
+            headerTitle.text = "Logs"
+            agentLogIcon.setColorFilter(ICON_INACTIVE_TINT)
+            agentLogIcon.background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dpf(8)
+                setColor(Color.TRANSPARENT)
+            }
+        }
+    }
+
+    private fun renderVisibleEntries() {
+        val visible = if (showingAgentLogOnly) {
+            latestEntries.filter { it.source == LogSource.AGENT }
+        } else {
+            latestEntries
+        }
+        emptyStateText.text = if (showingAgentLogOnly) {
+            "No agent activity yet. Agent events will stream here."
+        } else {
+            "No activity yet. Agent, trading, and account events will stream here."
+        }
+        renderEntries(visible)
     }
 
     private fun buildTerminalContent(): View {
