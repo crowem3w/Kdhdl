@@ -53,6 +53,7 @@ import org.example.syncora.perf.PerformanceMonitor
 import org.example.syncora.ui.AgentStatePanelView
 import org.example.syncora.ui.DrawingContextToolbar
 import org.example.syncora.ui.DrawingToolsPanel
+import org.example.syncora.ui.AgentLogDialog
 import org.example.syncora.ui.LogPanelDialog
 import org.example.syncora.ui.HistoricalDataDialog
 import org.example.syncora.ui.LiveTradePanel
@@ -140,6 +141,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var agentLogButton: ImageView
     private lateinit var drawingContextToolbar: DrawingContextToolbar
     private val logPanelDialog by lazy { LogPanelDialog(this) }
+    private val agentLogDialog by lazy { AgentLogDialog(this) }
     private val paperTradePanel by lazy { PaperTradePanel(this) }
     private val paperTradingAccountPanel by lazy { PaperTradingAccountPanel(this) }
     private val paperTradingHistoryPanel by lazy { PaperTradingHistoryPanel(this) }
@@ -225,6 +227,9 @@ class MainActivity : AppCompatActivity() {
         }
         agentLogButton = findViewById(R.id.agentLogButton)
         agentLogButton.visibility = View.GONE
+        agentLogButton.setOnClickListener {
+            agentLogDialog.show()
+        }
         logPanelDialog.setOnShowListener {
             agentLogButton.visibility = View.VISIBLE
         }
