@@ -4,8 +4,6 @@
     android:viewportWidth="24"
     android:viewportHeight="24"
     android:tint="#FFFFFF">
-    <!-- Plain white silhouette (candlestick glyph) per Android's status-bar
-         icon guidelines - the system masks/tints this, so no gradients. -->
     <path
         android:fillColor="#FFFFFF"
         android:pathData="M5.25,4H6.75V8H5.25z" />

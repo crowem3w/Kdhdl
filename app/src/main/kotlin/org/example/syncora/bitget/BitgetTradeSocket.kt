@@ -19,19 +19,13 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import org.example.syncora.log.AppLog
+import org.example.syncora.log.LogLevel
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
 
-/**
- * Public, read-only trade-print stream (Bitget's `trade` channel) - no
- * account/order data, no trading permissions required. This is what feeds
- * [QueuePositionTracker]: watching how much volume actually trades through
- * a price level is how a real exchange's FIFO matching decides when a
- * resting limit order at that level gets filled, and it's the same signal
- * this paper engine uses instead of guessing.
- */
 class BitgetTradeSocket(
     private val instId: String = "BTCUSDT",
     private val instType: String = "USDT-FUTURES",
@@ -115,8 +109,10 @@ class BitgetTradeSocket(
         }
 
         override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-            Log.w(TAG, "WebSocket failure: ${t.message}")
-            _lastError.value = NetworkErrorClassifier.friendlyMessage(t)
+            val diagnostic = NetworkErrorClassifier.diagnosticMessage(t, response)
+            Log.w(TAG, "WebSocket failure: $diagnostic")
+            AppLog.trading(LogLevel.ERROR, "$TAG failed to connect: $diagnostic")
+            _lastError.value = diagnostic
             heartbeatJob?.cancel()
             _state.value = SocketState.FAILED
             if (!intentionallyStopped) scheduleReconnect()

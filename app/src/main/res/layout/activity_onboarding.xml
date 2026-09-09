@@ -5,9 +5,6 @@
     android:layout_height="match_parent"
     android:background="#000000">
 
-    <!-- Focal point: a ~420x420dp morphing orb, centered, white core with a subtle teal
-         outer glow. It sits behind all text/UI, well below the top-left lockup and above
-         the bottom caption/button, so it reads as the visual anchor of the screen. -->
     <org.example.syncora.orb.OrbView
         android:id="@+id/orbView"
         android:layout_width="320dp"
@@ -25,10 +22,6 @@
         android:paddingTop="32dp"
         android:paddingBottom="32dp">
 
-        <!-- Top-left lockup: teal mark + uppercase wordmark, generously letter-spaced.
-             Positioned ~48dp from the left / ~56dp from the top: the parent container
-             already contributes 32dp of padding on each edge, so the extra 16dp start /
-             24dp top margins below make up the remaining offset. -->
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -62,13 +55,10 @@
 
         </LinearLayout>
 
-        <!-- Generous, deliberate space before the primary message. -->
         <Space
             android:layout_width="match_parent"
             android:layout_height="48dp" />
 
-        <!-- Headline: "Buy low. Sell high." in white, "Brag responsibly." immediately
-             below in the brand teal — same size and weight, left-aligned. -->
         <TextView
             android:id="@+id/headlineText"
             android:layout_width="match_parent"
@@ -86,7 +76,6 @@
             android:layout_width="match_parent"
             android:layout_height="24dp" />
 
-        <!-- Supporting copy: 70%-opacity white, regular weight. -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -99,15 +88,11 @@
             android:lineHeight="30sp"
             android:includeFontPadding="false" />
 
-        <!-- Flexible spacer: keeps the copy pinned to the top and the caption/button
-             pinned to the bottom, with the orb occupying the open space between. -->
         <View
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1" />
 
-        <!-- Bottom row: muted caption (with "clarity." in teal) on the left,
-             transparent teal-outlined next button on the right. -->
         <RelativeLayout
             android:layout_width="match_parent"
             android:layout_height="72dp">

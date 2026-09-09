@@ -10,22 +10,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.example.syncora.log.AppLog
+import org.example.syncora.log.LogLevel
 
-/**
- * Owns the polling loop against [BitgetTradingRestClient] and exposes
- * the **real** account's balance/positions as [StateFlow]s the UI can
- * collect, plus the actions to open/close positions with real funds.
- *
- * This is a structural mirror of [PaperTradingRepository] - same polling
- * cadence, same state shape, same underlying client class - but pinned to
- * [BitgetEnvironment.LIVE]. There is no Testnet/Demo toggle on this path:
- * every request this repository issues goes to Bitget's real matching
- * engine against the balance backing [credentialsStore]'s key. Paper
- * trading is the only supported way to route orders at Bitget's sandbox
- * (see [PaperTradingRepository]).
- * Reuses [PaperTradingConnectionState]/[PaperTradingResult] since those are
- * just generic "connection status" / "result" wrappers, not paper-specific.
- */
 class LiveTradingRepository(
     private val credentialsStore: BitgetLiveCredentialsStore,
     private val symbol: String = "BTCUSDT",
@@ -35,8 +22,6 @@ class LiveTradingRepository(
         const val POLL_INTERVAL_MS = 4_000L
     }
 
-    // Always reads the latest saved credentials, so a key entered after
-    // construction (or cleared from settings) takes effect on the next poll.
     private val client = BitgetTradingRestClient(
         environment = { BitgetEnvironment.LIVE },
         credentialsProvider = { credentialsStore.load() },
@@ -60,16 +45,38 @@ class LiveTradingRepository(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var pollJob: Job? = null
 
+    @Volatile
+    private var active = false
+
+    
+
+
+
+
+
+    fun setActive(enabled: Boolean) {
+        active = enabled
+        if (!enabled) stop()
+    }
+
+    fun isActive(): Boolean = active
+
     fun hasCredentials(): Boolean = credentialsStore.load() != null
 
     fun start() {
         stop()
         _userId.value = null
-        if (!hasCredentials()) {
+        if (!active) {
             _connectionState.value = PaperTradingConnectionState.NOT_CONFIGURED
             return
         }
+        if (!hasCredentials()) {
+            _connectionState.value = PaperTradingConnectionState.NOT_CONFIGURED
+            AppLog.account(LogLevel.WARNING, "Live account selected but no Bitget API key is saved yet")
+            return
+        }
         _connectionState.value = PaperTradingConnectionState.LOADING
+        AppLog.account(LogLevel.INFO, "Connecting to Bitget live account ($symbol)...")
         pollJob = scope.launch { pollLoop() }
     }
 
@@ -78,7 +85,6 @@ class LiveTradingRepository(
         pollJob = null
     }
 
-    /** Call after credentials are saved/cleared from settings to re-evaluate connection state. */
     fun onCredentialsChanged() {
         start()
     }
@@ -91,6 +97,7 @@ class LiveTradingRepository(
     }
 
     private suspend fun refreshOnce() {
+        val previousState = _connectionState.value
         try {
             val latestBalance = client.fetchAccountBalance()
             val latestPositions = client.fetchAllPositions()
@@ -98,37 +105,53 @@ class LiveTradingRepository(
             _positions.value = latestPositions
             _connectionState.value = PaperTradingConnectionState.LIVE
             _lastError.value = null
+            if (previousState != PaperTradingConnectionState.LIVE) {
+                AppLog.account(LogLevel.SUCCESS, "Bitget live account connected - balance and positions syncing")
+            }
             if (_userId.value == null) {
-                // UID doesn't change for a given key, so fetch it once per
-                // connection rather than on every 4s poll.
                 runCatching { client.fetchUserId() }.getOrNull()?.let { _userId.value = it }
             }
         } catch (e: BitgetNotAuthenticatedException) {
             _connectionState.value = PaperTradingConnectionState.NOT_CONFIGURED
             _userId.value = null
+            if (previousState != PaperTradingConnectionState.NOT_CONFIGURED) {
+                AppLog.account(LogLevel.WARNING, "Bitget live account not authenticated - check the saved API key")
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Refresh failed: ${e.message}")
             _connectionState.value = PaperTradingConnectionState.ERROR
             _lastError.value = friendlyErrorMessage(e)
+            if (previousState != PaperTradingConnectionState.ERROR) {
+                AppLog.account(LogLevel.ERROR, "Bitget live connectivity lost: ${friendlyErrorMessage(e)}")
+            }
         }
     }
 
-    /** Places a real, funded market order. Callers are expected to have already confirmed with the user. */
     suspend fun openPosition(side: PositionSide, sizeInBaseCoin: String, leverage: Int): PaperTradingResult<PlacedOrder> {
+        if (!active) {
+            return PaperTradingResult.Failure("Switch to Live trading mode to trade this account")
+        }
+        AppLog.trading(LogLevel.INFO, "Submitting LIVE $side order - $symbol size=$sizeInBaseCoin leverage=${leverage}x")
         return try {
             client.setLeverage(symbol, leverage)
             val order = client.openPosition(
                 OrderTicket(symbol = symbol, side = side, sizeInBaseCoin = sizeInBaseCoin, leverage = leverage),
             )
             refreshOnce()
+            AppLog.trading(LogLevel.SUCCESS, "LIVE $side order filled - $symbol size=$sizeInBaseCoin (order ${order.orderId})")
             PaperTradingResult.Success(order)
         } catch (e: Exception) {
             Log.w(TAG, "Open position failed: ${e.message}")
+            AppLog.trading(LogLevel.ERROR, "LIVE $side order rejected - $symbol: ${friendlyErrorMessage(e)}")
             PaperTradingResult.Failure(friendlyErrorMessage(e), e)
         }
     }
 
     suspend fun closePosition(position: PaperPosition): PaperTradingResult<PlacedOrder> {
+        if (!active) {
+            return PaperTradingResult.Failure("Switch to Live trading mode to trade this account")
+        }
+        AppLog.trading(LogLevel.INFO, "Closing LIVE position - ${position.symbol} ${position.side} size=${position.total}")
         return try {
             val order = client.closePosition(
                 symbol = position.symbol,
@@ -136,9 +159,11 @@ class LiveTradingRepository(
                 sizeInBaseCoin = position.total.toString(),
             )
             refreshOnce()
+            AppLog.trading(LogLevel.SUCCESS, "LIVE position closed - ${position.symbol} (order ${order.orderId})")
             PaperTradingResult.Success(order)
         } catch (e: Exception) {
             Log.w(TAG, "Close position failed: ${e.message}")
+            AppLog.trading(LogLevel.ERROR, "LIVE close failed - ${position.symbol}: ${friendlyErrorMessage(e)}")
             PaperTradingResult.Failure(friendlyErrorMessage(e), e)
         }
     }

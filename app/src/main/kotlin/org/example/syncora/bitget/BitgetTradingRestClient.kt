@@ -9,6 +9,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import org.example.syncora.log.AppLog
+import org.example.syncora.log.LogLevel
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
@@ -16,22 +18,17 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * Which Bitget matching engine a request should be routed to.
- *
- * - [LIVE]: the real matching engine. Orders are funded with real balance.
- * - [DEMO]: Bitget's Demo Trading / paper-trading sandbox
- *   (https://www.bitget.com/api-doc/contract/demotrading/restapi). Same
- *   endpoints, same request shape, same `productType` ("USDT-FUTURES" for
- *   USDT-margined contracts) - the *only* difference is a `paptrading: 1`
- *   header on every request, which is what actually does the routing.
- *
- * (The legacy v1 API used separate simulation-only product types instead of
- * a header - e.g. `sumcbl` for a USDT-margined simulated contract, or a
- * `S`-prefixed symbol/productType such as `SUSDT-FUTURES`. Bitget's current
- * v2 Demo Trading REST API - the one this client talks to - replaced that
- * scheme with the `paptrading` header below, so ordinary product types are
- * used for both environments.)
+ * Raised when Bitget's edge (or something sitting in front of it, e.g. a WAF/CDN
+ * geo-block) returns a non-2xx response, or a 2xx response whose body isn't the
+ * JSON envelope Bitget's API normally returns. Carries the raw HTTP status and a
+ * snippet of the body so callers/logs can tell "Bitget rejected this request" apart
+ * from "the API blocked/redirected this connection before it reached the API".
  */
+class BitgetHttpException(
+    val httpCode: Int,
+    bodySnippet: String,
+) : IOException("HTTP $httpCode from Bitget: ${bodySnippet.take(200)}")
+
 enum class BitgetEnvironment { LIVE, DEMO }
 
 class BitgetNotAuthenticatedException(environment: BitgetEnvironment) : IOException(
@@ -40,29 +37,6 @@ class BitgetNotAuthenticatedException(environment: BitgetEnvironment) : IOExcept
 
 class BitgetApiException(val code: String, message: String) : IOException(message)
 
-/**
- * A single, configurable HTTP client/request wrapper for Bitget's v2 mix
- * (futures) trading REST endpoints, covering both the real matching engine
- * and Bitget's Demo Trading sandbox.
- *
- * Every request is:
- *  - Authenticated with the caller's API key/secret/passphrase via
- *    [BitgetRequestSigner] (HMAC-SHA256 of timestamp + method + path + body).
- *  - Dynamically routed to Demo Trading by appending the `paptrading: 1`
- *    header whenever [environment] currently reports [BitgetEnvironment.DEMO]
- *    - evaluated fresh on *every* request, not cached, so a runtime
- *      Live/Demo toggle (or switching which saved credentials are active)
- *      takes effect on the very next call without recreating this client.
- *  - Tagged with the configured [productType] (defaults to the standard
- *    USDT-margined futures type, "USDT-FUTURES") wherever Bitget's API
- *    requires one: fetching balances, fetching positions, and placing or
- *    closing orders.
- *
- * A stray `paptrading` header sent on a request meant for the live engine
- * (or omitted on one meant for Demo Trading) is exactly the kind of bug
- * that would silently route real money into the sandbox or vice versa, so
- * that header is applied in exactly one place: [applyAuthHeaders].
- */
 class BitgetTradingRestClient(
     private val environment: () -> BitgetEnvironment,
     private val credentialsProvider: () -> BitgetCredentials?,
@@ -99,14 +73,6 @@ class BitgetTradingRestClient(
         }
     }
 
-    /**
-     * Fetches the Bitget account's UID (User ID) - the numeric identifier
-     * Bitget shows on the account/API-key pages, distinct from the API key
-     * itself. `/api/v2/spot/account/info` is an account-level endpoint (not
-     * `mix`-specific), so the same call works for both [BitgetEnvironment.LIVE]
-     * and [BitgetEnvironment.DEMO] - a Demo API Key reports the UID of the
-     * demo account it was created under.
-     */
     suspend fun fetchUserId(): String? {
         val json = get("/api/v2/spot/account/info", "")
         val data = json.optJSONObject("data") ?: return null
@@ -140,11 +106,9 @@ class BitgetTradingRestClient(
             put("marginCoin", "USDT")
             put("leverage", leverage.toString())
         }
-        // Best-effort: some accounts reject redundant leverage changes; that's fine, ignore.
         runCatching { post(path, body) }
     }
 
-    /** Opens or adds to a position in [ticket.side] with a market order. */
     suspend fun openPosition(ticket: OrderTicket): PlacedOrder {
         val clientOrderId = "${orderIdPrefix()}-${System.currentTimeMillis()}"
         val body = JSONObject().apply {
@@ -154,7 +118,7 @@ class BitgetTradingRestClient(
             put("marginCoin", "USDT")
             put("size", ticket.sizeInBaseCoin)
             put("side", ticket.side.openOrderSide)
-            put("tradeSide", "open") // ignored by Bitget in one-way mode, required in hedge mode
+            put("tradeSide", "open")
             put("orderType", "market")
             put("clientOid", clientOrderId)
         }
@@ -166,7 +130,6 @@ class BitgetTradingRestClient(
         )
     }
 
-    /** Closes (all or part of) an existing position with a reduce-only market order. */
     suspend fun closePosition(symbol: String, side: PositionSide, sizeInBaseCoin: String, marginMode: String = "crossed"): PlacedOrder {
         val clientOrderId = "${orderIdPrefix()}-close-${System.currentTimeMillis()}"
         val body = JSONObject().apply {
@@ -189,23 +152,6 @@ class BitgetTradingRestClient(
         )
     }
 
-    /**
-     * Places (or replaces) a resting **position** stop-loss trigger order
-     * directly on Bitget's book - `/api/v2/mix/order/place-pos-tpsl`.
-     *
-     * This is a position-level TP/SL, not a normal limit order: Bitget's own
-     * matching engine watches [triggerPrice] against the live mark price and
-     * fires a reduce-only market close the instant it's crossed. That's what
-     * makes it safe to use as a dead-man's switch (design doc §2.2/§5) - the
-     * order lives on the exchange, so it still protects the position even if
-     * this app's process (and its foreground service) gets killed.
-     *
-     * `executePrice = "0"` tells Bitget to close at market once triggered,
-     * rather than resting a limit order that could fail to fill in a fast
-     * move - for a safety stop, guaranteed execution matters more than
-     * avoiding slippage. `triggerType = "mark_price"` avoids false triggers
-     * from a brief wick in the last-traded price.
-     */
     suspend fun placeStopLoss(
         symbol: String,
         holdSide: PositionSide,
@@ -219,7 +165,7 @@ class BitgetTradingRestClient(
             put("planType", "loss_plan")
             put("triggerPrice", triggerPrice)
             put("triggerType", "mark_price")
-            put("executePrice", "0") // 0 = execute at market once triggered
+            put("executePrice", "0")
             put("holdSide", holdSide.bitgetHoldSide)
             put("size", sizeInBaseCoin)
         }
@@ -228,13 +174,6 @@ class BitgetTradingRestClient(
         return data.optString("orderId")
     }
 
-    /**
-     * Lists resting stop-loss trigger orders for [symbol] -
-     * `/api/v2/mix/order/orders-plan-pending` filtered to `planType=loss_plan`.
-     * Used by [StopLossGuard] to check whether a position already has a live
-     * exchange-side stop before placing another one (Bitget doesn't dedupe
-     * these for you - placing twice results in two resting stops).
-     */
     suspend fun fetchPendingStopLossOrders(symbol: String): List<StopLossOrder> {
         val path = "/api/v2/mix/order/orders-plan-pending"
         val query = "symbol=$symbol&productType=$productType&planType=loss_plan"
@@ -261,7 +200,6 @@ class BitgetTradingRestClient(
         }
     }
 
-    /** Cancels a resting stop-loss trigger order - `/api/v2/mix/order/cancel-plan-order`. */
     suspend fun cancelStopLoss(symbol: String, orderId: String) {
         val body = JSONObject().apply {
             put("marginCoin", "USDT")
@@ -270,9 +208,6 @@ class BitgetTradingRestClient(
             put("orderId", orderId)
             put("planType", "loss_plan")
         }
-        // Best-effort: if it already triggered or was manually cancelled on the
-        // exchange side, cancelling again just errors - either way there's
-        // nothing left to protect against, so it's safe to ignore.
         runCatching { post("/api/v2/mix/order/cancel-plan-order", body) }
     }
 
@@ -280,7 +215,7 @@ class BitgetTradingRestClient(
 
     private fun parsePosition(row: JSONObject): PaperPosition? {
         val total = row.optString("total", "0").toDoubleOrNull() ?: 0.0
-        if (total <= 0.0) return null // Bitget returns zeroed rows for closed sides; skip them.
+        if (total <= 0.0) return null
         return PaperPosition(
             symbol = row.optString("symbol"),
             side = PositionSide.fromHoldSide(row.optString("holdSide")),
@@ -306,7 +241,8 @@ class BitgetTradingRestClient(
             .applyAuthHeaders(credentials, timestamp, sign)
             .build()
 
-        return parseResponse(executeAsync(request))
+        val (httpCode, body) = executeAsync(request)
+        return parseResponse(httpCode, body)
     }
 
     private suspend fun post(path: String, body: JSONObject): JSONObject {
@@ -321,18 +257,10 @@ class BitgetTradingRestClient(
             .applyAuthHeaders(credentials, timestamp, sign)
             .build()
 
-        return parseResponse(executeAsync(request))
+        val (httpCode, responseBody) = executeAsync(request)
+        return parseResponse(httpCode, responseBody)
     }
 
-    /**
-     * Applies auth headers to every request, and - the whole point of this
-     * class - dynamically appends `paptrading: 1` when [environment]
-     * currently resolves to [BitgetEnvironment.DEMO]. [environment] is
-     * re-evaluated on every call rather than captured once at construction
-     * time, so this client stays correct even when demo mode is toggled
-     * at runtime (e.g. a Mainnet/Testnet switch in the UI) without needing
-     * a new client instance.
-     */
     private fun Request.Builder.applyAuthHeaders(credentials: BitgetCredentials, timestamp: String, sign: String): Request.Builder {
         val builder = header("ACCESS-KEY", credentials.apiKey)
             .header("ACCESS-SIGN", sign)
@@ -341,43 +269,68 @@ class BitgetTradingRestClient(
             .header("Content-Type", JSON_MEDIA_TYPE)
             .header("locale", "en-US")
         return if (environment() == BitgetEnvironment.DEMO) {
-            builder.header("paptrading", "1") // routes this request to Bitget's demo/paper matching engine
+            builder.header("paptrading", "1")
         } else {
             builder
         }
     }
 
-    private fun parseResponse(body: String): JSONObject {
-        val json = JSONObject(body)
+    private fun parseResponse(httpCode: Int, body: String): JSONObject {
+        val json = try {
+            JSONObject(body)
+        } catch (e: org.json.JSONException) {
+            // A non-JSON 2xx body almost always means something between us and Bitget
+            // (WAF, CDN, captive portal, ISP-level block page) intercepted the request
+            // rather than Bitget's API itself rejecting it.
+            val wrapped = BitgetHttpException(httpCode, body)
+            AppLog.trading(LogLevel.ERROR, "Bitget response wasn't valid JSON (HTTP $httpCode): ${body.take(200)}")
+            throw wrapped
+        }
         val code = json.optString("code")
         if (code != "00000") {
+            AppLog.trading(LogLevel.ERROR, "Bitget API error $code: ${json.optString("msg")}")
             throw BitgetApiException(code, json.optString("msg", "Unknown Bitget error"))
         }
         return json
     }
 
-    private suspend fun executeAsync(request: Request): String =
+    private suspend fun executeAsync(request: Request): Pair<Int, String> =
         suspendCancellableCoroutine { continuation ->
             val call = httpClient.newCall(request)
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
                     Log.w(TAG, "Trading request failed: ${e.message}")
+                    AppLog.trading(LogLevel.ERROR, "Trading request failed before a response arrived: ${e.message ?: e::class.java.simpleName}")
                     continuation.resumeWithException(e)
                 }
 
                 override fun onResponse(call: Call, response: Response) {
                     response.use {
                         val text = it.body?.string()
-                        if (text == null) {
+                        if (!it.isSuccessful) {
+                            val snippet = text.orEmpty()
+                            Log.w(TAG, "Trading request returned HTTP ${it.code}: ${snippet.take(200)}")
+                            AppLog.trading(
+                                LogLevel.ERROR,
+                                "HTTP ${it.code} from ${request.url.encodedPath} — ${geoBlockHint(it.code)}${snippet.take(200)}",
+                            )
+                            continuation.resumeWithException(BitgetHttpException(it.code, snippet))
+                        } else if (text == null) {
                             continuation.resumeWithException(IOException("Empty response body (HTTP ${it.code})"))
                         } else {
-                            // Bitget returns 200 with an error `code` in the JSON payload for most
-                            // API errors, so we parse the body even on non-2xx HTTP responses.
-                            continuation.resume(text)
+                            continuation.resume(it.code to text)
                         }
                     }
                 }
             })
         }
+
+    /** Short, non-alarmist hint for the log panel when a status code commonly indicates a network-level block rather than an API error. */
+    private fun geoBlockHint(httpCode: Int): String = when (httpCode) {
+        403, 451 -> "possible IP/region restriction — "
+        429 -> "rate limited — "
+        503 -> "upstream/WAF unavailable — "
+        else -> ""
+    }
 }

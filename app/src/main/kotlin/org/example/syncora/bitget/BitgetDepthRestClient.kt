@@ -6,6 +6,8 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.example.syncora.log.AppLog
+import org.example.syncora.log.LogLevel
 import org.json.JSONObject
 import java.io.IOException
 import kotlin.coroutines.resume
@@ -60,6 +62,7 @@ class BitgetDepthRestClient(
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
                     Log.w(TAG, "REST aggregated depth request failed: ${e.message}")
+                    AppLog.trading(LogLevel.ERROR, "Depth fetch failed before a response arrived: ${e.message ?: e::class.java.simpleName}")
                     continuation.resumeWithException(e)
                 }
 
@@ -67,6 +70,8 @@ class BitgetDepthRestClient(
                     response.use {
                         val text = it.body?.string()
                         if (!it.isSuccessful || text == null) {
+                            val hint = if (it.code == 403 || it.code == 451) "possible IP/region restriction — " else ""
+                            AppLog.trading(LogLevel.ERROR, "HTTP ${it.code} fetching depth — ${hint}${text.orEmpty().take(200)}")
                             continuation.resumeWithException(
                                 IOException("HTTP ${it.code} fetching aggregated depth")
                             )

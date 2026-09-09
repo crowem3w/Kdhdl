@@ -12,15 +12,6 @@ import android.graphics.drawable.Drawable
 import android.view.View
 import kotlin.math.roundToInt
 
-/**
- * A "pressed-in" / concave neumorphic frame, the inverse of [NeumorphicPillDrawable]'s raised
- * pill. Instead of a convex surface catching a highlight on one edge and casting a shadow on the
- * other, this carves an indented well: a dark inner shadow on the light-facing edge and a soft
- * highlight on the opposite edge, so the icon reads as sunk into the surface.
- *
- * Intended for small icon-only controls (e.g. the double-chevron timeframe-expand button and the
- * drawing tools button) that only need this framing while selected/active.
- */
 class NeumorphicInsetFrameDrawable(
     private val density: Float,
     var selected: Boolean = false,
@@ -116,7 +107,6 @@ class NeumorphicInsetFrameDrawable(
     }
 
     override fun setAlpha(alpha: Int) {
-        // No-op: opacity is controlled per-layer via the paints above.
     }
 
     override fun setColorFilter(colorFilter: ColorFilter?) {

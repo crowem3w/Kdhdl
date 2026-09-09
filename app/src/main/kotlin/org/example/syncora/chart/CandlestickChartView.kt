@@ -345,32 +345,6 @@ class CandlestickChartView @JvmOverloads constructor(
     }
     private val bullVolumePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bullColor; alpha = 140 }
     private val bearVolumePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bearColor; alpha = 140 }
-
-    private val bollingerColor = Color.parseColor("#FFB800")
-    private val bollingerBandWidthPx = dp(1.1f)
-    private val bollingerMidWidthPx = dp(1f)
-    private val bollingerUpperLowerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = bollingerColor
-        style = Paint.Style.STROKE
-        strokeWidth = bollingerBandWidthPx
-        alpha = 200
-    }
-    private val bollingerMidPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = bollingerColor
-        style = Paint.Style.STROKE
-        strokeWidth = bollingerMidWidthPx
-        alpha = 140
-        pathEffect = android.graphics.DashPathEffect(floatArrayOf(dp(3f), dp(3f)), 0f)
-    }
-    private val bollingerFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = bollingerColor
-        style = Paint.Style.FILL
-        alpha = 18
-    }
-    private val bollingerUpperPath = android.graphics.Path()
-    private val bollingerLowerPath = android.graphics.Path()
-    private val bollingerMidPath = android.graphics.Path()
-    private val bollingerFillPath = android.graphics.Path()
     private val skeletonBodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = skeletonBodyColor
         style = Paint.Style.FILL
@@ -434,47 +408,6 @@ class CandlestickChartView @JvmOverloads constructor(
 
     private var priceRangeOverride: ChartPriceRange? = null
 
-    // ---- Bollinger Bands ----
-
-    private var bollingerEnabled = false
-    private var bollingerPeriod = BollingerBands.DEFAULT_PERIOD
-    private var bollingerStdDevMultiplier = BollingerBands.DEFAULT_STD_DEV_MULTIPLIER
-    private var bollingerPoints: List<BollingerBands.Point?> = emptyList()
-    private var bollingerPointsStaleFor: List<Kline>? = null
-
-    fun isBollingerBandsEnabled(): Boolean = bollingerEnabled
-
-    fun bollingerBandsPeriod(): Int = bollingerPeriod
-
-    fun bollingerBandsStdDevMultiplier(): Double = bollingerStdDevMultiplier
-
-    fun setBollingerBandsEnabled(enabled: Boolean) {
-        if (bollingerEnabled == enabled) return
-        bollingerEnabled = enabled
-        invalidate()
-    }
-
-    /** Updates the Bollinger Bands period/multiplier. Forces a recompute even if enabled is unchanged. */
-    fun setBollingerBandsSettings(period: Int, stdDevMultiplier: Double) {
-        val clampedPeriod = period.coerceIn(BollingerBands.MIN_PERIOD, BollingerBands.MAX_PERIOD)
-        val clampedMultiplier = stdDevMultiplier.coerceIn(
-            BollingerBands.MIN_STD_DEV_MULTIPLIER,
-            BollingerBands.MAX_STD_DEV_MULTIPLIER,
-        )
-        if (bollingerPeriod == clampedPeriod && bollingerStdDevMultiplier == clampedMultiplier) return
-        bollingerPeriod = clampedPeriod
-        bollingerStdDevMultiplier = clampedMultiplier
-        bollingerPointsStaleFor = null
-        invalidate()
-    }
-
-    /** Recomputes [bollingerPoints] against the current [candles], caching by list identity. */
-    private fun ensureBollingerPointsUpToDate() {
-        if (bollingerPointsStaleFor === candles) return
-        bollingerPoints = BollingerBands.compute(candles, bollingerPeriod, bollingerStdDevMultiplier)
-        bollingerPointsStaleFor = candles
-    }
-
     private val minZoomSpanFraction = 0.05
     private val maxZoomSpanFraction = 8.0
 
@@ -499,19 +432,6 @@ class CandlestickChartView @JvmOverloads constructor(
             invalidate()
         }
 
-    /**
-     * The long-press crosshair now has three states instead of just
-     * on/off: [isCrosshairDragging] while a finger is actively positioning
-     * it (either right after the long-press that created it, or after
-     * re-grabbing it - see [handleCrosshairDragTouch]); [isCrosshairLocked]
-     * once that finger lifts, when it stays drawn at its last position
-     * instead of disappearing; and visible (see [isCrosshairVisible])
-     * whenever either of those is true. [crosshairIntersectionX]/[Y] track
-     * where it was actually drawn last (the vertical line snaps to the
-     * nearest candle, so this can differ slightly from the raw touch
-     * point) - that's what a re-grab tap is measured against, not the raw
-     * coordinates.
-     */
     private var isCrosshairDragging = false
     private var isCrosshairLocked = false
     private val isCrosshairVisible: Boolean get() = isCrosshairDragging || isCrosshairLocked
@@ -942,11 +862,6 @@ class CandlestickChartView @JvmOverloads constructor(
 
                 if (isPinching) return false
 
-                // A locked crosshair's own grab point is handled earlier, in
-                // handleCrosshairDragTouch's ACTION_DOWN check, which
-                // consumes the whole gesture before it ever reaches here -
-                // so any tap that does reach this point while locked is, by
-                // definition, a tap elsewhere, and closes it.
                 if (isCrosshairLocked) {
                     isCrosshairLocked = false
                     invalidate()
@@ -974,18 +889,6 @@ class CandlestickChartView @JvmOverloads constructor(
         },
     )
 
-    /**
-     * Handles re-grabbing and re-dragging an already-[isCrosshairLocked]
-     * crosshair, entirely separately from [panGestureDetector]: a DOWN
-     * landing within [handleGrabRadiusPx] of where the crosshair was last
-     * drawn (see [crosshairIntersectionX]/[Y]) starts a drag and consumes
-     * the whole gesture (so the chart doesn't also try to pan underneath
-     * it); everything else about that DOWN is left alone so a miss falls
-     * through to the normal tap/long-press/scroll handling in
-     * [panGestureDetector] - a plain tap there closes the crosshair (see
-     * `onSingleTapConfirmed`), a hold starts a fresh one (see
-     * `onLongPress`), and a drag pans the chart as usual.
-     */
     private fun handleCrosshairDragTouch(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             if (!isCrosshairLocked || isCrosshairDragging) return false
@@ -1020,10 +923,8 @@ class CandlestickChartView @JvmOverloads constructor(
         return true
     }
 
-    /** Notified on every touch delivered to this view, for the performance HUD's latency readout. */
     var touchListener: (() -> Unit)? = null
 
-    /** Notified after every completed draw pass with its wall-clock duration in nanoseconds. */
     var drawDurationListener: ((Long) -> Unit)? = null
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -1490,15 +1391,7 @@ class CandlestickChartView @JvmOverloads constructor(
         }
         if (maxVolume <= 0.0) maxVolume = 1.0
 
-        if (bollingerEnabled) ensureBollingerPointsUpToDate()
-        val visibleBollingerPoints: List<BollingerBands.Point?>? = if (bollingerEnabled) {
-            data.map { (globalIndex, _) -> bollingerPoints.getOrNull(globalIndex) }
-        } else {
-            null
-        }
-
-        val (minPrice, maxPrice) = priceRangeOverride
-            ?: ChartPriceRange.from(visibleCandles, visibleBollingerPoints)!!
+        val (minPrice, maxPrice) = priceRangeOverride ?: ChartPriceRange.from(visibleCandles)!!
 
         fun priceToY(price: Double): Float {
             val ratio = ((maxPrice - price) / (maxPrice - minPrice)).toFloat()
@@ -1521,10 +1414,6 @@ class CandlestickChartView @JvmOverloads constructor(
         mapLeftIndex = leftIndex
         mapSlotWidth = slotWidth
         mapValid = true
-
-        if (visibleBollingerPoints != null) {
-            drawBollingerBands(canvas, data, visibleBollingerPoints, leftIndex, slotWidth, ::priceToY)
-        }
 
         drawTimeAxis(canvas, data, timeRange, chartRight, chartBottom)
         val bodyWidth = max(bodyMinWidthPx, slotWidth * (1f - bodyGapRatio))
@@ -1693,9 +1582,6 @@ class CandlestickChartView @JvmOverloads constructor(
         val x = ((index - leftIndex) * slotWidth).toFloat()
         canvas.drawLine(x, 0f, x, chartBottom, crosshairLinePaint)
 
-        // Remembered so a later re-grab tap (see handleCrosshairDragTouch)
-        // is measured against where the lines were actually drawn, not the
-        // raw touch point that positioned them.
         crosshairIntersectionX = x
         crosshairIntersectionY = y
 
@@ -2016,76 +1902,6 @@ class CandlestickChartView @JvmOverloads constructor(
         }
         val upperBound = min(maxGridLineCount, max(minGridLineCount, pixelCap))
         return zoomScaled.coerceIn(minGridLineCount, upperBound)
-    }
-
-    /**
-     * Draws the Bollinger middle/upper/lower lines plus a faint fill between
-     * the upper and lower band. The wider that fill reads, the more volatile
-     * recent price action has been - no separate volatility panel needed.
-     *
-     * Gaps (nulls, from not enough lookback history yet) simply break the
-     * path rather than interpolating across them.
-     */
-    private fun drawBollingerBands(
-        canvas: Canvas,
-        data: List<Pair<Int, Kline>>,
-        points: List<BollingerBands.Point?>,
-        leftIndex: Double,
-        slotWidth: Float,
-        priceToY: (Double) -> Float,
-    ) {
-        bollingerUpperPath.rewind()
-        bollingerLowerPath.rewind()
-        bollingerMidPath.rewind()
-        bollingerFillPath.rewind()
-
-        var segmentOpen = false
-        var fillStartedAt = -1
-
-        fun closeFillSegment(uptoScreenIndex: Int) {
-            if (!segmentOpen || fillStartedAt < 0) return
-            // Walk back along the lower band to close the filled ribbon.
-            for (i in uptoScreenIndex downTo fillStartedAt) {
-                val point = points[i] ?: continue
-                val centerX = ((data[i].first - leftIndex) * slotWidth).toFloat()
-                bollingerFillPath.lineTo(centerX, priceToY(point.lower))
-            }
-            bollingerFillPath.close()
-            segmentOpen = false
-            fillStartedAt = -1
-        }
-
-        for (i in data.indices) {
-            val point = points[i]
-            if (point == null) {
-                closeFillSegment(i - 1)
-                continue
-            }
-            val centerX = ((data[i].first - leftIndex) * slotWidth).toFloat()
-            val upperY = priceToY(point.upper)
-            val lowerY = priceToY(point.lower)
-            val midY = priceToY(point.middle)
-
-            if (!segmentOpen) {
-                bollingerUpperPath.moveTo(centerX, upperY)
-                bollingerLowerPath.moveTo(centerX, lowerY)
-                bollingerMidPath.moveTo(centerX, midY)
-                bollingerFillPath.moveTo(centerX, upperY)
-                segmentOpen = true
-                fillStartedAt = i
-            } else {
-                bollingerUpperPath.lineTo(centerX, upperY)
-                bollingerLowerPath.lineTo(centerX, lowerY)
-                bollingerMidPath.lineTo(centerX, midY)
-                bollingerFillPath.lineTo(centerX, upperY)
-            }
-        }
-        closeFillSegment(data.lastIndex)
-
-        canvas.drawPath(bollingerFillPath, bollingerFillPaint)
-        canvas.drawPath(bollingerUpperPath, bollingerUpperLowerPaint)
-        canvas.drawPath(bollingerLowerPath, bollingerUpperLowerPaint)
-        canvas.drawPath(bollingerMidPath, bollingerMidPaint)
     }
 
     private fun drawPriceGrid(

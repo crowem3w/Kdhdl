@@ -249,15 +249,6 @@
                 android:layout_gravity="top|start"
                 android:visibility="gone" />
 
-            <!--
-                Always-on quick-trade drawer handle. Docked to the bottom-center of the
-                chart canvas itself (above the timeframe row / drawer, horizontally
-                centered on the full screen width) so it stays visible even while the
-                drawer is fully collapsed and GONE. Dragging it drives the same reveal
-                gesture as the drawer's own internal grab handle; it fades out once the
-                drawer is visible so the two handles never show at once (see
-                MainActivity#applyQuickTradeProgress).
-            -->
             <FrameLayout
                 android:id="@+id/quickTradeHandleIndicator"
                 android:layout_width="56dp"
@@ -275,6 +266,31 @@
                     android:background="@drawable/bg_quick_trade_handle_grip" />
 
             </FrameLayout>
+
+            <ImageView
+                android:id="@+id/logPanelButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="bottom|start"
+                android:layout_marginStart="24dp"
+                android:layout_marginBottom="48dp"
+                android:padding="9dp"
+                android:background="@drawable/bg_log_panel_button"
+                android:src="@drawable/ic_log_panel"
+                android:contentDescription="@string/log_panel_content_description" />
+
+            <ImageView
+                android:id="@+id/agentLogButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="bottom|start"
+                android:layout_marginStart="72dp"
+                android:layout_marginBottom="48dp"
+                android:padding="9dp"
+                android:background="@drawable/bg_log_panel_button"
+                android:src="@drawable/ic_agent_log"
+                android:contentDescription="@string/agent_log_content_description"
+                android:visibility="gone" />
 
         </FrameLayout>
 
@@ -330,15 +346,6 @@
             android:padding="9dp"
             android:src="@drawable/ic_drawing_pencil"
             android:contentDescription="@string/drawing_tools_content_description" />
-
-        <ImageView
-            android:id="@+id/indicatorsButton"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_marginStart="8dp"
-            android:padding="9dp"
-            android:src="@drawable/ic_indicators"
-            android:contentDescription="@string/indicators_content_description" />
     </LinearLayout>
 
 </org.example.syncora.ui.ScrollRevealContainer>

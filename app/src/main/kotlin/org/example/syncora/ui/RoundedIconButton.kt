@@ -9,14 +9,6 @@ import android.view.ViewOutlineProvider
 import androidx.appcompat.widget.AppCompatImageView
 import org.example.syncora.R
 
-/**
- * An [android.widget.ImageView] whose corners are clipped to a radius
- * expressed as a **percentage of the view's own size** (min of width/height)
- * rather than a fixed dp value, so the same rounding looks proportionate at
- * any icon size (e.g. `app:cornerRadiusPercent="0.15"` for a 15% radius).
- *
- * Defaults to 15% if not set via XML attribute.
- */
 class RoundedIconButton @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,

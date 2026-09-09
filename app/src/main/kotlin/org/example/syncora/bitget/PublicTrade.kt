@@ -1,6 +1,5 @@
 package org.example.syncora.bitget
 
-/** A single public trade print off Bitget's public trade stream - no account/order info, just what traded. */
 data class PublicTrade(
     val price: Double,
     val size: Double,

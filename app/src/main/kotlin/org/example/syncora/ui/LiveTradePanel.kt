@@ -26,16 +26,6 @@ import org.example.syncora.bitget.BitgetTradingRestClient
 import org.example.syncora.bitget.PaperTradingConnectionState
 import java.util.Locale
 
-/**
- * Self-contained "live trading" panel. Scoped to just the Live API Key &
- * Connection section - connecting an account is the only thing this screen
- * asks for. Distinct amber "LIVE" branding throughout so it can't be
- * mistaken for the paper trading screen at a glance.
- *
- * This view holds no state of its own beyond the credential fields - it
- * just renders whatever it's given and forwards user actions back out
- * through [Callbacks].
- */
 class LiveTradePanel @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -54,7 +44,7 @@ class LiveTradePanel @JvmOverloads constructor(
     private val bullColor = Color.parseColor("#26A69A")
     private val bearColor = Color.parseColor("#EF5350")
     private val fieldBackground = Color.parseColor("#131722")
-    private val liveAccentColor = Color.parseColor("#F0B90B") // amber - "this is real money", distinct from paper's teal
+    private val liveAccentColor = Color.parseColor("#F0B90B")
 
     private var callbacks: Callbacks? = null
     private var savedCredentials: BitgetCredentials? = null
@@ -62,7 +52,6 @@ class LiveTradePanel @JvmOverloads constructor(
     private var fieldsPrefilled = false
     private var credentialScope: CoroutineScope? = null
 
-    // ---- Live API Key section (the panel's upfront content) ----
     private lateinit var apiKeyField: EditText
     private lateinit var secretField: EditText
     private lateinit var passphraseField: EditText
@@ -86,9 +75,6 @@ class LiveTradePanel @JvmOverloads constructor(
         }
         setPadding(dp(14), dp(12), dp(14), dp(14))
 
-        // The Live API Key & Connection section is the panel's only
-        // content - connecting an account is the only thing this screen
-        // asks for.
         addView(buildCredentialsSection())
     }
 
@@ -133,14 +119,6 @@ class LiveTradePanel @JvmOverloads constructor(
         )
     }
 
-    /**
-     * The Live API Key & Connection section. This is the panel's entire
-     * content (see init{}), scoped to exactly two things: the API
-     * Key/Secret/Passphrase, and the API Connection (exchange) they'll be
-     * used against. Always talks to Bitget's real matching engine - there is
-     * no Testnet/Demo toggle here, that's what the separate Paper Trading
-     * mode is for (see [BitgetEnvironment]).
-     */
     private fun buildCredentialsSection(): View {
         val container = LinearLayout(context).apply {
             orientation = VERTICAL
@@ -197,8 +175,6 @@ class LiveTradePanel @JvmOverloads constructor(
         container.addView(spacer(12))
         container.addView(sectionHeader("API Connection"))
 
-        // Exchange selector - a single supported exchange today, presented
-        // as a dropdown so this reads naturally if more are added later.
         val exchangeSpinner = Spinner(context).apply {
             adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, listOf("Bitget"))
         }
@@ -208,7 +184,6 @@ class LiveTradePanel @JvmOverloads constructor(
         container.addView(buildDivider())
         container.addView(spacer(10))
 
-        // Connection status indicator.
         credStatusDot = View(context).apply {
             layoutParams = LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(7) }
         }
@@ -355,7 +330,6 @@ class LiveTradePanel @JvmOverloads constructor(
         callbacks?.onCredentialsSubmitted?.invoke(credentials)
     }
 
-
     private fun sectionHeader(text: String): TextView = TextView(context).apply {
         this.text = text.uppercase(Locale.US)
         textSize = 11f
@@ -378,7 +352,6 @@ class LiveTradePanel @JvmOverloads constructor(
         addView(control)
     }
 
-    /** An EditText plus an eye-icon visibility toggle, wrapped in one row. Secrets start masked; the API Key does not need to. */
     private fun secureField(hint: String, initialValue: String, maskByDefault: Boolean): Pair<EditText, View> {
         val field = fieldEditTextForDialog(hint).apply {
             setText(initialValue)

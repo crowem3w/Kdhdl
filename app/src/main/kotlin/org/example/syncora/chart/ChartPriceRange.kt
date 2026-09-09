@@ -6,7 +6,7 @@ data class ChartPriceRange(val minPrice: Double, val maxPrice: Double) {
     companion object {
         private const val PADDING_FRACTION = 0.08
 
-        fun from(candles: List<Kline>, bollingerPoints: List<BollingerBands.Point?>? = null): ChartPriceRange? {
+        fun from(candles: List<Kline>): ChartPriceRange? {
             if (candles.isEmpty()) return null
 
             var minPrice = Double.MAX_VALUE
@@ -14,12 +14,6 @@ data class ChartPriceRange(val minPrice: Double, val maxPrice: Double) {
             for (c in candles) {
                 if (c.low < minPrice) minPrice = c.low
                 if (c.high > maxPrice) maxPrice = c.high
-            }
-            bollingerPoints?.forEach { point ->
-                if (point != null) {
-                    if (point.upper > maxPrice) maxPrice = point.upper
-                    if (point.lower < minPrice) minPrice = point.lower
-                }
             }
             if (minPrice == maxPrice) {
 
