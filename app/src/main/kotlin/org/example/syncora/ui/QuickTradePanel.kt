@@ -266,6 +266,16 @@ class QuickTradePanel @JvmOverloads constructor(
         get() = agentStatePanel.onRestoreLastAutosave
         set(value) { agentStatePanel.onRestoreLastAutosave = value }
 
+    /** Tap on the Pause/Resume Agent button in the right-hand column. */
+    var onPauseResumeAgent: (() -> Unit)?
+        get() = agentStatePanel.onPauseResumeAgent
+        set(value) { agentStatePanel.onPauseResumeAgent = value }
+
+    /** Reflects the agent's actual running state on the Pause/Resume button. */
+    fun setAgentPaused(paused: Boolean) {
+        agentStatePanel.setAgentPaused(paused)
+    }
+
     private fun buildTwoColumnBody(): View {
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL

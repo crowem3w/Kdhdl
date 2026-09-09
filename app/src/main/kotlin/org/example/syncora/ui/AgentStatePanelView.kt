@@ -68,6 +68,14 @@ class AgentStatePanelView @JvmOverloads constructor(
     /** Long-press while in Import mode: fall back to restoring the last autosaved checkpoint. */
     var onRestoreLastAutosave: (() -> Unit)? = null
 
+    private lateinit var pauseResumeButton: SpecularToggleButton
+
+    /** Tap on the Pause/Resume Agent button. The caller performs the actual pause/resume and
+     *  should then call [setAgentPaused] to reflect the outcome - this view never assumes it. */
+    var onPauseResumeAgent: (() -> Unit)?
+        get() = pauseResumeButton.onToggle
+        set(value) { pauseResumeButton.onToggle = value }
+
     init {
         orientation = VERTICAL
         setPadding(dp(8), dp(10), dp(14), dp(14))
@@ -110,6 +118,24 @@ class AgentStatePanelView @JvmOverloads constructor(
         )
         addView(buildLegend())
         addView(buildCheckpointRow())
+        addView(buildPauseResumeRow())
+    }
+
+    /** Reflects the agent's actual running state on the button (label + accent color). */
+    fun setAgentPaused(paused: Boolean) {
+        pauseResumeButton.isPaused = paused
+    }
+
+    /** Bottom-of-column control: pause or resume the RRL agent, with an animated specular rim. */
+    private fun buildPauseResumeRow(): View {
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(16), 0, 0)
+        }
+        pauseResumeButton = SpecularToggleButton(context)
+        row.addView(pauseResumeButton)
+        return row
     }
 
     /**

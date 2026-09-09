@@ -8,7 +8,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -72,21 +74,50 @@ class RrlDataPipeline(
     
     suspend fun restoreLastAutosave(): Boolean = agent.restoreFromCheckpoint()
 
+    /** Whether the current account mode (paper/live) wants the agent live-fed. Driven by AccountManager. */
     @Volatile
-    private var active = false
+    private var modeActive = false
 
-    
+    /** Manual override from the Pause/Resume Agent button, independent of account mode. */
+    @Volatile
+    private var manuallyPaused = false
 
+    private val _isPaused = MutableStateFlow(false)
 
+    /** True when the agent is manually paused, for the Pause/Resume Agent button to reflect. */
+    val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
 
-
-
+    /** Effective feed-through gate: on only when the account mode wants it *and* it isn't manually paused. */
+    private val active: Boolean
+        get() = modeActive && !manuallyPaused
 
     fun setActive(enabled: Boolean) {
-        active = enabled
+        modeActive = enabled
     }
 
     fun isActive(): Boolean = active
+
+    /** Pauses agent training/inference without touching account mode or resetting state. */
+    fun pause() {
+        if (manuallyPaused) return
+        manuallyPaused = true
+        _isPaused.value = true
+        AppLog.agent(LogLevel.INFO, "Agent paused")
+    }
+
+    /** Resumes agent training/inference after a manual pause. */
+    fun resume() {
+        if (!manuallyPaused) return
+        manuallyPaused = false
+        _isPaused.value = false
+        AppLog.agent(LogLevel.INFO, "Agent resumed")
+    }
+
+    /** Flips the manual pause state; returns the new paused value. */
+    fun togglePause(): Boolean {
+        if (manuallyPaused) resume() else pause()
+        return manuallyPaused
+    }
 
     
     val signal: StateFlow<RrlStepResult?> = agent.signal

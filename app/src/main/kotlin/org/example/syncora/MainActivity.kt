@@ -724,6 +724,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        quickTradePanel.onPauseResumeAgent = {
+            val nowPaused = rrlPipeline.togglePause()
+            Toast.makeText(
+                this@MainActivity,
+                if (nowPaused) "Agent paused" else "Agent resumed",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
@@ -734,6 +743,11 @@ class MainActivity : AppCompatActivity() {
                         .collect { (step, performance) ->
                             quickTradePanel.renderAgentState(step, performance)
                         }
+                }
+                launch {
+                    rrlPipeline.isPaused.collect { paused ->
+                        quickTradePanel.setAgentPaused(paused)
+                    }
                 }
             }
         }
