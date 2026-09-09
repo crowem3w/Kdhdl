@@ -53,6 +53,8 @@ internal object Matrix {
 
     fun tanh(vector: DoubleArray): DoubleArray = DoubleArray(vector.size) { kotlin.math.tanh(vector[it]) }
 
+    fun norm(vector: DoubleArray): Double = kotlin.math.sqrt(dot(vector, vector))
+
     fun identity(n: Int, diagonalValue: Double = 1.0): Array<DoubleArray> =
         Array(n) { i -> DoubleArray(n) { j -> if (i == j) diagonalValue else 0.0 } }
 }

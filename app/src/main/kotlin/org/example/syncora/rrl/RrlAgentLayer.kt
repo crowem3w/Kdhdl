@@ -315,7 +315,14 @@ class RrlAgentLayer(
         } else {
             AppLog.agent(
                 LogLevel.DEBUG,
-                "step position=${"%.3f".format(result.position)} reward=${"%.5f".format(result.reward)}",
+                "step pos=${"%.3f".format(result.position)} raw=${"%.3f".format(result.rawPosition)} " +
+                    "reward=${"%.5f".format(result.reward)} " +
+                    "(price=${"%.5f".format(result.priceReturn)} cost=${"%.5f".format(result.executionCost)} " +
+                    "funding=${"%.5f".format(result.fundingCarry)}) " +
+                    "exp=${"%.5f".format(result.expectedReturn)} util=${"%.5f".format(result.utility)} " +
+                    "IR=${"%.3f".format(result.informationRatio)} risk=${"%.3f".format(result.riskAppetite)} " +
+                    "|grad|=${"%.5f".format(result.gradientNorm)} |dw|=${"%.5f".format(result.weightUpdateNorm)} " +
+                    "|w|=${"%.3f".format(result.weightNorm)}",
             )
         }
     }

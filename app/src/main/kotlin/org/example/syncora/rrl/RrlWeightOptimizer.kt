@@ -29,6 +29,10 @@ class RrlWeightOptimizer(
         private set
 
     
+    var lastUpdateNorm: Double = 0.0
+        private set
+
+    
     private var precision: Array<DoubleArray> = Matrix.identity(dimension, 1.0 / ridgePenalty)
 
     
@@ -49,6 +53,7 @@ class RrlWeightOptimizer(
 
         
         weights = Matrix.add(weights, k)
+        lastUpdateNorm = Matrix.norm(k)
 
         
         val n = dimension
@@ -61,6 +66,7 @@ class RrlWeightOptimizer(
 
     fun reset() {
         weights = DoubleArray(dimension)
+        lastUpdateNorm = 0.0
         precision = Matrix.identity(dimension, 1.0 / ridgePenalty)
     }
 

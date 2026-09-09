@@ -50,6 +50,12 @@ data class RrlStepResult(
     val informationRatio: Double,
     
     val riskAppetite: Double,
+    
+    val gradientNorm: Double,
+    
+    val weightUpdateNorm: Double,
+    
+    val weightNorm: Double,
 )
 
 

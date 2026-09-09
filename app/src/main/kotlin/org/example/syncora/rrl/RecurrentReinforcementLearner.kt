@@ -163,6 +163,9 @@ class RecurrentReinforcementLearner(private val config: RrlAgentConfig) {
             utility = utility,
             informationRatio = informationRatio,
             riskAppetite = riskAppetite,
+            gradientNorm = Matrix.norm(gradient),
+            weightUpdateNorm = optimizer.lastUpdateNorm,
+            weightNorm = Matrix.norm(optimizer.weights),
         )
     }
 
