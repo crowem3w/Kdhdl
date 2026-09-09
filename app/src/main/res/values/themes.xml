@@ -16,15 +16,6 @@
         <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
     </style>
 
-    <style name="BatteryDialogTheme" parent="Theme.AppCompat.Dialog.Alert">
-        <item name="android:windowBackground">@drawable/bg_battery_dialog</item>
-        <item name="android:windowMinWidthMajor">88%</item>
-        <item name="android:windowMinWidthMinor">88%</item>
-        <item name="android:textColorPrimary">#FFFFFF</item>
-        <item name="android:textColorSecondary">#B8C0C8</item>
-        <item name="colorAccent">#26C7C3</item>
-    </style>
-
     <style name="TradingModalTheme" parent="Theme.AppCompat.Dialog">
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowIsFloating">false</item>

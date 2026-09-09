@@ -22,34 +22,45 @@ import android.widget.ScrollView
 import android.widget.TextView
 import org.example.syncora.R
 
+/**
+ * Full-screen modal launched from the § header button.
+ *
+ * First shows two vertically stacked options - Paper Trading / Live Trading
+ * - then swaps its content area in place when one is picked. The app
+ * content behind the modal is real-time blurred on Android 12+ (where the
+ * device/user has cross-window blur enabled); on older devices it falls
+ * back to a plain dark scrim, since window blur-behind isn't available
+ * pre-S. The modal surface itself uses a translucent, bordered "glass" card
+ * to read as dark-mode glassmorphism either way.
+ */
 class TradingModeDialog(
     context: Context,
     private val paperAccountContent: PaperTradingAccountPanel,
     private val paperHistoryContent: View,
     private val liveTradingContent: View,
     private val onExportReport: () -> Unit,
-    
-    private val onSelectPaper: () -> Unit,
-    
-
-
-
-
-
-    private val onSelectLive: () -> Boolean,
 ) : Dialog(context, R.style.TradingModalTheme) {
 
     private enum class Screen { OPTIONS, PAPER_ACCOUNT, PAPER_HISTORY, LIVE }
 
     private companion object {
+        // Android has no native 0-100% "blurriness" scale, so these two
+        // knobs translate the requested percentages into concrete values:
 
+        // Card fill: charcoal-black at 75% opacity (25% see-through), which
+        // is what "blurriness" means for a flat glass panel - the more
+        // translucent it is, the more it reads as frosted glass rather than
+        // a solid card.
         const val CARD_FILL_OPACITY_PERCENT = 0.75f
-        val CARD_BASE_COLOR_RGB = Color.parseColor("#1C1C1E")
+        val CARD_BASE_COLOR_RGB = Color.parseColor("#1C1C1E") // charcoal-black
 
+        // Backdrop (whole homepage/chart) blur radius behind the window,
+        // Android 12+ only. We treat 100dp as a "fully blurred" ceiling and
+        // scale the requested percentage against it.
         const val BACKDROP_BLUR_PERCENT = 0.80f
         const val MAX_BACKDROP_BLUR_DP = 100
 
-        const val CARD_CORNER_RADIUS_DP = 12
+        const val CARD_CORNER_RADIUS_DP = 14
     }
 
     private val cardColor = Color.argb(
@@ -102,6 +113,8 @@ class TradingModeDialog(
         }
     }
 
+    // ---- Root scaffold: full-screen scrim + centered glass card ----
+
     private fun buildRootView(): View {
         rootView = FrameLayout(context).apply {
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
@@ -112,6 +125,8 @@ class TradingModeDialog(
 
         val cornerRadiusPx = dp(CARD_CORNER_RADIUS_DP).toFloat()
 
+        // Outer shell: clips all children (content + highlight strip) to the
+        // same rounded rect so nothing pokes past the glass edge.
         val cardOuter = FrameLayout(context).apply {
             background = GradientDrawable().apply {
                 cornerRadius = cornerRadiusPx
@@ -125,7 +140,7 @@ class TradingModeDialog(
             clipToOutline = true
             elevation = dp(16).toFloat()
             isClickable = true
-            setOnClickListener {  }
+            setOnClickListener { /* consume: don't dismiss when tapping inside the card */ }
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -150,6 +165,8 @@ class TradingModeDialog(
         contentContainer = FrameLayout(context)
         cardContent.addView(contentContainer)
 
+        // Thin gradient sheen along the top edge - the classic glassmorphism
+        // "light catching the rim of the glass" cue.
         val highlightStrip = View(context).apply {
             background = GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
@@ -210,19 +227,19 @@ class TradingModeDialog(
         return row
     }
 
+    /** Opens the dialog straight to the paper trading account screen, skipping the mode picker. */
     fun showPaperTradingScreen() {
-        onSelectPaper()
         showScreen(Screen.PAPER_ACCOUNT)
     }
 
+    /** Opens the dialog straight to the live trading order screen, skipping the mode picker. */
     fun showLiveTradingScreen() {
-        if (onSelectLive()) {
-            showScreen(Screen.LIVE)
-        }
+        showScreen(Screen.LIVE)
     }
 
     private var currentScreen: Screen = Screen.OPTIONS
 
+    /** Where the back chevron returns to from each screen - a shallow, one-level-deep back stack. */
     private fun backTargetFor(screen: Screen): Screen = when (screen) {
         Screen.PAPER_HISTORY -> Screen.PAPER_ACCOUNT
         else -> Screen.OPTIONS
@@ -255,6 +272,7 @@ class TradingModeDialog(
         }
     }
 
+    /** Wraps [content] in a fresh scroll container, detaching it from any previous parent first. */
     private fun scrollableCopy(content: View): View {
         (content.parent as? ViewGroup)?.removeView(content)
         return ScrollView(context).apply {
@@ -267,6 +285,8 @@ class TradingModeDialog(
         }
     }
 
+    // ---- Screen 1: mode picker ----
+
     private fun buildOptionsScreen(): View {
         val container = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
 
@@ -275,14 +295,14 @@ class TradingModeDialog(
             subtitle = "Practice with a free local account - no exchange required",
             iconRes = R.drawable.ic_mode_paper,
             tintIcon = true,
-            onClick = { showPaperTradingScreen() },
+            onClick = { showScreen(Screen.PAPER_ACCOUNT) },
         )
         val liveRow = buildOptionRow(
             title = "Live Trading",
             subtitle = "Trade with real funds",
             iconRes = R.drawable.ic_mode_live,
             tintIcon = true,
-            onClick = { showLiveTradingScreen() },
+            onClick = { showScreen(Screen.LIVE) },
         )
 
         container.addView(paperRow)
@@ -350,5 +370,7 @@ class TradingModeDialog(
         row.addView(chevron)
         return row
     }
+
+    // ---- Screen: blank/placeholder content (Live Trading) ----
 
 }

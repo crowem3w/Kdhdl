@@ -28,8 +28,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
-import org.example.syncora.account.AccountMode
-import org.example.syncora.account.AccountSelectionResult
 import org.example.syncora.bitget.ClosedPaperTrade
 import org.example.syncora.bitget.FeeRates
 import org.example.syncora.bitget.Kline
@@ -50,11 +48,10 @@ import org.example.syncora.chart.DrawingTool
 import org.example.syncora.onboarding.OnboardingActivity
 import org.example.syncora.onboarding.OnboardingPreferences
 import org.example.syncora.perf.PerformanceMonitor
-import org.example.syncora.ui.AgentStatePanelView
 import org.example.syncora.ui.DrawingContextToolbar
 import org.example.syncora.ui.DrawingToolsPanel
-import org.example.syncora.ui.LogPanelDialog
 import org.example.syncora.ui.HistoricalDataDialog
+import org.example.syncora.ui.IndicatorsPanel
 import org.example.syncora.ui.LiveTradePanel
 import org.example.syncora.ui.NeumorphicInsetFrameDrawable
 import org.example.syncora.ui.NeumorphicPillDrawable
@@ -75,43 +72,24 @@ import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
 
+    // Held at application scope so the pipeline survives activity recreation. The
+    // pipeline/live-poll/stop-loss-guard lifecycle itself is owned by
+    // MarketDataForegroundService now, not by this activity - see that class's kdoc
+    // and SyncoraApplication.ensureMarketDataStarted().
     private val app by lazy { application as SyncoraApplication }
     private val pipeline by lazy { app.pipeline }
     private val depthPipeline by lazy { app.depthPipeline }
     private val paperTradingRepository by lazy { app.paperTradingRepository }
     private val liveCredentialsStore by lazy { app.liveCredentialsStore }
     private val liveTradingRepository by lazy { app.liveTradingRepository }
-    private val accountManager by lazy { app.accountManager }
-    private val rrlPipeline by lazy { app.rrlPipeline }
 
+    // Android 13+ requires this permission for the foreground service's persistent
+    // status notification to actually be visible - the service still runs and
+    // still protects positions without it, the notification just won't show. Must
+    // be registered before the activity reaches STARTED, hence the property here
+    // rather than an inline call from onCreate().
     private val notificationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) {  }
-
-    private val exportCheckpointLauncher =
-        registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-            if (uri == null) return@registerForActivityResult
-            lifecycleScope.launch {
-                val success = rrlPipeline.exportCheckpoint(uri)
-                Toast.makeText(
-                    this@MainActivity,
-                    if (success) "Checkpoint exported" else "Export failed - see log panel",
-                    Toast.LENGTH_SHORT,
-                ).show()
-            }
-        }
-
-    private val importCheckpointLauncher =
-        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri == null) return@registerForActivityResult
-            lifecycleScope.launch {
-                val success = rrlPipeline.importCheckpoint(uri)
-                Toast.makeText(
-                    this@MainActivity,
-                    if (success) "Checkpoint imported" else "Import failed - file may not match current agent settings",
-                    Toast.LENGTH_LONG,
-                ).show()
-            }
-        }
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op either way */ }
 
     private lateinit var candleChart: CandlestickChartView
     private lateinit var depthHeatmap: DepthHeatmapView
@@ -135,10 +113,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var priceSkeleton: SkeletonLoadingView
     private lateinit var changeSkeleton: SkeletonLoadingView
     private lateinit var drawingToolsButton: ImageView
+    private lateinit var indicatorsButton: ImageView
     private lateinit var timeframeExpandButton: ImageView
-    private lateinit var logPanelButton: ImageView
     private lateinit var drawingContextToolbar: DrawingContextToolbar
-    private val logPanelDialog by lazy { LogPanelDialog(this) }
     private val paperTradePanel by lazy { PaperTradePanel(this) }
     private val paperTradingAccountPanel by lazy { PaperTradingAccountPanel(this) }
     private val paperTradingHistoryPanel by lazy { PaperTradingHistoryPanel(this) }
@@ -153,12 +130,20 @@ class MainActivity : AppCompatActivity() {
     private val drawingToolsPanel by lazy { DrawingToolsPanel(this) }
     private var activeDrawingTool: DrawingTool = DrawingTool.NONE
 
+    private val indicatorsPanel by lazy { IndicatorsPanel(this) }
+
     private var latestPipelineState = PipelineState.IDLE
     private var latestSocketState = SocketState.IDLE
     private var connectivityBannerDismissed = false
 
+    // Quick-trade drawer: revealed by an upward drag, hidden by a downward drag, made
+    // anywhere ScrollRevealContainer reports as eligible (i.e. outside the chart's plot
+    // area - so this covers the price axis, time axis, timeframe row, and toolbar icons,
+    // while leaving the chart's own pan/zoom gestures untouched). The drawer follows the
+    // finger live as it drags (quickTradeProgress), then settles fully open or fully
+    // closed on release.
     private var isQuickTradeExpanded = false
-    private var quickTradeProgress = 0f
+    private var quickTradeProgress = 0f // 0 = fully collapsed, 1 = fully expanded
     private var quickTradeDragBaseProgress = 0f
     private var quickTradeSettleAnimator: ValueAnimator? = null
     private val quickTradeMaxDragPx by lazy { dp(220) }
@@ -167,6 +152,12 @@ class MainActivity : AppCompatActivity() {
     private val quickTradeCollapsedChartWeight = 1f
     private val quickTradeCollapsedPanelWeight = 0f
 
+    // The timeframe row / double-chevron / drawing-tools strip below the chart. It has no
+    // weight of its own (wrap_content, fixed at the bottom), so as it collapses toward the
+    // drawer drag's progress, the space it gives up is automatically reclaimed by
+    // chartAndQuickTradeContainer's weight-1 sibling above it - which is exactly what lets
+    // the chart and the fully-expanded drawer grow into that freed space. Captured lazily the
+    // first time it's needed, since it's wrap_content and not known until after first layout.
     private var bottomControlsRowHeight = 0
 
     private val bullColor = Color.parseColor("#22D3C5")
@@ -179,6 +170,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // First-ever open: hand off to the one-time onboarding screen instead of
+        // inflating the main chart UI. OnboardingActivity marks itself complete
+        // before returning here, so this only ever fires once per install.
         if (!OnboardingPreferences(this).hasCompletedOnboarding) {
             startActivity(Intent(this, OnboardingActivity::class.java))
             finish()
@@ -214,13 +208,23 @@ class MainActivity : AppCompatActivity() {
         priceSkeleton = findViewById(R.id.priceSkeleton)
         changeSkeleton = findViewById(R.id.changeSkeleton)
         drawingToolsButton = findViewById(R.id.drawingToolsButton)
+        indicatorsButton = findViewById(R.id.indicatorsButton)
+        indicatorsButton.setColorFilter(pillTextColor(candleChart.isBollingerBandsEnabled()))
+        indicatorsButton.setOnClickListener {
+            val current = IndicatorsPanel.BollingerState(
+                enabled = candleChart.isBollingerBandsEnabled(),
+                period = candleChart.bollingerBandsPeriod(),
+                stdDevMultiplier = candleChart.bollingerBandsStdDevMultiplier(),
+            )
+            indicatorsPanel.show(indicatorsButton, current) { state ->
+                candleChart.setBollingerBandsSettings(state.period, state.stdDevMultiplier)
+                candleChart.setBollingerBandsEnabled(state.enabled)
+                indicatorsButton.setColorFilter(pillTextColor(state.enabled))
+            }
+        }
         timeframeExpandButton = findViewById(R.id.timeframeExpandButton)
         timeframeExpandButton.setOnClickListener {
             HistoricalDataDialog(this).show()
-        }
-        logPanelButton = findViewById(R.id.logPanelButton)
-        logPanelButton.setOnClickListener {
-            logPanelDialog.show()
         }
         drawingContextToolbar = findViewById(R.id.drawingContextToolbar)
         paragraphButton = findViewById(R.id.paragraphButton)
@@ -231,34 +235,6 @@ class MainActivity : AppCompatActivity() {
                 paperHistoryContent = paperTradingHistoryPanel,
                 liveTradingContent = liveTradePanel,
                 onExportReport = { exportPaperTradingReport() },
-                onSelectPaper = {
-                    accountManager.selectPaper()
-                    Toast.makeText(
-                        this,
-                        "Paper account active. Live trading is paused.",
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                },
-                onSelectLive = {
-                    when (accountManager.selectLive()) {
-                        is AccountSelectionResult.Success -> {
-                            Toast.makeText(
-                                this,
-                                "Live account active. Paper trading is paused.",
-                                Toast.LENGTH_SHORT,
-                            ).show()
-                            true
-                        }
-                        is AccountSelectionResult.LiveCredentialsMissing -> {
-                            Toast.makeText(
-                                this,
-                                "Add a Bitget live API key first to switch to Live trading",
-                                Toast.LENGTH_SHORT,
-                            ).show()
-                            false
-                        }
-                    }
-                },
             ).show()
         }
         connectivityBanner = findViewById(R.id.connectivityBanner)
@@ -366,6 +342,9 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             depthHeatmap.submitDepth(tick.snapshot)
                         }
+                        // Quick-trade drawer's order book only ever shows the
+                        // top 9 bid / top 9 ask price levels; it trims the
+                        // full snapshot down itself.
                         quickTradePanel.renderOrderBook(tick.snapshot.bids, tick.snapshot.asks)
                     }
                 }
@@ -521,6 +500,14 @@ class MainActivity : AppCompatActivity() {
         val latencyConfig: LatencyConfig,
     )
 
+    /**
+     * Short " (137ms latency, 0.042% slippage)"-style suffix for a fill
+     * toast, built from whatever [PlacedOrder] a simulated order actually
+     * came back with - see [org.example.syncora.bitget.LatencySimulator] and
+     * [org.example.syncora.bitget.OrderBookWalker]. Empty when neither applies
+     * (e.g. latency simulation is off and the fill was a flat mark-price
+     * fallback), so it never leaves a dangling empty "()" in the toast.
+     */
     private fun fillSummarySuffix(order: PlacedOrder): String {
         val parts = mutableListOf<String>()
         if (order.appliedLatencyMs > 0L) {
@@ -532,6 +519,13 @@ class MainActivity : AppCompatActivity() {
         return if (parts.isEmpty()) "" else " (${parts.joinToString(", ")})"
     }
 
+    /**
+     * Builds a plain-text performance summary of the local paper trading
+     * account and hands it to the system share sheet, so the person can
+     * save it to Drive/Files, email it, or otherwise "export" it - there's
+     * no exchange or server to download a report from, so a share sheet is
+     * the closest on-device equivalent.
+     */
     private fun exportPaperTradingReport() {
         val account = paperTradingRepository.account.value
         if (account == null) {
@@ -623,14 +617,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Wires the quick-trade drawer's Long/Short buttons to paper trading -
+     * the same account the chart's own Long/Short quick-action buttons use.
+     * MARKET fills immediately via [PaperTradingRepository.openPosition];
+     * LIMIT places a resting order via [PaperTradingRepository.placeLimitOrder]
+     * that fills on its own once a later mark-price tick reaches the limit
+     * price (see that repository for the fill logic).
+     */
     private fun setupQuickTradePanel() {
-        lifecycleScope.launch {
-            val restored = rrlPipeline.restoreLastAutosave()
-            if (restored) {
-                Toast.makeText(this@MainActivity, "Resumed agent from last session", Toast.LENGTH_SHORT).show()
-            }
-        }
-
         quickTradePanel.bind(
             QuickTradePanel.Callbacks(
                 onOpenPosition = { side, sizeUsdt, leverage, orderType, limitPrice, takeProfitPrice, stopLossPrice ->
@@ -655,6 +650,8 @@ class MainActivity : AppCompatActivity() {
                                     "$sideLabel order placed${fillSummarySuffix(result.data)}"
                                 }
                                 Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+                                // TP/SL aren't enforced by the paper-trading engine yet - only
+                                // captured here so the UI doesn't silently drop what the user typed.
                                 if (!takeProfitPrice.isNullOrBlank() || !stopLossPrice.isNullOrBlank()) {
                                     Toast.makeText(
                                         this@MainActivity,
@@ -687,54 +684,46 @@ class MainActivity : AppCompatActivity() {
                 },
             ),
         )
-
-        quickTradePanel.onCheckpointAction = { action ->
-            when (action) {
-                AgentStatePanelView.CheckpointAction.EXPORT -> {
-                    val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                    exportCheckpointLauncher.launch("rrl_checkpoint_$timestamp.json")
-                }
-                AgentStatePanelView.CheckpointAction.IMPORT -> {
-                    importCheckpointLauncher.launch(arrayOf("application/json"))
-                }
-            }
-        }
-        quickTradePanel.onRestoreLastAutosave = {
-            lifecycleScope.launch {
-                val success = rrlPipeline.restoreLastAutosave()
-                Toast.makeText(
-                    this@MainActivity,
-                    if (success) "Restored last autosaved checkpoint" else "No autosave found to restore",
-                    Toast.LENGTH_SHORT,
-                ).show()
-            }
-        }
-
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch {
-                    combine(
-                        rrlPipeline.signal,
-                        rrlPipeline.performance,
-                    ) { step, performance -> step to performance }
-                        .collect { (step, performance) ->
-                            quickTradePanel.renderAgentState(step, performance)
-                        }
-                }
-            }
-        }
     }
 
+    /**
+     * Wires [ScrollRevealContainer]'s drag reporting to the quick-trade drawer.
+     * The container reports drags made anywhere except the chart's plot area
+     * (see [ScrollRevealContainer] for how that's determined), which lands us
+     * the price axis, time axis, timeframe row, and toolbar icons in addition
+     * to the header/banner - covering everywhere "outside the chart canvas"
+     * without touching the chart's own pan/zoom handling. The drawer's own
+     * grab handle additionally reports drags directly via
+     * [QuickTradePanel.onHandleDrag], independent of that container-wide
+     * detection, so dragging the handle itself is never at the mercy of the
+     * broader screen-wide gesture heuristics.
+     *
+     * Direction: dragging the finger *up* (negative deltaY) reveals the
+     * drawer; dragging *down* (positive deltaY) hides it. The drawer tracks
+     * the finger 1:1 while dragging (an on-screen, live expand rather than a
+     * snap after a hidden threshold) and settles fully open or fully closed
+     * once the finger lifts, based on which side of the midpoint it landed.
+     */
     private fun setupQuickTradeScrollGesture() {
         chartSectionContainer.excludedInteractiveView = candleChart
         chartSectionContainer.excludedRightInsetPx = ChartLayoutMetrics.priceAxisWidthPx(resources)
         chartSectionContainer.excludedBottomInsetPx = ChartLayoutMetrics.timeAxisHeightPx(resources)
+        // Leaves the drawer's grab handle draggable for the reveal gesture while
+        // letting drags that start on its body (balance, leverage, size, order
+        // type, Long/Short) scroll the drawer instead of resizing it, once the
+        // body actually has overflow content to scroll.
         chartSectionContainer.excludedScrollableView = quickTradePanel.scrollableContent
         chartSectionContainer.onVerticalDrag = ::handleQuickTradeDrag
         quickTradePanel.onHandleDrag = ::handleQuickTradeDrag
         setupQuickTradeHandleIndicator()
     }
 
+    /**
+     * Wires the always-visible, chart-docked handle (see [quickTradeHandleIndicator] and its
+     * doc comment in activity_main.xml) to the same drag handler as the drawer's own internal
+     * grab handle, using raw screen coordinates for the same reason [QuickTradePanel]'s handle
+     * does - the indicator's surroundings can relayout mid-gesture as the drawer expands.
+     */
     private fun setupQuickTradeHandleIndicator() {
         var indicatorDownY = 0f
         quickTradeHandleIndicator.setOnTouchListener { _, event ->
@@ -762,6 +751,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Shared handler for both the screen-wide reveal gesture and the drawer's own grab-handle drag. */
     private fun handleQuickTradeDrag(phase: ScrollRevealContainer.DragPhase, deltaY: Float) {
         when (phase) {
             ScrollRevealContainer.DragPhase.START -> {
@@ -778,6 +768,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Applies a 0..1 reveal progress directly to the chart/drawer weights - the live, finger-following part of the gesture. */
     private fun applyQuickTradeProgress(progress: Float) {
         quickTradeProgress = progress
         val chartParams = chartCanvas.layoutParams as LinearLayout.LayoutParams
@@ -787,12 +778,22 @@ class MainActivity : AppCompatActivity() {
         chartCanvas.layoutParams = chartParams
         quickTradePanel.layoutParams = panelParams
         quickTradePanel.visibility = if (progress > 0f) View.VISIBLE else View.GONE
+        // Fades out quickly as the drawer starts opening so it hands off to the drawer's own
+        // internal grab handle rather than the two ever being visible at once.
         quickTradeHandleIndicator.alpha = (1f - progress * 4f).coerceIn(0f, 1f)
         quickTradeHandleIndicator.visibility = if (progress >= 0.25f) View.GONE else View.VISIBLE
         applyBottomControlsProgress(progress)
         chartAndQuickTradeContainer.requestLayout()
     }
 
+    /**
+     * Collapses the timeframe row / double-chevron / drawing-tools strip in lockstep with the
+     * drawer's drag progress: it slides toward the bottom edge and fades as it shrinks, rather
+     * than just clipping in place, and its reserved height shrinks along with it so that space
+     * is handed back to the chart/drawer above (see [bottomControlsRowHeight]). At progress 1
+     * it's collapsed to zero height and set GONE, matching the drawer landing fully expanded;
+     * at progress 0 it's restored to its full height, position, and opacity.
+     */
     private fun applyBottomControlsProgress(progress: Float) {
         if (bottomControlsRowHeight <= 0) {
             val measured = bottomControlsRow.height
@@ -809,6 +810,7 @@ class MainActivity : AppCompatActivity() {
         bottomControlsRow.visibility = if (progress >= 1f) View.GONE else View.VISIBLE
     }
 
+    /** Called on finger-up: snaps to fully expanded (0.5/0.5 weights) or fully collapsed, whichever the drag ended closer to. */
     private fun settleQuickTrade() {
         val target = if (quickTradeProgress >= 0.5f) 1f else 0f
         isQuickTradeExpanded = target == 1f
@@ -878,6 +880,17 @@ class MainActivity : AppCompatActivity() {
         const val CONNECTIVITY_TIMEOUT_MS = 15_000L
     }
 
+    /**
+     * Watches both market-data sockets and, if neither manages to connect within
+     * [CONNECTIVITY_TIMEOUT_MS], surfaces a banner distinguishing "still can't reach
+     * Bitget" from the ordinary brief "Connecting…" state shown by [renderConnectionState].
+     * This matters in regions where ISPs block Bitget's domains (e.g. under Philippines
+     * NTC directives) - in that case the socket will just keep retrying forever and the
+     * user would otherwise see nothing but a spinner with no explanation.
+     *
+     * Uses collectLatest so each new state cancels any pending delay from the previous
+     * one - the timer only fires if a state has been sustained for the full timeout.
+     */
     private suspend fun watchConnectivity() {
         combine(pipeline.socketState, depthPipeline.socketState) { kline, depth -> kline to depth }
             .collectLatest { (klineState, depthState) ->
@@ -970,18 +983,23 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        // Idempotent: MarketDataForegroundService.start() is a no-op if the service
+        // is already running. Market data, live-position polling, and the
+        // stop-loss guard are now owned by that service (see its kdoc), not by
+        // this activity - they keep running after onStop() instead of dying the
+        // moment the app is backgrounded.
         MarketDataForegroundService.start(this)
-        
-        
-        if (accountManager.isActive(AccountMode.PAPER)) {
-            paperTradingRepository.start()
-        }
+        paperTradingRepository.start()
         performanceMonitor.start()
     }
 
     override fun onStop() {
         super.onStop()
         performanceMonitor.stop()
+        // Deliberately NOT stopping MarketDataForegroundService here - that's the
+        // whole point of moving this to a foreground service. Only paper trading
+        // (a pure on-device simulation with no real position to protect) and the
+        // performance HUD are UI-only concerns that should stop with the activity.
         paperTradingRepository.stop()
     }
 }

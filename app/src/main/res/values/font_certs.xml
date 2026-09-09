@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Standard certificate set for the Android "Downloadable Fonts" API, published by
+  the Android Open Source Project so apps can verify the Google Play Services font
+  provider (com.google.android.gms.fonts). Required by res/font/inter_thin.xml and
+  res/font/inter_bold_italic.xml.
+-->
 <resources>
     <array name="com_google_android_gms_fonts_certs">
         <item>@array/com_google_android_gms_fonts_certs_dev</item>

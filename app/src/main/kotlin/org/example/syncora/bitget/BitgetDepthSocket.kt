@@ -19,8 +19,6 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-import org.example.syncora.log.AppLog
-import org.example.syncora.log.LogLevel
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -119,10 +117,8 @@ class BitgetDepthSocket(
         }
 
         override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-            val diagnostic = NetworkErrorClassifier.diagnosticMessage(t, response)
-            Log.w(TAG, "WebSocket failure: $diagnostic")
-            AppLog.trading(LogLevel.ERROR, "$TAG failed to connect: $diagnostic")
-            _lastError.value = diagnostic
+            Log.w(TAG, "WebSocket failure: ${t.message}")
+            _lastError.value = NetworkErrorClassifier.friendlyMessage(t)
             heartbeatJob?.cancel()
             _state.value = SocketState.FAILED
             if (!intentionallyStopped) scheduleReconnect()

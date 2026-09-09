@@ -15,6 +15,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * "Account History" screen: a plain reverse-chronological list of every
+ * closed paper trade on this device (see [ClosedPaperTrade]), each row
+ * showing side/leverage, size @ entry -> exit, and realized P&L.
+ */
 class PaperTradingHistoryPanel @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
