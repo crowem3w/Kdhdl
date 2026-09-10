@@ -21,6 +21,10 @@ import android.widget.Toast
 
 private data class ComponentCategory(val id: String, val label: String, val iconRes: Int)
 
+// Pseudo-category shown at the top of the rail. Selecting it is the default/all-components
+// view (every section visible, nothing filtered out) rather than jumping to one category.
+private val ALL_CATEGORY = ComponentCategory("all", "All", R.drawable.ic_components)
+
 private val COMPONENT_CATEGORIES = listOf(
     ComponentCategory("structure", "Structure", R.drawable.ic_cat_structure),
     ComponentCategory("layout", "Layout", R.drawable.ic_cat_layout),
@@ -34,6 +38,23 @@ private val COMPONENT_CATEGORIES = listOf(
     ComponentCategory("feedback", "Feedback", R.drawable.ic_cat_feedback),
     ComponentCategory("mobile", "Mobile", R.drawable.ic_cat_mobile),
     ComponentCategory("prototype", "Prototype", R.drawable.ic_cat_prototype),
+)
+
+// Named, empty placeholder components shown inside each category's section. These aren't wired
+// up to anything yet (see bg_component_placeholder tiles below) - just labeled slots.
+private val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
+    "structure" to listOf("Frame", "Section", "Container", "Group"),
+    "layout" to listOf("Row", "Column", "Grid", "Stack"),
+    "typography" to listOf("Heading", "Body Text", "Caption", "Label"),
+    "shapes" to listOf("Rectangle", "Ellipse", "Line", "Polygon"),
+    "media" to listOf("Image", "Video", "Icon", "Avatar"),
+    "navigation" to listOf("Top App Bar", "Bottom Nav", "Tab Bar", "Drawer"),
+    "input" to listOf("Text Field", "Checkbox", "Radio Button", "Switch"),
+    "actions" to listOf("Button", "Icon Button", "FAB", "Chip"),
+    "content" to listOf("Card", "List Item", "Divider", "Badge"),
+    "feedback" to listOf("Snackbar", "Dialog", "Progress Bar", "Tooltip"),
+    "mobile" to listOf("Status Bar", "Bottom Sheet", "Segmented Control", "Pull to Refresh"),
+    "prototype" to listOf("Hotspot", "Overlay", "Transition", "Scroll Group"),
 )
 
 
@@ -134,16 +155,16 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     })
 
     
-    val railIcons = mutableMapOf<String, FrameLayout>()
+    val railIcons = mutableMapOf<String, LinearLayout>()
     val sectionViews = mutableMapOf<String, View>()
 
     fun setActiveCategory(id: String) {
         for ((catId, item) in railIcons) {
             val active = catId == id
             item.setBackgroundResource(if (active) R.drawable.bg_tab_selected else 0)
-            (item.getChildAt(0) as ImageView).setColorFilter(
-                Color.parseColor(if (active) "#FFFFFF" else "#9A9AA5")
-            )
+            val color = Color.parseColor(if (active) "#FFFFFF" else "#9A9AA5")
+            (item.getChildAt(0) as ImageView).setColorFilter(color)
+            (item.getChildAt(1) as TextView).setTextColor(color)
         }
     }
 
@@ -189,13 +210,31 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         })
         section.addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            val itemNames = COMPONENT_ITEMS[cat.id].orEmpty()
             for (i in 0 until 4) {
-                addView(View(context).apply {
-                    setBackgroundResource(R.drawable.bg_component_placeholder)
-                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply {
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                         if (i != 0) marginStart = dp(8)
                     }
+                    // Empty placeholder tile - not wired up to anything yet.
+                    addView(View(context).apply {
+                        setBackgroundResource(R.drawable.bg_component_placeholder)
+                        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
+                    })
+                    // Name label underneath each tile.
+                    addView(TextView(context).apply {
+                        text = itemNames.getOrElse(i) { "Component ${i + 1}" }
+                        setTextColor(Color.parseColor("#9A9AA5"))
+                        textSize = 10.5f
+                        gravity = Gravity.CENTER
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                            topMargin = dp(4)
+                        }
+                    })
                 })
             }
         })
@@ -205,31 +244,63 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
     val rail = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        layoutParams = LinearLayout.LayoutParams(dp(48), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            marginEnd = dp(8)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            marginEnd = dp(10)
         }
     }
-    for (cat in COMPONENT_CATEGORIES) {
-        val item = FrameLayout(context).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(44), dp(40)).apply { bottomMargin = dp(4) }
+
+    fun buildRailRow(iconRes: Int, label: String, onClick: () -> Unit): LinearLayout {
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36)).apply {
+                bottomMargin = dp(4)
+            }
             isClickable = true
             isFocusable = true
             foreground = selectableForeground()
+            setPadding(dp(8), 0, dp(12), 0)
             addView(ImageView(context).apply {
-                setImageResource(cat.iconRes)
-                layoutParams = FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER)
+                setImageResource(iconRes)
+                layoutParams = LinearLayout.LayoutParams(dp(18), dp(18)).apply { marginEnd = dp(8) }
             })
-            setOnClickListener {
-                setActiveCategory(cat.id)
-                sectionViews[cat.id]?.let { target ->
-                    contentScroll.post { contentScroll.smoothScrollTo(0, target.top) }
-                }
+            addView(TextView(context).apply {
+                text = label
+                textSize = 12.5f
+                maxLines = 1
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            })
+            setOnClickListener { onClick() }
+        }
+    }
+
+    // "All" sits on top of the rail and is the default state: every section is visible and
+    // nothing is filtered out. Selecting it just scrolls back to the top and re-highlights it.
+    val allItem = buildRailRow(ALL_CATEGORY.iconRes, ALL_CATEGORY.label) {
+        setActiveCategory(ALL_CATEGORY.id)
+        contentScroll.post { contentScroll.smoothScrollTo(0, 0) }
+    }
+    rail.addView(allItem)
+    railIcons[ALL_CATEGORY.id] = allItem
+    rail.addView(View(context).apply {
+        setBackgroundColor(Color.parseColor("#2A2A31"))
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
+            topMargin = dp(2)
+            bottomMargin = dp(8)
+        }
+    })
+
+    for (cat in COMPONENT_CATEGORIES) {
+        val item = buildRailRow(cat.iconRes, cat.label) {
+            setActiveCategory(cat.id)
+            sectionViews[cat.id]?.let { target ->
+                contentScroll.post { contentScroll.smoothScrollTo(0, target.top) }
             }
         }
         rail.addView(item)
         railIcons[cat.id] = item
     }
-    setActiveCategory(COMPONENT_CATEGORIES.first().id)
+    setActiveCategory(ALL_CATEGORY.id)
 
     searchInput.addTextChangedListener(object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -237,7 +308,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         override fun afterTextChanged(s: Editable?) {
             val query = s?.toString()?.trim()?.lowercase().orEmpty()
             for (cat in COMPONENT_CATEGORIES) {
-                val matches = query.isEmpty() || cat.label.lowercase().contains(query)
+                val matches = query.isEmpty() ||
+                    cat.label.lowercase().contains(query) ||
+                    COMPONENT_ITEMS[cat.id].orEmpty().any { it.lowercase().contains(query) }
                 sectionViews[cat.id]?.visibility = if (matches) View.VISIBLE else View.GONE
                 railIcons[cat.id]?.alpha = if (matches) 1f else 0.35f
             }
