@@ -94,11 +94,11 @@ private val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
 
 
 // Dedicated content for the "Geometry" category, rendered directly in the sidebar rail beneath
-// its icon (not in the main content pane): an accordion listing Create/Edit/Transform/Deform/
-// Animate, each with its own icon. Tapping one cascades the other sub-categories out of the way
-// (same lift+fade stagger used elsewhere in this panel) and reveals its leaf items as text-only
-// rows underneath - those leaves have no icons supplied, so they're plain labels. Nothing is
-// wired up to real content yet (see onClick below).
+// its icon (not in the main content pane). Laid out as a small tree, mirroring geometry.txt:
+// Create/Edit/Transform/Deform/Animate sit in an icon row (icon on top, label below, hugging the
+// left edge), and tapping one reveals its leaf items underneath as a text-only list, each line
+// prefixed with "|" to read as a branch of the selected icon. Those leaves have no icons of
+// their own. Nothing is wired up to real content yet (see onClick below).
 // Returns the view plus a `reset` callback that immediately collapses everything, for use when
 // the Geometry category itself is deselected in the rail.
 private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Unit> {
@@ -111,188 +111,163 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
         return if (outValue.resourceId != 0) context.getDrawable(outValue.resourceId) else null
     }
 
-    val staggerStepMs = 45L
-    val animDurationMs = 200L
-    val liftDistancePx = dp(24).toFloat()
-    val iconTint = Color.WHITE
+    val animDurationMs = 150L
+    val activeColor = Color.WHITE
+    val inactiveColor = Color.parseColor("#9A9AA5")
 
     val root = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = dp(2)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(4)
         }
-        setPadding(dp(6), 0, 0, dp(4))
+        setPadding(dp(4), 0, 0, dp(6))
         clipChildren = false
         clipToPadding = false
     }
 
-    data class Row(val header: LinearLayout, val childrenContainer: LinearLayout)
-    val rows = mutableListOf<Row>()
-    var expandedIndex: Int? = null
+    // Icon row: Create/Edit/Transform/Deform/Animate side by side, hugging the left edge (the
+    // row is wrap_content, not stretched full width). Each icon has its label below it rather
+    // than beside it.
+    val iconRow = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        clipChildren = false
+        clipToPadding = false
+    }
 
-    for (sub in GEOMETRY_SUBCATEGORIES) {
-        val header = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            isClickable = true
-            isFocusable = true
-            foreground = selectableForeground()
-            setPadding(dp(8), dp(7), dp(8), dp(7))
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            addView(ImageView(context).apply {
-                setImageResource(sub.iconRes)
-                setColorFilter(iconTint)
-                layoutParams = LinearLayout.LayoutParams(dp(18), dp(18))
+    // Text-only leaf list for whichever icon is currently selected, underneath the icon row.
+    // Each line is prefixed with "|" so it reads as a branch off the selected icon above,
+    // echoing the tree structure in geometry.txt.
+    val childrenContainer = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        visibility = View.GONE
+        alpha = 0f
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(4)
+        }
+    }
+
+    root.addView(iconRow)
+    root.addView(childrenContainer)
+
+    data class IconItem(val container: LinearLayout, val icon: ImageView, val label: TextView)
+    val iconItems = mutableListOf<IconItem>()
+    var selectedIndex: Int? = null
+
+    fun setSelected(index: Int?) {
+        iconItems.forEachIndexed { idx, item ->
+            val active = idx == index
+            item.container.setBackgroundResource(if (active) R.drawable.bg_tab_selected else 0)
+            val color = if (active) activeColor else inactiveColor
+            item.icon.setColorFilter(activeColor) // icons stay fully visible either way
+            item.label.setTextColor(color)
+        }
+    }
+
+    fun fillChildren(index: Int) {
+        childrenContainer.removeAllViews()
+        for (childLabel in GEOMETRY_SUBCATEGORIES[index].children) {
+            childrenContainer.addView(TextView(context).apply {
+                text = "|  $childLabel"
+                setTextColor(inactiveColor)
+                textSize = 11.5f
+                isClickable = true
+                isFocusable = true
+                foreground = selectableForeground()
+                setPadding(dp(4), dp(5), dp(8), dp(5))
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                // Content intentionally left blank for now - no detail view wired up yet.
+                setOnClickListener { }
             })
-            addView(TextView(context).apply {
-                text = sub.label
-                setTextColor(Color.WHITE)
-                textSize = 12.5f
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    marginStart = dp(8)
-                }
-            })
-        }
-
-        // Leaf items: text-only rows (no icon supplied for these), indented under their parent.
-        // Hidden until this sub-category is expanded.
-        val childrenContainer = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = View.GONE
-            alpha = 0f
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(1)
-                bottomMargin = dp(2)
-            }
-            for (childLabel in sub.children) {
-                addView(TextView(context).apply {
-                    text = childLabel
-                    setTextColor(Color.parseColor("#9A9AA5"))
-                    textSize = 11.5f
-                    isClickable = true
-                    isFocusable = true
-                    foreground = selectableForeground()
-                    setPadding(dp(28), dp(6), dp(8), dp(6))
-                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                    // Content intentionally left blank for now - no detail view wired up yet.
-                    setOnClickListener { }
-                })
-            }
-        }
-
-        root.addView(header)
-        root.addView(childrenContainer)
-        rows.add(Row(header, childrenContainer))
-    }
-
-    fun collapseChildrenImmediate(row: Row) {
-        row.childrenContainer.animate().cancel()
-        row.childrenContainer.visibility = View.GONE
-        row.childrenContainer.alpha = 0f
-        row.childrenContainer.translationY = 0f
-    }
-
-    fun resetHeadersImmediate() {
-        rows.forEach { row ->
-            row.header.animate().cancel()
-            row.header.visibility = View.VISIBLE
-            row.header.alpha = 1f
-            row.header.translationY = 0f
         }
     }
 
-    // Fades/lifts every other header out of the way (staggered by distance from the expanded
-    // row) and reveals the expanded row's children, fading them in top-to-bottom.
-    fun expand(index: Int) {
-        rows.forEachIndexed { idx, row ->
-            if (idx == index) return@forEachIndexed
-            val delay = kotlin.math.abs(idx - index) * staggerStepMs
-            row.header.animate().cancel()
-            row.header.visibility = View.VISIBLE
-            row.header.animate()
-                .translationY(-liftDistancePx)
-                .alpha(0f)
-                .setStartDelay(delay)
-                .setDuration(animDurationMs)
-                .setInterpolator(AccelerateInterpolator())
-                .withEndAction { if (row.header.alpha == 0f) row.header.visibility = View.GONE }
-                .start()
-        }
-        val childrenContainer = rows[index].childrenContainer
-        childrenContainer.animate().cancel()
-        childrenContainer.visibility = View.VISIBLE
-        childrenContainer.alpha = 0f
-        childrenContainer.translationY = -dp(6).toFloat()
-        childrenContainer.animate()
-            .alpha(1f)
-            .translationY(0f)
-            .setStartDelay(staggerStepMs)
-            .setDuration(animDurationMs)
-            .setInterpolator(DecelerateInterpolator())
-            .withEndAction(null)
-            .start()
-    }
-
-    // Reverses expand(): hides the expanded row's children and brings every other header back
-    // into place, staggered.
-    fun collapse(index: Int) {
-        val childrenContainer = rows[index].childrenContainer
+    fun hideChildren(onHidden: () -> Unit = {}) {
         childrenContainer.animate().cancel()
         childrenContainer.animate()
             .alpha(0f)
-            .translationY(-dp(6).toFloat())
             .setDuration(animDurationMs)
             .setInterpolator(AccelerateInterpolator())
             .withEndAction {
-                if (childrenContainer.alpha == 0f) {
-                    childrenContainer.visibility = View.GONE
-                    childrenContainer.translationY = 0f
-                }
+                childrenContainer.visibility = View.GONE
+                onHidden()
             }
             .start()
-
-        rows.forEachIndexed { idx, row ->
-            if (idx == index) return@forEachIndexed
-            val delay = kotlin.math.abs(idx - index) * staggerStepMs
-            row.header.animate().cancel()
-            row.header.visibility = View.VISIBLE
-            row.header.animate()
-                .translationY(0f)
-                .alpha(1f)
-                .setStartDelay(delay)
-                .setDuration(animDurationMs)
-                .setInterpolator(DecelerateInterpolator())
-                .withEndAction(null)
-                .start()
-        }
     }
 
-    rows.forEachIndexed { index, row ->
-        row.header.setOnClickListener {
-            when (expandedIndex) {
+    fun showChildren(index: Int) {
+        fillChildren(index)
+        childrenContainer.animate().cancel()
+        childrenContainer.visibility = View.VISIBLE
+        childrenContainer.alpha = 0f
+        childrenContainer.animate()
+            .alpha(1f)
+            .setDuration(animDurationMs)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    for ((index, sub) in GEOMETRY_SUBCATEGORIES.withIndex()) {
+        lateinit var icon: ImageView
+        lateinit var label: TextView
+        val itemContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            isClickable = true
+            isFocusable = true
+            foreground = selectableForeground()
+            setPadding(dp(6), dp(5), dp(6), dp(5))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                if (index != 0) marginStart = dp(2)
+            }
+            icon = ImageView(context).apply {
+                setImageResource(sub.iconRes)
+                setColorFilter(activeColor)
+                layoutParams = LinearLayout.LayoutParams(dp(20), dp(20))
+            }
+            addView(icon)
+            label = TextView(context).apply {
+                text = sub.label
+                setTextColor(inactiveColor)
+                textSize = 10f
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = dp(3)
+                }
+            }
+            addView(label)
+        }
+        iconRow.addView(itemContainer)
+        iconItems.add(IconItem(itemContainer, icon, label))
+
+        itemContainer.setOnClickListener {
+            when (selectedIndex) {
                 index -> {
-                    collapse(index)
-                    expandedIndex = null
+                    // Tapping the already-selected icon collapses the tree back up.
+                    setSelected(null)
+                    selectedIndex = null
+                    hideChildren()
                 }
                 null -> {
-                    expand(index)
-                    expandedIndex = index
+                    setSelected(index)
+                    selectedIndex = index
+                    showChildren(index)
                 }
                 else -> {
-                    resetHeadersImmediate()
-                    rows.forEachIndexed { idx, r -> if (idx != index) collapseChildrenImmediate(r) }
-                    expand(index)
-                    expandedIndex = index
+                    setSelected(index)
+                    selectedIndex = index
+                    hideChildren { showChildren(index) }
                 }
             }
         }
     }
 
     fun reset() {
-        rows.forEach { row -> row.header.animate().cancel() }
-        resetHeadersImmediate()
-        rows.forEach { row -> collapseChildrenImmediate(row) }
-        expandedIndex = null
+        childrenContainer.animate().cancel()
+        childrenContainer.visibility = View.GONE
+        childrenContainer.alpha = 0f
+        childrenContainer.removeAllViews()
+        setSelected(null)
+        selectedIndex = null
     }
 
     return root to ::reset
