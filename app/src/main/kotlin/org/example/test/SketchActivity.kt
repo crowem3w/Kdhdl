@@ -61,8 +61,22 @@ class SketchActivity : AppCompatActivity() {
     private lateinit var defaultToolsContentScroll: NestedScrollView
     private lateinit var defaultToolsContent: LinearLayout
     private lateinit var componentsContentContainer: FrameLayout
+    private lateinit var dragHandle: View
     private var componentsContentBuilt = false
     private var showingComponents = false
+
+    // Panel resize bounds, computed once the panel has laid out (see setupBottomPanel).
+    // - minPanelHeight: smallest height that still shows the handle + tabs row.
+    // - maxPanelHeight: full-screen height (the panel's parent height).
+    // - defaultPanelHeight: the panel's resting size when first shown/revealed. Uses the
+    //   standard Material/Android "half-expanded" convention of 50% of screen height
+    //   (com.google.android.material.bottomsheet.BottomSheetBehavior.DEFAULT_HALF_EXPANDED_RATIO)
+    //   as the HCI-standard default length for a resizable bottom panel.
+    private var minPanelHeight = 0
+    private var maxPanelHeight = 0
+    private var defaultPanelHeight = 0
+    private val hideThreshold: Int get() = (minPanelHeight * 0.5f).roundToInt()
+    private val fullscreenThreshold: Int get() = maxPanelHeight - (minPanelHeight * 0.5f).roundToInt()
 
     private var nextId = 1L
 
@@ -92,6 +106,7 @@ class SketchActivity : AppCompatActivity() {
         defaultToolsContentScroll = findViewById(R.id.defaultToolsContentScroll)
         defaultToolsContent = findViewById(R.id.defaultToolsContent)
         componentsContentContainer = findViewById(R.id.componentsContentContainer)
+        dragHandle = findViewById(R.id.dragHandle)
         bottomSheetBehavior = BottomSheetBehavior.from(bottomPanel)
 
         canvas.listener = object : SketchCanvasView.Listener {
@@ -122,6 +137,7 @@ class SketchActivity : AppCompatActivity() {
         setupTopBar()
         setupZoomControls()
         setupBottomPanel()
+        setupDragHandle()
         setupTabs()
         setupQuickActions()
         setupAnimationRow()
@@ -176,21 +192,92 @@ class SketchActivity : AppCompatActivity() {
 
 
     private fun setupBottomPanel() {
+        bottomSheetBehavior.isDraggable = false // dragHandle drives resizing manually; see setupDragHandle
         bottomPanel.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
-                if (defaultToolsContent.height > 0 && panelContentContainer.top > 0) {
-                    
-                    
-                    
-                    val peek = panelContentContainer.top +
-                        defaultToolsContent.height +
-                        bottomPanel.paddingBottom
-                    bottomSheetBehavior.peekHeight = peek
+                val rootHeight = (bottomPanel.parent as? View)?.height ?: 0
+                if (panelContentContainer.top > 0 && rootHeight > 0) {
+                    // Smallest height that still shows the handle + tabs row, with no content
+                    // area showing yet.
+                    minPanelHeight = panelContentContainer.top + bottomPanel.paddingBottom
+                    // Full screen, since bottomPanel's height is match_parent.
+                    maxPanelHeight = rootHeight
+                    // HCI-standard resting size: 50% of screen height (the same half-expanded
+                    // ratio Material's own BottomSheetBehavior defaults to for resizable
+                    // sheets), clamped so it never shows less than the tabs row or more than
+                    // the full screen.
+                    defaultPanelHeight = (rootHeight * 0.5f).roundToInt()
+                        .coerceIn(minPanelHeight, maxPanelHeight)
+
+                    bottomSheetBehavior.peekHeight = defaultPanelHeight
                     bottomPanel.viewTreeObserver.removeOnGlobalLayoutListener(this)
                 }
             }
         })
         bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+    }
+
+    
+
+    /**
+     * Lets the small pill handle at the top of the panel resize it freely: the panel height
+     * tracks the finger 1:1 while dragging (no snapping mid-drag), matching whatever height the
+     * user needs. Only on release, if the drag went past one of the extremes, does it
+     * auto-complete into fully hidden or full screen; anywhere else it simply stays put at the
+     * size the user left it.
+     */
+    private fun setupDragHandle() {
+        var startRawY = 0f
+        var startHeight = 0
+
+        dragHandle.setOnTouchListener { _, event ->
+            if (maxPanelHeight == 0) return@setOnTouchListener false // not laid out yet
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (showingComponents) closeComponentsContent()
+                    startRawY = event.rawY
+                    startHeight = currentPanelHeight()
+                    // Normalize to COLLAPSED at the current visible height so peekHeight takes
+                    // over the drag from here with no visual jump, regardless of which state
+                    // (collapsed/expanded/hidden) the panel was resting in.
+                    bottomSheetBehavior.setPeekHeight(startHeight, false)
+                    bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dragUpAmount = startRawY - event.rawY
+                    val newHeight = (startHeight + dragUpAmount.roundToInt())
+                        .coerceIn(0, maxPanelHeight)
+                    bottomSheetBehavior.setPeekHeight(newHeight, false)
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val finalHeight = bottomSheetBehavior.peekHeight
+                    when {
+                        finalHeight <= hideThreshold ->
+                            bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+                        finalHeight >= fullscreenThreshold ->
+                            bottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
+                        else -> {
+                            // Resting mid-drag: keep the exact height the user chose, and make
+                            // sure it doesn't end up below the usable minimum.
+                            bottomSheetBehavior.setPeekHeight(
+                                finalHeight.coerceAtLeast(minPanelHeight),
+                                false,
+                            )
+                        }
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun currentPanelHeight(): Int = when (bottomSheetBehavior.state) {
+        BottomSheetBehavior.STATE_EXPANDED -> maxPanelHeight
+        BottomSheetBehavior.STATE_HIDDEN -> 0
+        else -> bottomSheetBehavior.peekHeight
     }
 
     
@@ -215,6 +302,7 @@ class SketchActivity : AppCompatActivity() {
         componentsContentContainer.visibility = View.GONE
         defaultToolsContentScroll.visibility = View.VISIBLE
         setTabActive(tabSelect)
+        if (defaultPanelHeight > 0) bottomSheetBehavior.setPeekHeight(defaultPanelHeight, false)
         bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
 
@@ -245,6 +333,7 @@ class SketchActivity : AppCompatActivity() {
 
     private fun revealPanel() {
         if (showingComponents) closeComponentsContent()
+        if (defaultPanelHeight > 0) bottomSheetBehavior.setPeekHeight(defaultPanelHeight, false)
         bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
 

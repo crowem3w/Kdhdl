@@ -208,9 +208,13 @@
 
     <!-- Shared bottom panel: Main tools tab bar stays pinned at the top of the panel; the
          content area beneath it swaps between the default tools content (Quick Actions,
-         Properties, Animation & Interaction) and the Components browser. A single drag handle
-         drives a BottomSheetBehavior so the whole panel can be resized by dragging (up to full
-         screen, since this view's height is match_parent) or dragged all the way down to hide it. -->
+         Properties, Animation & Interaction) and the Components browser. BottomSheetBehavior is
+         used purely as a height/visibility container here (app:behavior_draggable="false" -
+         see setupDragHandle in SketchActivity): the panel's own dragHandle drives free-form
+         resizing by hand, tracking the finger 1:1 via behavior.peekHeight, rather than relying
+         on the framework's fling-to-snap gesture. Letting go only auto-completes to hidden or
+         full screen when the drag has gone past those extremes; anywhere in between just holds
+         at the height you left it. -->
     <LinearLayout
         android:id="@+id/bottomPanel"
         android:layout_width="match_parent"
@@ -225,13 +229,24 @@
         app:behavior_skipCollapsed="false"
         app:behavior_peekHeight="220dp">
 
-        <View
+        <!-- Touch target is taller (40dp) than the visible pill (4dp) so the handle meets a
+             comfortable Fitts's-law-friendly hit area without adding visual bulk. -->
+        <FrameLayout
             android:id="@+id/dragHandle"
-            android:layout_width="36dp"
-            android:layout_height="4dp"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginBottom="14dp"
-            android:background="@drawable/bg_drag_handle" />
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:layout_marginTop="-10dp"
+            android:layout_marginBottom="4dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Drag to resize panel">
+
+            <View
+                android:layout_width="36dp"
+                android:layout_height="4dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_drag_handle" />
+        </FrameLayout>
 
         <!-- Main tools tab navigation (always visible, above both the default tools content and
              the Components browser). -->
