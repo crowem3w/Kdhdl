@@ -23,6 +23,20 @@ import android.widget.Toast
 
 private data class ComponentCategory(val id: String, val label: String, val iconRes: Int)
 
+// The "Geometry" category (id "shapes" in COMPONENT_CATEGORIES) gets its own dedicated content
+// instead of the generic blank placeholder: an accordion of Create/Edit/Transform/Deform/Animate
+// sub-sections, each with its own icon, that expand to reveal their leaf items. The leaf items
+// have no icons of their own, so they're rendered as text-only rows.
+private data class GeometrySubCategory(val label: String, val iconRes: Int, val children: List<String>)
+
+private val GEOMETRY_SUBCATEGORIES = listOf(
+    GeometrySubCategory("Create", R.drawable.ic_geo_create, listOf("Point", "Line", "Curve", "2D Shape", "3D Primitive", "Custom Mesh")),
+    GeometrySubCategory("Edit", R.drawable.ic_geo_edit, listOf("Vertex", "Edge", "Face", "Path", "Control Point")),
+    GeometrySubCategory("Transform", R.drawable.ic_geo_transform, listOf("Move", "Rotate", "Scale", "Skew", "Pivot")),
+    GeometrySubCategory("Deform", R.drawable.ic_geo_deform, listOf("Bend", "Twist", "Taper", "Warp", "Freeform")),
+    GeometrySubCategory("Animate", R.drawable.ic_geo_animate, listOf("Keyframe", "Motion Path", "Constraint", "Timeline", "Graph Editor")),
+)
+
 // Pseudo-category shown at the top of the rail. Selecting it is the default/all-components
 // view (every section visible, nothing filtered out) rather than jumping to one category.
 private val ALL_CATEGORY = ComponentCategory("all", "All", R.drawable.ic_components)
@@ -78,6 +92,207 @@ private val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
 
 
 
+
+// Dedicated content for the "Geometry" category: an accordion listing Create/Edit/Transform/
+// Deform/Animate (each with its own icon) below one another. Tapping one cascades the other
+// sub-categories out of the way (same lift+fade stagger used elsewhere in this panel) and
+// reveals its leaf items as text-only rows underneath - those leaves have no icons supplied,
+// so they're plain labels. Nothing is wired up to real content yet (see onClick below).
+private fun buildGeometryContent(context: Context): View {
+    val d = context.resources.displayMetrics.density
+    fun dp(v: Int) = (v * d).toInt()
+
+    fun selectableForeground(): android.graphics.drawable.Drawable? {
+        val outValue = TypedValue()
+        context.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, outValue, true)
+        return if (outValue.resourceId != 0) context.getDrawable(outValue.resourceId) else null
+    }
+
+    val staggerStepMs = 45L
+    val animDurationMs = 200L
+    val liftDistancePx = dp(28).toFloat()
+
+    val root = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        setPadding(0, dp(2), 0, dp(24))
+        clipChildren = false
+        clipToPadding = false
+    }
+
+    root.addView(TextView(context).apply {
+        text = "Geometry"
+        setTextColor(Color.WHITE)
+        textSize = 14f
+        setTypeface(typeface, Typeface.BOLD)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(12)
+        }
+    })
+
+    data class Row(val header: LinearLayout, val childrenContainer: LinearLayout)
+    val rows = mutableListOf<Row>()
+    var expandedIndex: Int? = null
+
+    for ((index, sub) in GEOMETRY_SUBCATEGORIES.withIndex()) {
+        val header = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
+            foreground = selectableForeground()
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            addView(ImageView(context).apply {
+                setImageResource(sub.iconRes)
+                layoutParams = LinearLayout.LayoutParams(dp(20), dp(20))
+            })
+            addView(TextView(context).apply {
+                text = sub.label
+                setTextColor(Color.WHITE)
+                textSize = 13f
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    marginStart = dp(10)
+                }
+            })
+        }
+
+        // Leaf items: text-only rows (no icon supplied for these), indented under their parent.
+        // Hidden until this sub-category is expanded.
+        val childrenContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            alpha = 0f
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(2)
+                bottomMargin = dp(4)
+            }
+            for (childLabel in sub.children) {
+                addView(TextView(context).apply {
+                    text = childLabel
+                    setTextColor(Color.parseColor("#9A9AA5"))
+                    textSize = 12.5f
+                    isClickable = true
+                    isFocusable = true
+                    foreground = selectableForeground()
+                    setPadding(dp(38), dp(7), dp(10), dp(7))
+                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    // Content intentionally left blank for now - no detail view wired up yet.
+                    setOnClickListener { }
+                })
+            }
+        }
+
+        root.addView(header)
+        root.addView(childrenContainer)
+        rows.add(Row(header, childrenContainer))
+    }
+
+    fun collapseChildrenImmediate(row: Row) {
+        row.childrenContainer.animate().cancel()
+        row.childrenContainer.visibility = View.GONE
+        row.childrenContainer.alpha = 0f
+        row.childrenContainer.translationY = 0f
+    }
+
+    fun resetHeadersImmediate() {
+        rows.forEach { row ->
+            row.header.animate().cancel()
+            row.header.visibility = View.VISIBLE
+            row.header.alpha = 1f
+            row.header.translationY = 0f
+        }
+    }
+
+    // Fades/lifts every other header out of the way (staggered by distance from the expanded
+    // row) and reveals the expanded row's children, fading them in top-to-bottom.
+    fun expand(index: Int) {
+        rows.forEachIndexed { idx, row ->
+            if (idx == index) return@forEachIndexed
+            val delay = kotlin.math.abs(idx - index) * staggerStepMs
+            row.header.animate().cancel()
+            row.header.visibility = View.VISIBLE
+            row.header.animate()
+                .translationY(-liftDistancePx)
+                .alpha(0f)
+                .setStartDelay(delay)
+                .setDuration(animDurationMs)
+                .setInterpolator(AccelerateInterpolator())
+                .withEndAction { if (row.header.alpha == 0f) row.header.visibility = View.GONE }
+                .start()
+        }
+        val childrenContainer = rows[index].childrenContainer
+        childrenContainer.animate().cancel()
+        childrenContainer.visibility = View.VISIBLE
+        childrenContainer.alpha = 0f
+        childrenContainer.translationY = -dp(8).toFloat()
+        childrenContainer.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setStartDelay(staggerStepMs)
+            .setDuration(animDurationMs)
+            .setInterpolator(DecelerateInterpolator())
+            .withEndAction(null)
+            .start()
+    }
+
+    // Reverses expand(): hides the expanded row's children and brings every other header back
+    // into place, staggered.
+    fun collapse(index: Int) {
+        val childrenContainer = rows[index].childrenContainer
+        childrenContainer.animate().cancel()
+        childrenContainer.animate()
+            .alpha(0f)
+            .translationY(-dp(8).toFloat())
+            .setDuration(animDurationMs)
+            .setInterpolator(AccelerateInterpolator())
+            .withEndAction {
+                if (childrenContainer.alpha == 0f) {
+                    childrenContainer.visibility = View.GONE
+                    childrenContainer.translationY = 0f
+                }
+            }
+            .start()
+
+        rows.forEachIndexed { idx, row ->
+            if (idx == index) return@forEachIndexed
+            val delay = kotlin.math.abs(idx - index) * staggerStepMs
+            row.header.animate().cancel()
+            row.header.visibility = View.VISIBLE
+            row.header.animate()
+                .translationY(0f)
+                .alpha(1f)
+                .setStartDelay(delay)
+                .setDuration(animDurationMs)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction(null)
+                .start()
+        }
+    }
+
+    rows.forEachIndexed { index, row ->
+        row.header.setOnClickListener {
+            when (expandedIndex) {
+                index -> {
+                    collapse(index)
+                    expandedIndex = null
+                }
+                null -> {
+                    expand(index)
+                    expandedIndex = index
+                }
+                else -> {
+                    resetHeadersImmediate()
+                    rows.forEachIndexed { idx, r -> if (idx != index) collapseChildrenImmediate(r) }
+                    expand(index)
+                    expandedIndex = index
+                }
+            }
+        }
+    }
+
+    return root
+}
 
 fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     val d = context.resources.displayMetrics.density
@@ -183,24 +398,43 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         addView(sectionsContainer)
     }
     // Shown instead of contentScroll whenever a specific category (not "All") is selected in
-    // the rail. Categories don't have their own dedicated views yet, so this is just blank for
-    // now - each category will get its own use-case-specific content here later.
+    // the rail. Most categories don't have their own dedicated views yet, so this is just blank
+    // for now - each will get its own use-case-specific content here later. "Geometry" is the
+    // first to get one - see geometryContentView below.
     val emptyCategoryView = FrameLayout(context).apply {
         layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         visibility = View.GONE
+    }
+    // Dedicated "Geometry" content: Create/Edit/Transform/Deform/Animate accordion (see
+    // buildGeometryContent). Wrapped in a ScrollView since the expanded leaf list can run long.
+    val geometryContentView = ScrollView(context).apply {
+        isFillViewport = true
+        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        clipChildren = false
+        clipToPadding = false
+        visibility = View.GONE
+        addView(buildGeometryContent(context))
     }
     val contentContainer = FrameLayout(context).apply {
         layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
         addView(contentScroll)
         addView(emptyCategoryView)
+        addView(geometryContentView)
     }
     fun showAllContent() {
         emptyCategoryView.visibility = View.GONE
+        geometryContentView.visibility = View.GONE
         contentScroll.visibility = View.VISIBLE
     }
     fun showEmptyCategoryContent() {
         contentScroll.visibility = View.GONE
+        geometryContentView.visibility = View.GONE
         emptyCategoryView.visibility = View.VISIBLE
+    }
+    fun showGeometryContent() {
+        contentScroll.visibility = View.GONE
+        emptyCategoryView.visibility = View.GONE
+        geometryContentView.visibility = View.VISIBLE
     }
 
     for (cat in COMPONENT_CATEGORIES) {
@@ -550,6 +784,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
     for (cat in COMPONENT_CATEGORIES) {
         val index = railEntries.size // this row's fixed position, captured before it's appended
+        // "Geometry" (id "shapes") has its own dedicated content; every other category still
+        // falls back to the generic blank placeholder until it gets one too.
+        fun showCategoryContent() = if (cat.id == "shapes") showGeometryContent() else showEmptyCategoryContent()
         val item = buildRailRow(cat.iconRes, cat.label) {
             setActiveCategory(cat.id)
             when (activeRailIndex) {
@@ -561,13 +798,13 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 null -> {
                     railAnimateSelect(index)
                     activeRailIndex = index
-                    showEmptyCategoryContent()
+                    showCategoryContent()
                 }
                 else -> {
                     railResetAllImmediate()
                     railAnimateSelect(index)
                     activeRailIndex = index
-                    showEmptyCategoryContent()
+                    showCategoryContent()
                 }
             }
         }
