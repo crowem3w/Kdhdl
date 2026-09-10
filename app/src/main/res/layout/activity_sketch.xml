@@ -17,49 +17,6 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-        <!-- Empty state -->
-        <LinearLayout
-            android:id="@+id/emptyStateContainer"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:orientation="vertical"
-            android:gravity="center_horizontal"
-            android:clickable="true"
-            android:focusable="true"
-            android:padding="16dp">
-
-            <FrameLayout
-                android:layout_width="64dp"
-                android:layout_height="64dp"
-                android:background="@drawable/bg_empty_icon_box">
-
-                <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:layout_gravity="center"
-                    android:src="@drawable/ic_plus"
-                    app:tint="#79747E" />
-            </FrameLayout>
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:text="Start designing"
-                android:textColor="#1D1B20"
-                android:textSize="17sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Add elements and bring your ideas to life."
-                android:textColor="#79747E"
-                android:textSize="13sp" />
-        </LinearLayout>
-
         <!-- Top bar -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -134,57 +91,6 @@
                 android:elevation="3dp" />
         </LinearLayout>
 
-        <!-- Zoom controls -->
-        <LinearLayout
-            android:layout_width="48dp"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom|end"
-            android:layout_marginEnd="16dp"
-            android:layout_marginBottom="16dp"
-            android:orientation="vertical"
-            android:background="@drawable/bg_zoom_control"
-            android:elevation="3dp">
-
-            <ImageButton
-                android:id="@+id/btnZoomIn"
-                android:layout_width="48dp"
-                android:layout_height="44dp"
-                android:background="@drawable/bg_top_bar_button_ripple"
-                android:padding="13dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_plus"
-                android:contentDescription="Zoom in" />
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="@drawable/divider_zoom" />
-
-            <ImageButton
-                android:id="@+id/btnZoomOut"
-                android:layout_width="48dp"
-                android:layout_height="44dp"
-                android:background="@drawable/bg_top_bar_button_ripple"
-                android:padding="13dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_minus"
-                android:contentDescription="Zoom out" />
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="@drawable/divider_zoom" />
-
-            <ImageButton
-                android:id="@+id/btnLocate"
-                android:layout_width="48dp"
-                android:layout_height="44dp"
-                android:background="@drawable/bg_top_bar_button_ripple"
-                android:padding="12dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_locate"
-                android:contentDescription="Center canvas" />
-        </LinearLayout>
     </FrameLayout>
 
     <!-- Thin strip pinned to the bottom edge, hidden behind the panel whenever the panel is

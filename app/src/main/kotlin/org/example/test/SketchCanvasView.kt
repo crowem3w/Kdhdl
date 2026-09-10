@@ -9,6 +9,7 @@ import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import kotlin.math.max
 
@@ -65,18 +66,40 @@ class SketchCanvasView @JvmOverloads constructor(
     private var dragOffsetY = 0f
     private var dragMoved = false
 
+    // Zoom state. Scaling pivots around the view's center; content-space coordinates (used for
+    // hit-testing/dragging) are derived from screen coordinates via the pivot + scaleFactor, see
+    // toContentX/toContentY.
+    private var scaleFactor = 1f
+    private val minScale = 0.5f
+    private val maxScale = 4f
+    private val pivotX: Float get() = width / 2f
+    private val pivotY: Float get() = height / 2f
+
+    private fun toContentX(screenX: Float) = pivotX + (screenX - pivotX) / scaleFactor
+    private fun toContentY(screenY: Float) = pivotY + (screenY - pivotY) / scaleFactor
+
+    private val scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            scaleFactor = (scaleFactor * detector.scaleFactor).coerceIn(minScale, maxScale)
+            invalidate()
+            return true
+        }
+    })
+
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onLongPress(e: MotionEvent) {
-            val hit = hitTest(e.x, e.y)
+            val cx = toContentX(e.x)
+            val cy = toContentY(e.y)
+            val hit = hitTest(cx, cy)
             if (hit != null) {
                 listener?.onPartLongPressed(hit)
             } else {
-                listener?.onLongPressEmptySpace(e.x, e.y)
+                listener?.onLongPressEmptySpace(cx, cy)
             }
         }
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-            val hit = hitTest(e.x, e.y)
+            val hit = hitTest(toContentX(e.x), toContentY(e.y))
             if (hit != selected) {
                 selected = hit
                 invalidate()
@@ -84,27 +107,41 @@ class SketchCanvasView @JvmOverloads constructor(
             }
             return true
         }
+
+        override fun onDoubleTap(e: MotionEvent): Boolean {
+            scaleFactor = 1f
+            invalidate()
+            return true
+        }
     })
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        scaleGestureDetector.onTouchEvent(event)
         gestureDetector.onTouchEvent(event)
+        val pinching = scaleGestureDetector.isInProgress || event.pointerCount > 1
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                val hit = hitTest(event.x, event.y)
+                val cx = toContentX(event.x)
+                val cy = toContentY(event.y)
+                val hit = hitTest(cx, cy)
                 draggingPart = hit
                 dragMoved = false
                 if (hit != null) {
-                    dragOffsetX = event.x - hit.x
-                    dragOffsetY = event.y - hit.y
+                    dragOffsetX = cx - hit.x
+                    dragOffsetY = cy - hit.y
                 }
             }
             MotionEvent.ACTION_MOVE -> {
-                draggingPart?.let { p ->
-                    p.x = (event.x - dragOffsetX).coerceIn(0f, max(0f, width - p.w))
-                    p.y = (event.y - dragOffsetY).coerceIn(0f, max(0f, height - p.h))
-                    dragMoved = true
-                    invalidate()
-                    listener?.onSelectionChanged(p)
+                if (!pinching) {
+                    draggingPart?.let { p ->
+                        val cx = toContentX(event.x)
+                        val cy = toContentY(event.y)
+                        p.x = (cx - dragOffsetX).coerceIn(0f, max(0f, width - p.w))
+                        p.y = (cy - dragOffsetY).coerceIn(0f, max(0f, height - p.h))
+                        dragMoved = true
+                        invalidate()
+                        listener?.onSelectionChanged(p)
+                    }
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -146,8 +183,11 @@ class SketchCanvasView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
+        val saveCount = canvas.save()
+        canvas.scale(scaleFactor, scaleFactor, pivotX, pivotY)
         for (part in parts) drawPart(canvas, part)
         selected?.let { drawSelection(canvas, it) }
+        canvas.restoreToCount(saveCount)
     }
 
     private fun drawPart(canvas: Canvas, part: SketchPart) {

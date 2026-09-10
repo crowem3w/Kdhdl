@@ -39,7 +39,6 @@ import kotlin.math.roundToInt
 class SketchActivity : AppCompatActivity() {
 
     private lateinit var canvas: SketchCanvasView
-    private lateinit var emptyState: View
 
     private lateinit var tabSelect: LinearLayout
     private lateinit var tabShapes: LinearLayout
@@ -85,7 +84,6 @@ class SketchActivity : AppCompatActivity() {
         setContentView(R.layout.activity_sketch)
 
         canvas = findViewById(R.id.sketchCanvas)
-        emptyState = findViewById(R.id.emptyStateContainer)
 
         tabSelect = findViewById(R.id.tabSelect)
         tabShapes = findViewById(R.id.tabShapes)
@@ -131,11 +129,10 @@ class SketchActivity : AppCompatActivity() {
 
             override fun onSelectionChanged(part: SketchPart?) = updateProperties(part)
 
-            override fun onPartsChanged() = updateEmptyState()
+            override fun onPartsChanged() = Unit
         }
 
         setupTopBar()
-        setupZoomControls()
         setupBottomPanel()
         setupDragHandle()
         setupTabs()
@@ -143,16 +140,6 @@ class SketchActivity : AppCompatActivity() {
         setupAnimationRow()
         setupHiddenReveal()
 
-        emptyState.setOnClickListener {
-            openPartPicker(
-                title = "Add to sketch",
-                kinds = PartKind.values().toList(),
-                x = canvas.width / 2f,
-                y = canvas.height / 2f,
-            )
-        }
-
-        updateEmptyState()
         updateProperties(null)
     }
 
@@ -175,12 +162,6 @@ class SketchActivity : AppCompatActivity() {
     }
 
     
-
-    private fun setupZoomControls() {
-        findViewById<View>(R.id.btnZoomIn).setOnClickListener { notAvailableYet("Zoom") }
-        findViewById<View>(R.id.btnZoomOut).setOnClickListener { notAvailableYet("Zoom") }
-        findViewById<View>(R.id.btnLocate).setOnClickListener { notAvailableYet("Recenter") }
-    }
 
     
 
@@ -424,10 +405,6 @@ class SketchActivity : AppCompatActivity() {
     }
 
     
-
-    private fun updateEmptyState() {
-        emptyState.visibility = if (canvas.parts.isEmpty()) View.VISIBLE else View.GONE
-    }
 
     
 
