@@ -1,0 +1,433 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FFFFFF"
+    android:fitsSystemWindows="true">
+
+    <!-- Canvas + floating chrome (top bar, empty state, zoom controls) -->
+    <FrameLayout
+        android:id="@+id/canvasArea"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <org.example.test.SketchCanvasView
+            android:id="@+id/sketchCanvas"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- Top bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingTop="16dp">
+
+            <ImageButton
+                android:id="@+id/btnBack"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="10dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_chevron_left"
+                android:contentDescription="Back"
+                android:elevation="3dp" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <ImageButton
+                android:id="@+id/btnUndo"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="10dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_undo"
+                android:contentDescription="Undo"
+                android:elevation="3dp" />
+
+            <ImageButton
+                android:id="@+id/btnRedo"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="10dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_redo"
+                android:contentDescription="Redo"
+                android:elevation="3dp" />
+
+            <ImageButton
+                android:id="@+id/btnMore"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="10dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_more_horiz"
+                android:contentDescription="More"
+                android:elevation="3dp" />
+
+            <ImageButton
+                android:id="@+id/btnPlay"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="11dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_play"
+                android:contentDescription="Preview"
+                android:elevation="3dp" />
+        </LinearLayout>
+
+    </FrameLayout>
+
+    <!-- Thin strip pinned to the bottom edge, hidden behind the panel whenever the panel is
+         visible. Exposed only when the panel has been swiped/dragged into STATE_HIDDEN, at which
+         point a tap or an upward swipe here brings the shared panel back (see setupHiddenReveal
+         in SketchActivity). -->
+    <FrameLayout
+        android:id="@+id/bottomSwipeHandle"
+        android:layout_width="match_parent"
+        android:layout_height="28dp"
+        android:layout_gravity="bottom"
+        android:clickable="true"
+        android:focusable="true">
+
+        <View
+            android:layout_width="36dp"
+            android:layout_height="4dp"
+            android:layout_gravity="center"
+            android:background="@drawable/bg_drag_handle" />
+    </FrameLayout>
+
+    <!-- Shared bottom panel: Main tools tab bar stays pinned at the top of the panel; the
+         content area beneath it swaps between the default tools content (Quick Actions,
+         Properties, Animation & Interaction) and the Components browser. BottomSheetBehavior is
+         used purely as a height/visibility container here (app:behavior_draggable="false" -
+         see setupDragHandle in SketchActivity): the panel's own dragHandle drives free-form
+         resizing by hand, tracking the finger 1:1 via behavior.peekHeight, rather than relying
+         on the framework's fling-to-snap gesture. Letting go only auto-completes to hidden or
+         full screen when the drag has gone past those extremes; anywhere in between just holds
+         at the height you left it. -->
+    <LinearLayout
+        android:id="@+id/bottomPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="@drawable/bg_bottom_panel"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="18dp"
+        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
+        app:behavior_hideable="true"
+        app:behavior_skipCollapsed="false"
+        app:behavior_peekHeight="220dp">
+
+        <!-- Touch target is taller (40dp) than the visible pill (4dp) so the handle meets a
+             comfortable Fitts's-law-friendly hit area without adding visual bulk. -->
+        <FrameLayout
+            android:id="@+id/dragHandle"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:layout_marginTop="-10dp"
+            android:layout_marginBottom="4dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Drag to resize panel">
+
+            <View
+                android:layout_width="36dp"
+                android:layout_height="4dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_drag_handle" />
+        </FrameLayout>
+
+        <!-- Main tools tab navigation (always visible, above both the default tools content and
+             the Components browser). -->
+        <LinearLayout
+            android:id="@+id/mainToolsRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:id="@+id/tabSelect"
+                style="@style/SketchTabColumn">
+
+                <LinearLayout style="@style/SketchTabPill" android:background="@drawable/bg_tab_selected">
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_cursor" />
+                    <TextView style="@style/SketchTabLabel" android:text="Select" android:textColor="#FFFFFF" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tabShapes"
+                style="@style/SketchTabColumn">
+
+                <LinearLayout style="@style/SketchTabPill">
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_shapes" app:tint="#9A9AA5" />
+                    <TextView style="@style/SketchTabLabel" android:text="Shapes" android:textColor="#9A9AA5" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tabText"
+                style="@style/SketchTabColumn">
+
+                <LinearLayout style="@style/SketchTabPill">
+                    <TextView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:gravity="center"
+                        android:text="T"
+                        android:textColor="#9A9AA5"
+                        android:textStyle="bold"
+                        android:textSize="15sp" />
+                    <TextView style="@style/SketchTabLabel" android:text="Text" android:textColor="#9A9AA5" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tabMedia"
+                style="@style/SketchTabColumn">
+
+                <LinearLayout style="@style/SketchTabPill">
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_media" app:tint="#9A9AA5" />
+                    <TextView style="@style/SketchTabLabel" android:text="Media" android:textColor="#9A9AA5" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tabComponents"
+                style="@style/SketchTabColumn">
+
+                <LinearLayout style="@style/SketchTabPill">
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_components" app:tint="#9A9AA5" />
+                    <TextView style="@style/SketchTabLabel" android:text="Components" android:textColor="#9A9AA5" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Content area beneath the Main tools row: swaps between defaultToolsContentScroll and
+             componentsContentContainer. Weighted to fill the rest of the panel, so it grows when
+             the panel is dragged taller (up to full screen) and is what scrolls/clips first when
+             the panel is dragged shorter. -->
+        <FrameLayout
+            android:id="@+id/panelContentContainer"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="14dp">
+
+            <androidx.core.widget.NestedScrollView
+                android:id="@+id/defaultToolsContentScroll"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:fillViewport="true">
+
+                <LinearLayout
+                    android:id="@+id/defaultToolsContent"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <!-- Quick actions -->
+                    <TextView
+                        style="@style/SketchSectionLabel"
+                        android:text="Quick Actions" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <LinearLayout android:id="@+id/actionFrame" style="@style/SketchQuickAction">
+                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_frame" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Frame" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionGroup" style="@style/SketchQuickAction">
+                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_group" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Group" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionAlign" style="@style/SketchQuickAction">
+                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_align" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Align" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionDistribute" style="@style/SketchQuickAction">
+                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_distribute" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Distribute" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionLock" style="@style/SketchQuickAction">
+                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_lock" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Lock" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Properties panel -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                style="@style/SketchSectionLabel"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:text="Properties" />
+
+            <ImageButton
+                android:id="@+id/btnPropertiesMore"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:padding="4dp"
+                android:src="@drawable/ic_more_vert" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:background="@drawable/bg_properties_card"
+            android:padding="14dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView style="@style/SketchPropertyLabel" android:text="Position" />
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <TextView style="@style/SketchPropertyKey" android:text="X" />
+                    <TextView android:id="@+id/tvPosX" style="@style/SketchPropertyValue" android:text="0" />
+
+                    <TextView style="@style/SketchPropertyKey" android:layout_marginStart="14dp" android:text="Y" />
+                    <TextView android:id="@+id/tvPosY" style="@style/SketchPropertyValue" android:text="0" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView style="@style/SketchPropertyLabel" android:text="Size" />
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <TextView style="@style/SketchPropertyKey" android:text="W" />
+                    <TextView android:id="@+id/tvSizeW" style="@style/SketchPropertyValue" android:text="100" />
+
+                    <TextView style="@style/SketchPropertyKey" android:layout_marginStart="14dp" android:text="H" />
+                    <TextView android:id="@+id/tvSizeH" style="@style/SketchPropertyValue" android:text="100" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView style="@style/SketchPropertyLabel" android:text="Rotation" />
+
+                <TextView
+                    android:id="@+id/tvRotation"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="0\u00B0"
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Animation & interaction -->
+        <TextView
+            style="@style/SketchSectionLabel"
+            android:layout_marginTop="18dp"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:text="Animation &amp; Interaction" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal">
+
+            <LinearLayout android:id="@+id/actionAnimate" style="@style/SketchAnimColumn">
+                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_animate" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Animate" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionStates" style="@style/SketchAnimColumn">
+                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_states" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="States" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionInteractions" style="@style/SketchAnimColumn">
+                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_link" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Interactions" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionTimeline" style="@style/SketchAnimColumn">
+                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_timeline" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Timeline" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionMore" style="@style/SketchAnimColumn">
+                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_more_horiz" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="More" />
+            </LinearLayout>
+        </LinearLayout>
+                </LinearLayout>
+            </androidx.core.widget.NestedScrollView>
+
+            <!-- Components browser content, built and attached at runtime by
+                 buildComponentsContent() in ComponentsPanel.kt; hidden until the Components tab
+                 is tapped. Lives in the same shared panel as the tools above, beneath the
+                 always-visible Main tools row. -->
+            <FrameLayout
+                android:id="@+id/componentsContentContainer"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+        </FrameLayout>
+    </LinearLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
