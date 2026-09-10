@@ -72,11 +72,11 @@ class SketchCanvasView @JvmOverloads constructor(
     private var scaleFactor = 1f
     private val minScale = 0.5f
     private val maxScale = 4f
-    private val pivotX: Float get() = width / 2f
-    private val pivotY: Float get() = height / 2f
+    private val zoomPivotX: Float get() = width / 2f
+    private val zoomPivotY: Float get() = height / 2f
 
-    private fun toContentX(screenX: Float) = pivotX + (screenX - pivotX) / scaleFactor
-    private fun toContentY(screenY: Float) = pivotY + (screenY - pivotY) / scaleFactor
+    private fun toContentX(screenX: Float) = zoomPivotX + (screenX - zoomPivotX) / scaleFactor
+    private fun toContentY(screenY: Float) = zoomPivotY + (screenY - zoomPivotY) / scaleFactor
 
     private val scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
@@ -184,7 +184,7 @@ class SketchCanvasView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
         val saveCount = canvas.save()
-        canvas.scale(scaleFactor, scaleFactor, pivotX, pivotY)
+        canvas.scale(scaleFactor, scaleFactor, zoomPivotX, zoomPivotY)
         for (part in parts) drawPart(canvas, part)
         selected?.let { drawSelection(canvas, it) }
         canvas.restoreToCount(saveCount)
