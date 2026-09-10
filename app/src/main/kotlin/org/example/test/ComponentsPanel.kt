@@ -99,12 +99,11 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         isClickable = true
         isFocusable = true
         foreground = selectableForeground()
-        addView(TextView(context).apply {
-            text = "\u2715"
-            setTextColor(Color.parseColor("#9A9AA5"))
-            textSize = 15f
-            gravity = Gravity.CENTER
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        contentDescription = "Back"
+        addView(ImageView(context).apply {
+            setImageResource(R.drawable.ic_back_return)
+            setColorFilter(Color.parseColor("#9A9AA5"))
+            layoutParams = FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER)
         })
         setOnClickListener { onClose() }
     }
