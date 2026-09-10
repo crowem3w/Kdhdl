@@ -93,12 +93,15 @@ private val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
 
 
 
-// Dedicated content for the "Geometry" category: an accordion listing Create/Edit/Transform/
-// Deform/Animate (each with its own icon) below one another. Tapping one cascades the other
-// sub-categories out of the way (same lift+fade stagger used elsewhere in this panel) and
-// reveals its leaf items as text-only rows underneath - those leaves have no icons supplied,
-// so they're plain labels. Nothing is wired up to real content yet (see onClick below).
-private fun buildGeometryContent(context: Context): View {
+// Dedicated content for the "Geometry" category, rendered directly in the sidebar rail beneath
+// its icon (not in the main content pane): an accordion listing Create/Edit/Transform/Deform/
+// Animate, each with its own icon. Tapping one cascades the other sub-categories out of the way
+// (same lift+fade stagger used elsewhere in this panel) and reveals its leaf items as text-only
+// rows underneath - those leaves have no icons supplied, so they're plain labels. Nothing is
+// wired up to real content yet (see onClick below).
+// Returns the view plus a `reset` callback that immediately collapses everything, for use when
+// the Geometry category itself is deselected in the rail.
+private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Unit> {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
 
@@ -110,49 +113,43 @@ private fun buildGeometryContent(context: Context): View {
 
     val staggerStepMs = 45L
     val animDurationMs = 200L
-    val liftDistancePx = dp(28).toFloat()
+    val liftDistancePx = dp(24).toFloat()
+    val iconTint = Color.WHITE
 
     val root = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        setPadding(0, dp(2), 0, dp(24))
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(2)
+        }
+        setPadding(dp(6), 0, 0, dp(4))
         clipChildren = false
         clipToPadding = false
     }
-
-    root.addView(TextView(context).apply {
-        text = "Geometry"
-        setTextColor(Color.WHITE)
-        textSize = 14f
-        setTypeface(typeface, Typeface.BOLD)
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            bottomMargin = dp(12)
-        }
-    })
 
     data class Row(val header: LinearLayout, val childrenContainer: LinearLayout)
     val rows = mutableListOf<Row>()
     var expandedIndex: Int? = null
 
-    for ((index, sub) in GEOMETRY_SUBCATEGORIES.withIndex()) {
+    for (sub in GEOMETRY_SUBCATEGORIES) {
         val header = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             isClickable = true
             isFocusable = true
             foreground = selectableForeground()
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setPadding(dp(8), dp(7), dp(8), dp(7))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             addView(ImageView(context).apply {
                 setImageResource(sub.iconRes)
-                layoutParams = LinearLayout.LayoutParams(dp(20), dp(20))
+                setColorFilter(iconTint)
+                layoutParams = LinearLayout.LayoutParams(dp(18), dp(18))
             })
             addView(TextView(context).apply {
                 text = sub.label
                 setTextColor(Color.WHITE)
-                textSize = 13f
+                textSize = 12.5f
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    marginStart = dp(10)
+                    marginStart = dp(8)
                 }
             })
         }
@@ -163,20 +160,20 @@ private fun buildGeometryContent(context: Context): View {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
             alpha = 0f
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(2)
-                bottomMargin = dp(4)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(1)
+                bottomMargin = dp(2)
             }
             for (childLabel in sub.children) {
                 addView(TextView(context).apply {
                     text = childLabel
                     setTextColor(Color.parseColor("#9A9AA5"))
-                    textSize = 12.5f
+                    textSize = 11.5f
                     isClickable = true
                     isFocusable = true
                     foreground = selectableForeground()
-                    setPadding(dp(38), dp(7), dp(10), dp(7))
-                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    setPadding(dp(28), dp(6), dp(8), dp(6))
+                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
                     // Content intentionally left blank for now - no detail view wired up yet.
                     setOnClickListener { }
                 })
@@ -225,7 +222,7 @@ private fun buildGeometryContent(context: Context): View {
         childrenContainer.animate().cancel()
         childrenContainer.visibility = View.VISIBLE
         childrenContainer.alpha = 0f
-        childrenContainer.translationY = -dp(8).toFloat()
+        childrenContainer.translationY = -dp(6).toFloat()
         childrenContainer.animate()
             .alpha(1f)
             .translationY(0f)
@@ -243,7 +240,7 @@ private fun buildGeometryContent(context: Context): View {
         childrenContainer.animate().cancel()
         childrenContainer.animate()
             .alpha(0f)
-            .translationY(-dp(8).toFloat())
+            .translationY(-dp(6).toFloat())
             .setDuration(animDurationMs)
             .setInterpolator(AccelerateInterpolator())
             .withEndAction {
@@ -291,7 +288,14 @@ private fun buildGeometryContent(context: Context): View {
         }
     }
 
-    return root
+    fun reset() {
+        rows.forEach { row -> row.header.animate().cancel() }
+        resetHeadersImmediate()
+        rows.forEach { row -> collapseChildrenImmediate(row) }
+        expandedIndex = null
+    }
+
+    return root to ::reset
 }
 
 fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
@@ -398,43 +402,25 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         addView(sectionsContainer)
     }
     // Shown instead of contentScroll whenever a specific category (not "All") is selected in
-    // the rail. Most categories don't have their own dedicated views yet, so this is just blank
-    // for now - each will get its own use-case-specific content here later. "Geometry" is the
-    // first to get one - see geometryContentView below.
+    // the rail. Categories don't have their own dedicated views yet, so this is just blank for
+    // now - each category will get its own use-case-specific content here later. "Geometry"'s
+    // own navigation lives in the sidebar rail itself (see geometryAccordion below), not here.
     val emptyCategoryView = FrameLayout(context).apply {
         layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         visibility = View.GONE
-    }
-    // Dedicated "Geometry" content: Create/Edit/Transform/Deform/Animate accordion (see
-    // buildGeometryContent). Wrapped in a ScrollView since the expanded leaf list can run long.
-    val geometryContentView = ScrollView(context).apply {
-        isFillViewport = true
-        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        clipChildren = false
-        clipToPadding = false
-        visibility = View.GONE
-        addView(buildGeometryContent(context))
     }
     val contentContainer = FrameLayout(context).apply {
         layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
         addView(contentScroll)
         addView(emptyCategoryView)
-        addView(geometryContentView)
     }
     fun showAllContent() {
         emptyCategoryView.visibility = View.GONE
-        geometryContentView.visibility = View.GONE
         contentScroll.visibility = View.VISIBLE
     }
     fun showEmptyCategoryContent() {
         contentScroll.visibility = View.GONE
-        geometryContentView.visibility = View.GONE
         emptyCategoryView.visibility = View.VISIBLE
-    }
-    fun showGeometryContent() {
-        contentScroll.visibility = View.GONE
-        emptyCategoryView.visibility = View.GONE
-        geometryContentView.visibility = View.VISIBLE
     }
 
     for (cat in COMPONENT_CATEGORIES) {
@@ -648,6 +634,12 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         clipToPadding = false
     }
 
+    // "Geometry"'s Create/Edit/Transform/Deform/Animate navigation lives directly in the
+    // sidebar, inserted right under its own row (see the COMPONENT_CATEGORIES loop below).
+    // Hidden until the Geometry row is selected.
+    val (geometryAccordion, geometryAccordionReset) = buildGeometrySidebarAccordion(context)
+    geometryAccordion.visibility = View.GONE
+
     fun buildRailRow(iconRes: Int, label: String, onClick: () -> Unit): LinearLayout {
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -681,6 +673,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     data class RailEntry(val view: View, val label: TextView?)
     val railEntries = mutableListOf<RailEntry>()
     var activeRailIndex: Int? = null
+    var activeCategoryId: String? = null
 
     val railStaggerStepMs = 45L
     val railAnimDurationMs = 200L
@@ -766,6 +759,11 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         showAllContent()
         activeRailIndex?.let { railAnimateRestore(it) }
         activeRailIndex = null
+        if (activeCategoryId == "shapes") {
+            geometryAccordionReset()
+            geometryAccordion.visibility = View.GONE
+        }
+        activeCategoryId = null
         contentScroll.post { contentScroll.smoothScrollTo(0, 0) }
     }
     rail.addView(allItem)
@@ -784,33 +782,53 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
     for (cat in COMPONENT_CATEGORIES) {
         val index = railEntries.size // this row's fixed position, captured before it's appended
-        // "Geometry" (id "shapes") has its own dedicated content; every other category still
-        // falls back to the generic blank placeholder until it gets one too.
-        fun showCategoryContent() = if (cat.id == "shapes") showGeometryContent() else showEmptyCategoryContent()
         val item = buildRailRow(cat.iconRes, cat.label) {
             setActiveCategory(cat.id)
             when (activeRailIndex) {
                 index -> {
+                    // Deselecting this category (tapped again).
                     railAnimateRestore(index)
                     activeRailIndex = null
+                    activeCategoryId = null
                     showAllContent()
+                    if (cat.id == "shapes") {
+                        geometryAccordionReset()
+                        geometryAccordion.visibility = View.GONE
+                    }
                 }
                 null -> {
+                    // Nothing was selected - selecting this category fresh.
                     railAnimateSelect(index)
                     activeRailIndex = index
-                    showCategoryContent()
+                    activeCategoryId = cat.id
+                    showEmptyCategoryContent()
+                    if (cat.id == "shapes") geometryAccordion.visibility = View.VISIBLE
                 }
                 else -> {
+                    // A different category was active - switch straight to this one. If the
+                    // previous one was Geometry, fold its sidebar accordion back away first.
+                    if (activeCategoryId == "shapes") {
+                        geometryAccordionReset()
+                        geometryAccordion.visibility = View.GONE
+                    }
                     railResetAllImmediate()
                     railAnimateSelect(index)
                     activeRailIndex = index
-                    showCategoryContent()
+                    activeCategoryId = cat.id
+                    showEmptyCategoryContent()
+                    if (cat.id == "shapes") geometryAccordion.visibility = View.VISIBLE
                 }
             }
         }
         rail.addView(item)
         railIcons[cat.id] = item
         railEntries.add(RailEntry(item, item.getChildAt(1) as TextView))
+
+        // Geometry's Create/Edit/Transform/Deform/Animate rows sit directly beneath its own
+        // row in the sidebar (not in the content pane) - hidden until Geometry is selected.
+        if (cat.id == "shapes") {
+            rail.addView(geometryAccordion)
+        }
     }
     setActiveCategory(ALL_CATEGORY.id)
 
