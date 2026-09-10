@@ -9,6 +9,8 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
@@ -211,19 +213,95 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             val itemNames = COMPONENT_ITEMS[cat.id].orEmpty()
+
+            // Tracks which tile (if any) is currently "selected" within this row. Each
+            // category row has its own independent selection state.
+            var selectedIndex: Int? = null
+            val itemContainers = mutableListOf<LinearLayout>()
+            val labelViews = mutableListOf<TextView>()
+
+            val staggerStepMs = 50L
+            val animDurationMs = 220L
+            val liftDistancePx = dp(56).toFloat() // how far tiles travel up "into" the section header line
+
+            fun resetAllImmediate() {
+                itemContainers.forEach { c ->
+                    c.animate().cancel()
+                    c.visibility = View.VISIBLE
+                    c.alpha = 1f
+                    c.translationY = 0f
+                }
+                labelViews.forEach { l ->
+                    l.animate().cancel()
+                    l.visibility = View.VISIBLE
+                    l.alpha = 1f
+                }
+            }
+
+            // Cascades the non-selected tiles upward and out (staggered by distance from the
+            // selected tile), and collapses the selected tile's label so only its icon remains.
+            fun animateSelect(index: Int) {
+                itemContainers.forEachIndexed { idx, container ->
+                    if (idx == index) return@forEachIndexed
+                    val delay = kotlin.math.abs(idx - index) * staggerStepMs
+                    container.animate()
+                        .translationY(-liftDistancePx)
+                        .alpha(0f)
+                        .setStartDelay(delay)
+                        .setDuration(animDurationMs)
+                        .setInterpolator(AccelerateInterpolator())
+                        .withEndAction { container.visibility = View.GONE }
+                        .start()
+                }
+                val selectedLabel = labelViews[index]
+                selectedLabel.animate()
+                    .alpha(0f)
+                    .setDuration(animDurationMs)
+                    .withEndAction { selectedLabel.visibility = View.GONE }
+                    .start()
+            }
+
+            // Reverses animateSelect: brings the other tiles back down into place (staggered)
+            // and fades the selected tile's label back in.
+            fun animateRestore(index: Int) {
+                itemContainers.forEachIndexed { idx, container ->
+                    if (idx == index) return@forEachIndexed
+                    val delay = kotlin.math.abs(idx - index) * staggerStepMs
+                    container.visibility = View.VISIBLE
+                    container.animate()
+                        .translationY(0f)
+                        .alpha(1f)
+                        .setStartDelay(delay)
+                        .setDuration(animDurationMs)
+                        .setInterpolator(DecelerateInterpolator())
+                        .start()
+                }
+                val selectedLabel = labelViews[index]
+                selectedLabel.visibility = View.VISIBLE
+                selectedLabel.alpha = 0f
+                selectedLabel.animate()
+                    .alpha(1f)
+                    .setDuration(animDurationMs)
+                    .start()
+            }
+
             for (i in 0 until 4) {
-                addView(LinearLayout(context).apply {
+                lateinit var label: TextView
+                val itemContainer = LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
+                    isClickable = true
+                    isFocusable = true
+                    foreground = selectableForeground()
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                         if (i != 0) marginStart = dp(8)
                     }
-                    // Empty placeholder tile - not wired up to anything yet.
+                    // Icon tile (placeholder box today) - stays visible when selected.
                     addView(View(context).apply {
                         setBackgroundResource(R.drawable.bg_component_placeholder)
                         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
                     })
-                    // Name label underneath each tile.
-                    addView(TextView(context).apply {
+                    // Name label underneath each tile - hidden when its tile is selected.
+                    label = TextView(context).apply {
                         text = itemNames.getOrElse(i) { "Component ${i + 1}" }
                         setTextColor(Color.parseColor("#9A9AA5"))
                         textSize = 10.5f
@@ -233,8 +311,35 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                             topMargin = dp(4)
                         }
-                    })
-                })
+                    }
+                    addView(label)
+                }
+                itemContainers.add(itemContainer)
+                labelViews.add(label)
+                addView(itemContainer)
+            }
+
+            itemContainers.forEachIndexed { index, container ->
+                container.setOnClickListener {
+                    when (selectedIndex) {
+                        index -> {
+                            // Tapping the already-selected tile restores the row.
+                            animateRestore(index)
+                            selectedIndex = null
+                        }
+                        null -> {
+                            animateSelect(index)
+                            selectedIndex = index
+                        }
+                        else -> {
+                            // Switching selection within the row: snap back instantly, then
+                            // cascade out around the newly selected tile.
+                            resetAllImmediate()
+                            animateSelect(index)
+                            selectedIndex = index
+                        }
+                    }
+                }
             }
         })
         sectionsContainer.addView(section)
