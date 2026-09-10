@@ -376,6 +376,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             marginEnd = dp(10)
         }
+        clipChildren = false
+        clipToPadding = false
     }
 
     fun buildRailRow(iconRes: Int, label: String, onClick: () -> Unit): LinearLayout {
@@ -403,31 +405,137 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         }
     }
 
+    // Ordered list of every row in the rail (the "All" row, the divider, then each category
+    // row) in visual top-to-bottom order. Drives the cascade: index distance from whichever
+    // entry is selected determines each entry's stagger delay.
+    data class RailEntry(val view: View, val label: TextView?)
+    val railEntries = mutableListOf<RailEntry>()
+    var activeRailIndex: Int? = null
+
+    val railStaggerStepMs = 45L
+    val railAnimDurationMs = 200L
+    val railLiftDistancePx = dp(40).toFloat()
+
+    fun railResetAllImmediate() {
+        railEntries.forEach { entry ->
+            entry.view.animate().cancel()
+            entry.view.visibility = View.VISIBLE
+            entry.view.alpha = 1f
+            entry.view.translationY = 0f
+            entry.label?.let { l ->
+                l.animate().cancel()
+                l.visibility = View.VISIBLE
+                l.alpha = 1f
+            }
+        }
+    }
+
+    // Cascades every rail row except `index` upward and out (staggered by distance), and
+    // collapses the selected row's own label so only its icon remains.
+    fun railAnimateSelect(index: Int) {
+        railEntries.forEachIndexed { idx, entry ->
+            if (idx == index) return@forEachIndexed
+            val delay = kotlin.math.abs(idx - index) * railStaggerStepMs
+            entry.view.animate().cancel()
+            entry.view.visibility = View.VISIBLE
+            entry.view.animate()
+                .translationY(-railLiftDistancePx)
+                .alpha(0f)
+                .setStartDelay(delay)
+                .setDuration(railAnimDurationMs)
+                .setInterpolator(AccelerateInterpolator())
+                .withEndAction { if (entry.view.alpha == 0f) entry.view.visibility = View.GONE }
+                .start()
+        }
+        railEntries[index].label?.let { label ->
+            label.animate().cancel()
+            label.visibility = View.VISIBLE
+            label.animate()
+                .alpha(0f)
+                .setDuration(railAnimDurationMs)
+                .withEndAction { if (label.alpha == 0f) label.visibility = View.GONE }
+                .start()
+        }
+    }
+
+    // Reverses railAnimateSelect: brings every other row back into place (staggered) and
+    // fades the selected row's label back in.
+    fun railAnimateRestore(index: Int) {
+        railEntries.forEachIndexed { idx, entry ->
+            if (idx == index) return@forEachIndexed
+            val delay = kotlin.math.abs(idx - index) * railStaggerStepMs
+            entry.view.animate().cancel()
+            entry.view.visibility = View.VISIBLE
+            entry.view.animate()
+                .translationY(0f)
+                .alpha(1f)
+                .setStartDelay(delay)
+                .setDuration(railAnimDurationMs)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction(null)
+                .start()
+        }
+        railEntries[index].label?.let { label ->
+            label.animate().cancel()
+            label.visibility = View.VISIBLE
+            label.alpha = 0f
+            label.animate()
+                .alpha(1f)
+                .setDuration(railAnimDurationMs)
+                .withEndAction(null)
+                .start()
+        }
+    }
+
     // "All" sits on top of the rail and is the default state: every section is visible and
-    // nothing is filtered out. Selecting it just scrolls back to the top and re-highlights it.
+    // nothing is filtered out. Selecting it restores the rail if something else is collapsed,
+    // then scrolls back to the top.
     val allItem = buildRailRow(ALL_CATEGORY.iconRes, ALL_CATEGORY.label) {
         setActiveCategory(ALL_CATEGORY.id)
+        activeRailIndex?.let { railAnimateRestore(it) }
+        activeRailIndex = null
         contentScroll.post { contentScroll.smoothScrollTo(0, 0) }
     }
     rail.addView(allItem)
     railIcons[ALL_CATEGORY.id] = allItem
-    rail.addView(View(context).apply {
+    railEntries.add(RailEntry(allItem, allItem.getChildAt(1) as TextView))
+
+    val railDivider = View(context).apply {
         setBackgroundColor(Color.parseColor("#2A2A31"))
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
             topMargin = dp(2)
             bottomMargin = dp(8)
         }
-    })
+    }
+    rail.addView(railDivider)
+    railEntries.add(RailEntry(railDivider, null))
 
     for (cat in COMPONENT_CATEGORIES) {
+        val index = railEntries.size // this row's fixed position, captured before it's appended
         val item = buildRailRow(cat.iconRes, cat.label) {
             setActiveCategory(cat.id)
             sectionViews[cat.id]?.let { target ->
                 contentScroll.post { contentScroll.smoothScrollTo(0, target.top) }
             }
+            when (activeRailIndex) {
+                index -> {
+                    railAnimateRestore(index)
+                    activeRailIndex = null
+                }
+                null -> {
+                    railAnimateSelect(index)
+                    activeRailIndex = index
+                }
+                else -> {
+                    railResetAllImmediate()
+                    railAnimateSelect(index)
+                    activeRailIndex = index
+                }
+            }
         }
         rail.addView(item)
         railIcons[cat.id] = item
+        railEntries.add(RailEntry(item, item.getChildAt(1) as TextView))
     }
     setActiveCategory(ALL_CATEGORY.id)
 
