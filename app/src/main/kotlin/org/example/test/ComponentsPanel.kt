@@ -172,10 +172,14 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     val sectionsContainer = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(0, dp(2), 0, dp(28))
+        clipChildren = false
+        clipToPadding = false
     }
     val contentScroll = ScrollView(context).apply {
         isFillViewport = true
         layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+        clipChildren = false
+        clipToPadding = false
         addView(sectionsContainer)
     }
 
@@ -185,6 +189,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 bottomMargin = dp(22)
             }
+            clipChildren = false
+            clipToPadding = false
         }
         section.addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -212,6 +218,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         section.addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            clipChildren = false
+            clipToPadding = false
             val itemNames = COMPONENT_ITEMS[cat.id].orEmpty()
 
             // Tracks which tile (if any) is currently "selected" within this row. Each
