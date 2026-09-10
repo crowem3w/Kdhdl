@@ -424,16 +424,18 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             isClickable = true
             isFocusable = true
             foreground = selectableForeground()
-            setPadding(dp(8), 0, dp(12), 0)
+            setPadding(dp(10), 0, dp(10), 0)
             addView(ImageView(context).apply {
                 setImageResource(iconRes)
-                layoutParams = LinearLayout.LayoutParams(dp(18), dp(18)).apply { marginEnd = dp(8) }
+                layoutParams = LinearLayout.LayoutParams(dp(18), dp(18))
             })
             addView(TextView(context).apply {
                 text = label
                 textSize = 12.5f
                 maxLines = 1
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    marginStart = dp(8)
+                }
             })
             setOnClickListener { onClick() }
         }
