@@ -3,14 +3,26 @@ package org.example.test
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewTreeObserver
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import androidx.core.widget.NestedScrollView
+import com.google.android.material.bottomsheet.BottomSheetBehavior
 import kotlin.math.roundToInt
+
+
+
+
+
+
 
 
 
@@ -42,6 +54,16 @@ class SketchActivity : AppCompatActivity() {
     private lateinit var tvSizeH: TextView
     private lateinit var tvRotation: TextView
 
+    private lateinit var bottomPanel: LinearLayout
+    private lateinit var bottomSheetBehavior: BottomSheetBehavior<LinearLayout>
+    private lateinit var mainToolsRow: LinearLayout
+    private lateinit var panelContentContainer: FrameLayout
+    private lateinit var defaultToolsContentScroll: NestedScrollView
+    private lateinit var defaultToolsContent: LinearLayout
+    private lateinit var componentsContentContainer: FrameLayout
+    private var componentsContentBuilt = false
+    private var showingComponents = false
+
     private var nextId = 1L
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,6 +85,14 @@ class SketchActivity : AppCompatActivity() {
         tvSizeW = findViewById(R.id.tvSizeW)
         tvSizeH = findViewById(R.id.tvSizeH)
         tvRotation = findViewById(R.id.tvRotation)
+
+        bottomPanel = findViewById(R.id.bottomPanel)
+        mainToolsRow = findViewById(R.id.mainToolsRow)
+        panelContentContainer = findViewById(R.id.panelContentContainer)
+        defaultToolsContentScroll = findViewById(R.id.defaultToolsContentScroll)
+        defaultToolsContent = findViewById(R.id.defaultToolsContent)
+        componentsContentContainer = findViewById(R.id.componentsContentContainer)
+        bottomSheetBehavior = BottomSheetBehavior.from(bottomPanel)
 
         canvas.listener = object : SketchCanvasView.Listener {
             override fun onLongPressEmptySpace(x: Float, y: Float) = openPartPicker(
@@ -91,9 +121,11 @@ class SketchActivity : AppCompatActivity() {
 
         setupTopBar()
         setupZoomControls()
+        setupBottomPanel()
         setupTabs()
         setupQuickActions()
         setupAnimationRow()
+        setupHiddenReveal()
 
         emptyState.setOnClickListener {
             openPartPicker(
@@ -136,6 +168,88 @@ class SketchActivity : AppCompatActivity() {
 
     
 
+    
+
+
+
+
+
+
+    private fun setupBottomPanel() {
+        bottomPanel.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                if (defaultToolsContent.height > 0 && panelContentContainer.top > 0) {
+                    
+                    
+                    
+                    val peek = panelContentContainer.top +
+                        defaultToolsContent.height +
+                        bottomPanel.paddingBottom
+                    bottomSheetBehavior.peekHeight = peek
+                    bottomPanel.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                }
+            }
+        })
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+    }
+
+    
+
+    private fun showComponentsContent() {
+        if (!componentsContentBuilt) {
+            componentsContentContainer.addView(
+                buildComponentsContent(context = this, onClose = { closeComponentsContent() })
+            )
+            componentsContentBuilt = true
+        }
+        showingComponents = true
+        defaultToolsContentScroll.visibility = View.GONE
+        componentsContentContainer.visibility = View.VISIBLE
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
+    }
+
+    
+
+    private fun closeComponentsContent() {
+        showingComponents = false
+        componentsContentContainer.visibility = View.GONE
+        defaultToolsContentScroll.visibility = View.VISIBLE
+        setTabActive(tabSelect)
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+    }
+
+    
+
+    private fun setupHiddenReveal() {
+        val revealHandle = findViewById<View>(R.id.bottomSwipeHandle)
+        val gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                revealPanel()
+                return true
+            }
+
+            override fun onFling(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                velocityX: Float,
+                velocityY: Float,
+            ): Boolean {
+                val startY = e1?.y ?: return false
+                val swipedUp = (startY - e2.y) > 24 && velocityY < 0
+                if (swipedUp) revealPanel()
+                return swipedUp
+            }
+        })
+        revealHandle.setOnTouchListener { _, event -> gestureDetector.onTouchEvent(event) }
+    }
+
+    private fun revealPanel() {
+        if (showingComponents) closeComponentsContent()
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+    }
+
+    
+
     private fun setupTabs() {
         setTabActive(tabSelect)
 
@@ -150,15 +264,15 @@ class SketchActivity : AppCompatActivity() {
         }
         tabComponents.setOnClickListener {
             setTabActive(tabComponents)
-            showComponentsPanel(
-                context = this,
-                onDismiss = { setTabActive(tabSelect) },
-            )
+            showComponentsContent()
         }
-        tabSelect.setOnClickListener { setTabActive(tabSelect) }
+        tabSelect.setOnClickListener {
+            if (showingComponents) closeComponentsContent() else setTabActive(tabSelect)
+        }
     }
 
     private fun openPartPickerFromTab(tab: LinearLayout, title: String, kinds: List<PartKind>) {
+        if (showingComponents) closeComponentsContent()
         setTabActive(tab)
         openPartPicker(
             title = title,

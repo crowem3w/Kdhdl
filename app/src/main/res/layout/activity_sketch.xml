@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:background="#FFFFFF"
     android:fitsSystemWindows="true">
 
@@ -11,8 +10,7 @@
     <FrameLayout
         android:id="@+id/canvasArea"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
+        android:layout_height="match_parent">
 
         <org.example.test.SketchCanvasView
             android:id="@+id/sketchCanvas"
@@ -189,25 +187,56 @@
         </LinearLayout>
     </FrameLayout>
 
-    <!-- Bottom control panel -->
-    <LinearLayout
+    <!-- Thin strip pinned to the bottom edge, hidden behind the panel whenever the panel is
+         visible. Exposed only when the panel has been swiped/dragged into STATE_HIDDEN, at which
+         point a tap or an upward swipe here brings the shared panel back (see setupHiddenReveal
+         in SketchActivity). -->
+    <FrameLayout
+        android:id="@+id/bottomSwipeHandle"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="28dp"
+        android:layout_gravity="bottom"
+        android:clickable="true"
+        android:focusable="true">
+
+        <View
+            android:layout_width="36dp"
+            android:layout_height="4dp"
+            android:layout_gravity="center"
+            android:background="@drawable/bg_drag_handle" />
+    </FrameLayout>
+
+    <!-- Shared bottom panel: Main tools tab bar stays pinned at the top of the panel; the
+         content area beneath it swaps between the default tools content (Quick Actions,
+         Properties, Animation & Interaction) and the Components browser. A single drag handle
+         drives a BottomSheetBehavior so the whole panel can be resized by dragging (up to full
+         screen, since this view's height is match_parent) or dragged all the way down to hide it. -->
+    <LinearLayout
+        android:id="@+id/bottomPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
         android:orientation="vertical"
         android:background="@drawable/bg_bottom_panel"
         android:paddingHorizontal="16dp"
         android:paddingTop="10dp"
-        android:paddingBottom="18dp">
+        android:paddingBottom="18dp"
+        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
+        app:behavior_hideable="true"
+        app:behavior_skipCollapsed="false"
+        app:behavior_peekHeight="220dp">
 
         <View
+            android:id="@+id/dragHandle"
             android:layout_width="36dp"
             android:layout_height="4dp"
             android:layout_gravity="center_horizontal"
             android:layout_marginBottom="14dp"
             android:background="@drawable/bg_drag_handle" />
 
-        <!-- Main tools tab navigation -->
+        <!-- Main tools tab navigation (always visible, above both the default tools content and
+             the Components browser). -->
         <LinearLayout
+            android:id="@+id/mainToolsRow"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal">
@@ -270,11 +299,34 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Quick actions -->
-        <TextView
-            style="@style/SketchSectionLabel"
-            android:layout_marginTop="18dp"
-            android:text="Quick Actions" />
+        <!-- Content area beneath the Main tools row: swaps between defaultToolsContentScroll and
+             componentsContentContainer. Weighted to fill the rest of the panel, so it grows when
+             the panel is dragged taller (up to full screen) and is what scrolls/clips first when
+             the panel is dragged shorter. -->
+        <FrameLayout
+            android:id="@+id/panelContentContainer"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="14dp">
+
+            <androidx.core.widget.NestedScrollView
+                android:id="@+id/defaultToolsContentScroll"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:fillViewport="true">
+
+                <LinearLayout
+                    android:id="@+id/defaultToolsContent"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <!-- Quick actions -->
+                    <TextView
+                        style="@style/SketchSectionLabel"
+                        android:text="Quick Actions" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -443,5 +495,18 @@
                 <TextView style="@style/SketchQuickActionLabel" android:text="More" />
             </LinearLayout>
         </LinearLayout>
+                </LinearLayout>
+            </androidx.core.widget.NestedScrollView>
+
+            <!-- Components browser content, built and attached at runtime by
+                 buildComponentsContent() in ComponentsPanel.kt; hidden until the Components tab
+                 is tapped. Lives in the same shared panel as the tools above, beneath the
+                 always-visible Main tools row. -->
+            <FrameLayout
+                android:id="@+id/componentsContentContainer"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+        </FrameLayout>
     </LinearLayout>
-</LinearLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

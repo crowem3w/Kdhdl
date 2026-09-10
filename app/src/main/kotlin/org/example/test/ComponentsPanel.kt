@@ -17,8 +17,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import com.google.android.material.bottomsheet.BottomSheetBehavior
-import com.google.android.material.bottomsheet.BottomSheetDialog
 
 
 private data class ComponentCategory(val id: String, val label: String, val iconRes: Int)
@@ -47,8 +45,18 @@ private val COMPONENT_CATEGORIES = listOf(
 
 
 
-fun showComponentsPanel(context: Context, onDismiss: () -> Unit = {}) {
-    val dialog = BottomSheetDialog(context)
+
+
+
+
+
+
+
+
+
+
+
+fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
 
@@ -60,46 +68,25 @@ fun showComponentsPanel(context: Context, onDismiss: () -> Unit = {}) {
 
     val root = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        setBackgroundColor(Color.parseColor("#15161F"))
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
     }
 
     
-    root.addView(View(context).apply {
-        layoutParams = LinearLayout.LayoutParams(dp(36), dp(4)).apply {
-            gravity = Gravity.CENTER_HORIZONTAL
-            topMargin = dp(10)
-            bottomMargin = dp(14)
-        }
-        setBackgroundResource(R.drawable.bg_drag_handle)
-    })
-
     
-    root.addView(LinearLayout(context).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            leftMargin = dp(20); rightMargin = dp(20); bottomMargin = dp(14)
-        }
-        addView(TextView(context).apply {
-            text = "Components"
-            setTextColor(Color.WHITE)
-            textSize = 17f
-            setTypeface(typeface, Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        })
+    val closeButton = FrameLayout(context).apply {
+        layoutParams = LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginEnd = dp(8) }
+        isClickable = true
+        isFocusable = true
+        foreground = selectableForeground()
         addView(TextView(context).apply {
             text = "\u2715"
             setTextColor(Color.parseColor("#9A9AA5"))
             textSize = 15f
             gravity = Gravity.CENTER
-            isClickable = true
-            isFocusable = true
-            foreground = selectableForeground()
-            layoutParams = LinearLayout.LayoutParams(dp(32), dp(32))
-            setOnClickListener { dialog.dismiss() }
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         })
-    })
+        setOnClickListener { onClose() }
+    }
 
     
     val searchInput = EditText(context).apply {
@@ -137,9 +124,11 @@ fun showComponentsPanel(context: Context, onDismiss: () -> Unit = {}) {
     }
     root.addView(LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            leftMargin = dp(20); rightMargin = dp(20); bottomMargin = dp(16)
+            bottomMargin = dp(16)
         }
+        addView(closeButton)
         addView(searchField)
         addView(filterButton)
     })
@@ -160,7 +149,7 @@ fun showComponentsPanel(context: Context, onDismiss: () -> Unit = {}) {
 
     val sectionsContainer = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(16), dp(2), dp(20), dp(28))
+        setPadding(0, dp(2), 0, dp(28))
     }
     val contentScroll = ScrollView(context).apply {
         isFillViewport = true
@@ -217,7 +206,7 @@ fun showComponentsPanel(context: Context, onDismiss: () -> Unit = {}) {
     val rail = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         layoutParams = LinearLayout.LayoutParams(dp(48), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            marginStart = dp(16); marginEnd = dp(8)
+            marginEnd = dp(8)
         }
     }
     for (cat in COMPONENT_CATEGORIES) {
@@ -262,9 +251,5 @@ fun showComponentsPanel(context: Context, onDismiss: () -> Unit = {}) {
         addView(contentScroll)
     })
 
-    dialog.setOnDismissListener { onDismiss() }
-    dialog.setContentView(root)
-    dialog.behavior.state = BottomSheetBehavior.STATE_EXPANDED
-    dialog.behavior.skipCollapsed = true
-    dialog.show()
+    return root
 }
