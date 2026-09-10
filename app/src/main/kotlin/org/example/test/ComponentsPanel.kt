@@ -252,20 +252,30 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 itemContainers.forEachIndexed { idx, container ->
                     if (idx == index) return@forEachIndexed
                     val delay = kotlin.math.abs(idx - index) * staggerStepMs
+                    // Cancel any animation left over from a previous select/restore on this
+                    // tile first - cancel() runs synchronously, so the explicit VISIBLE below
+                    // always wins over whatever end-action that old animation had queued.
+                    container.animate().cancel()
+                    container.visibility = View.VISIBLE
                     container.animate()
                         .translationY(-liftDistancePx)
                         .alpha(0f)
                         .setStartDelay(delay)
                         .setDuration(animDurationMs)
                         .setInterpolator(AccelerateInterpolator())
-                        .withEndAction { container.visibility = View.GONE }
+                        // Guarded: if a restore re-targets this same in-flight animator back to
+                        // alpha 1 before this end action fires, don't hide a tile that's meant
+                        // to be visible again.
+                        .withEndAction { if (container.alpha == 0f) container.visibility = View.GONE }
                         .start()
                 }
                 val selectedLabel = labelViews[index]
+                selectedLabel.animate().cancel()
+                selectedLabel.visibility = View.VISIBLE
                 selectedLabel.animate()
                     .alpha(0f)
                     .setDuration(animDurationMs)
-                    .withEndAction { selectedLabel.visibility = View.GONE }
+                    .withEndAction { if (selectedLabel.alpha == 0f) selectedLabel.visibility = View.GONE }
                     .start()
             }
 
@@ -275,6 +285,10 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 itemContainers.forEachIndexed { idx, container ->
                     if (idx == index) return@forEachIndexed
                     val delay = kotlin.math.abs(idx - index) * staggerStepMs
+                    // Cancel first (may synchronously fire a stale GONE from an in-flight
+                    // animateSelect), then force VISIBLE - the explicit set below always runs
+                    // after cancel()'s side effect, so it wins.
+                    container.animate().cancel()
                     container.visibility = View.VISIBLE
                     container.animate()
                         .translationY(0f)
@@ -282,14 +296,17 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                         .setStartDelay(delay)
                         .setDuration(animDurationMs)
                         .setInterpolator(DecelerateInterpolator())
+                        .withEndAction(null) // clear any leftover GONE action from animateSelect
                         .start()
                 }
                 val selectedLabel = labelViews[index]
+                selectedLabel.animate().cancel()
                 selectedLabel.visibility = View.VISIBLE
                 selectedLabel.alpha = 0f
                 selectedLabel.animate()
                     .alpha(1f)
                     .setDuration(animDurationMs)
+                    .withEndAction(null)
                     .start()
             }
 
