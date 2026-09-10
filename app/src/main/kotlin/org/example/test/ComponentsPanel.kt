@@ -31,7 +31,7 @@ private val COMPONENT_CATEGORIES = listOf(
     ComponentCategory("structure", "Structure", R.drawable.ic_cat_structure),
     ComponentCategory("layout", "Layout", R.drawable.ic_cat_layout),
     ComponentCategory("typography", "Typography", R.drawable.ic_cat_typography),
-    ComponentCategory("shapes", "Shapes", R.drawable.ic_shapes),
+    ComponentCategory("shapes", "Geometry", R.drawable.ic_cat_geometry),
     ComponentCategory("media", "Media", R.drawable.ic_media),
     ComponentCategory("navigation", "Navigation", R.drawable.ic_cat_navigation),
     ComponentCategory("input", "Input", R.drawable.ic_cat_input),
