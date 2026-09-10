@@ -177,10 +177,30 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     }
     val contentScroll = ScrollView(context).apply {
         isFillViewport = true
-        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         clipChildren = false
         clipToPadding = false
         addView(sectionsContainer)
+    }
+    // Shown instead of contentScroll whenever a specific category (not "All") is selected in
+    // the rail. Categories don't have their own dedicated views yet, so this is just blank for
+    // now - each category will get its own use-case-specific content here later.
+    val emptyCategoryView = FrameLayout(context).apply {
+        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        visibility = View.GONE
+    }
+    val contentContainer = FrameLayout(context).apply {
+        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+        addView(contentScroll)
+        addView(emptyCategoryView)
+    }
+    fun showAllContent() {
+        emptyCategoryView.visibility = View.GONE
+        contentScroll.visibility = View.VISIBLE
+    }
+    fun showEmptyCategoryContent() {
+        contentScroll.visibility = View.GONE
+        emptyCategoryView.visibility = View.VISIBLE
     }
 
     for (cat in COMPONENT_CATEGORIES) {
@@ -227,6 +247,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             var selectedIndex: Int? = null
             val itemContainers = mutableListOf<LinearLayout>()
             val labelViews = mutableListOf<TextView>()
+            val iconBoxViews = mutableListOf<View>()
 
             val staggerStepMs = 50L
             val animDurationMs = 220L
@@ -244,6 +265,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     l.visibility = View.VISIBLE
                     l.alpha = 1f
                 }
+                iconBoxViews.forEach { it.setBackgroundResource(R.drawable.bg_component_placeholder) }
             }
 
             // Cascades the non-selected tiles upward and out (staggered by distance from the
@@ -277,6 +299,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     .setDuration(animDurationMs)
                     .withEndAction { if (selectedLabel.alpha == 0f) selectedLabel.visibility = View.GONE }
                     .start()
+                // Only one tile left visible now - drop its box/border so it reads as a bare icon.
+                iconBoxViews[index].background = null
             }
 
             // Reverses animateSelect: brings the other tiles back down into place (staggered)
@@ -308,10 +332,13 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     .setDuration(animDurationMs)
                     .withEndAction(null)
                     .start()
+                // Other tiles are coming back, so this one goes back to looking like a tile too.
+                iconBoxViews[index].setBackgroundResource(R.drawable.bg_component_placeholder)
             }
 
             for (i in 0 until 4) {
                 lateinit var label: TextView
+                lateinit var iconBox: View
                 val itemContainer = LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
                     isClickable = true
@@ -320,11 +347,13 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                         if (i != 0) marginStart = dp(8)
                     }
-                    // Icon tile (placeholder box today) - stays visible when selected.
-                    addView(View(context).apply {
+                    // Icon tile (placeholder box today) - stays visible when selected, but loses
+                    // its box/border once it's the only tile left in the row (see animateSelect).
+                    iconBox = View(context).apply {
                         setBackgroundResource(R.drawable.bg_component_placeholder)
                         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
-                    })
+                    }
+                    addView(iconBox)
                     // Name label underneath each tile - hidden when its tile is selected.
                     label = TextView(context).apply {
                         text = itemNames.getOrElse(i) { "Component ${i + 1}" }
@@ -341,6 +370,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 }
                 itemContainers.add(itemContainer)
                 labelViews.add(label)
+                iconBoxViews.add(iconBox)
                 addView(itemContainer)
             }
 
@@ -374,7 +404,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     val rail = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            marginEnd = dp(10)
+            marginEnd = dp(4)
         }
         clipChildren = false
         clipToPadding = false
@@ -431,10 +461,11 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     }
 
     // Cascades every rail row except `index` upward and out (staggered by distance), and
-    // collapses the selected row's own label so only its icon remains.
+    // collapses the selected row's own label so only its icon remains. Row 0 ("All") is
+    // excluded - it always stays visible regardless of what else is selected.
     fun railAnimateSelect(index: Int) {
         railEntries.forEachIndexed { idx, entry ->
-            if (idx == index) return@forEachIndexed
+            if (idx == index || idx == 0) return@forEachIndexed
             val delay = kotlin.math.abs(idx - index) * railStaggerStepMs
             entry.view.animate().cancel()
             entry.view.visibility = View.VISIBLE
@@ -459,10 +490,10 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     }
 
     // Reverses railAnimateSelect: brings every other row back into place (staggered) and
-    // fades the selected row's label back in.
+    // fades the selected row's label back in. Row 0 ("All") is excluded - always visible.
     fun railAnimateRestore(index: Int) {
         railEntries.forEachIndexed { idx, entry ->
-            if (idx == index) return@forEachIndexed
+            if (idx == index || idx == 0) return@forEachIndexed
             val delay = kotlin.math.abs(idx - index) * railStaggerStepMs
             entry.view.animate().cancel()
             entry.view.visibility = View.VISIBLE
@@ -492,6 +523,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     // then scrolls back to the top.
     val allItem = buildRailRow(ALL_CATEGORY.iconRes, ALL_CATEGORY.label) {
         setActiveCategory(ALL_CATEGORY.id)
+        showAllContent()
         activeRailIndex?.let { railAnimateRestore(it) }
         activeRailIndex = null
         contentScroll.post { contentScroll.smoothScrollTo(0, 0) }
@@ -514,22 +546,22 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         val index = railEntries.size // this row's fixed position, captured before it's appended
         val item = buildRailRow(cat.iconRes, cat.label) {
             setActiveCategory(cat.id)
-            sectionViews[cat.id]?.let { target ->
-                contentScroll.post { contentScroll.smoothScrollTo(0, target.top) }
-            }
             when (activeRailIndex) {
                 index -> {
                     railAnimateRestore(index)
                     activeRailIndex = null
+                    showAllContent()
                 }
                 null -> {
                     railAnimateSelect(index)
                     activeRailIndex = index
+                    showEmptyCategoryContent()
                 }
                 else -> {
                     railResetAllImmediate()
                     railAnimateSelect(index)
                     activeRailIndex = index
+                    showEmptyCategoryContent()
                 }
             }
         }
@@ -558,7 +590,13 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         orientation = LinearLayout.HORIZONTAL
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
         addView(rail)
-        addView(contentScroll)
+        addView(View(context).apply {
+            setBackgroundColor(Color.parseColor("#2A2A31"))
+            layoutParams = LinearLayout.LayoutParams(dp(1), ViewGroup.LayoutParams.MATCH_PARENT).apply {
+                marginEnd = dp(10)
+            }
+        })
+        addView(contentContainer)
     })
 
     return root
