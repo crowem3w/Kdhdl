@@ -17,7 +17,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "org.example.test"
+        applicationId = "apcka"
         minSdk = 30
         targetSdk = 37
         versionCode = 1
