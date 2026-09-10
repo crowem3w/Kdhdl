@@ -1,0 +1,447 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#FFFFFF"
+    android:fitsSystemWindows="true">
+
+    <!-- Canvas + floating chrome (top bar, empty state, zoom controls) -->
+    <FrameLayout
+        android:id="@+id/canvasArea"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <org.example.test.SketchCanvasView
+            android:id="@+id/sketchCanvas"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- Empty state -->
+        <LinearLayout
+            android:id="@+id/emptyStateContainer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:clickable="true"
+            android:focusable="true"
+            android:padding="16dp">
+
+            <FrameLayout
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:background="@drawable/bg_empty_icon_box">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_plus"
+                    app:tint="#79747E" />
+            </FrameLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="Start designing"
+                android:textColor="#1D1B20"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Add elements and bring your ideas to life."
+                android:textColor="#79747E"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- Top bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingTop="16dp">
+
+            <ImageButton
+                android:id="@+id/btnBack"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="10dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_chevron_left"
+                android:contentDescription="Back"
+                android:elevation="3dp" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <ImageButton
+                android:id="@+id/btnUndo"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="10dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_undo"
+                android:contentDescription="Undo"
+                android:elevation="3dp" />
+
+            <ImageButton
+                android:id="@+id/btnRedo"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="10dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_redo"
+                android:contentDescription="Redo"
+                android:elevation="3dp" />
+
+            <ImageButton
+                android:id="@+id/btnMore"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="10dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_more_horiz"
+                android:contentDescription="More"
+                android:elevation="3dp" />
+
+            <ImageButton
+                android:id="@+id/btnPlay"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="11dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_play"
+                android:contentDescription="Preview"
+                android:elevation="3dp" />
+        </LinearLayout>
+
+        <!-- Zoom controls -->
+        <LinearLayout
+            android:layout_width="48dp"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|end"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="16dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_zoom_control"
+            android:elevation="3dp">
+
+            <ImageButton
+                android:id="@+id/btnZoomIn"
+                android:layout_width="48dp"
+                android:layout_height="44dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="13dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_plus"
+                android:contentDescription="Zoom in" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@drawable/divider_zoom" />
+
+            <ImageButton
+                android:id="@+id/btnZoomOut"
+                android:layout_width="48dp"
+                android:layout_height="44dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="13dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_minus"
+                android:contentDescription="Zoom out" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@drawable/divider_zoom" />
+
+            <ImageButton
+                android:id="@+id/btnLocate"
+                android:layout_width="48dp"
+                android:layout_height="44dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="12dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_locate"
+                android:contentDescription="Center canvas" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- Bottom control panel -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/bg_bottom_panel"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="18dp">
+
+        <View
+            android:layout_width="36dp"
+            android:layout_height="4dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="14dp"
+            android:background="@drawable/bg_drag_handle" />
+
+        <!-- Main tools tab navigation -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:id="@+id/tabSelect"
+                style="@style/SketchTabColumn">
+
+                <LinearLayout style="@style/SketchTabPill" android:background="@drawable/bg_tab_selected">
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_cursor" />
+                    <TextView style="@style/SketchTabLabel" android:text="Select" android:textColor="#FFFFFF" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tabShapes"
+                style="@style/SketchTabColumn">
+
+                <LinearLayout style="@style/SketchTabPill">
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_shapes" app:tint="#9A9AA5" />
+                    <TextView style="@style/SketchTabLabel" android:text="Shapes" android:textColor="#9A9AA5" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tabText"
+                style="@style/SketchTabColumn">
+
+                <LinearLayout style="@style/SketchTabPill">
+                    <TextView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:gravity="center"
+                        android:text="T"
+                        android:textColor="#9A9AA5"
+                        android:textStyle="bold"
+                        android:textSize="15sp" />
+                    <TextView style="@style/SketchTabLabel" android:text="Text" android:textColor="#9A9AA5" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tabMedia"
+                style="@style/SketchTabColumn">
+
+                <LinearLayout style="@style/SketchTabPill">
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_media" app:tint="#9A9AA5" />
+                    <TextView style="@style/SketchTabLabel" android:text="Media" android:textColor="#9A9AA5" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tabComponents"
+                style="@style/SketchTabColumn">
+
+                <LinearLayout style="@style/SketchTabPill">
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_components" app:tint="#9A9AA5" />
+                    <TextView style="@style/SketchTabLabel" android:text="Components" android:textColor="#9A9AA5" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Quick actions -->
+        <TextView
+            style="@style/SketchSectionLabel"
+            android:layout_marginTop="18dp"
+            android:text="Quick Actions" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <LinearLayout android:id="@+id/actionFrame" style="@style/SketchQuickAction">
+                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_frame" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Frame" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionGroup" style="@style/SketchQuickAction">
+                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_group" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Group" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionAlign" style="@style/SketchQuickAction">
+                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_align" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Align" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionDistribute" style="@style/SketchQuickAction">
+                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_distribute" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Distribute" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionLock" style="@style/SketchQuickAction">
+                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_lock" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Lock" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Properties panel -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                style="@style/SketchSectionLabel"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:text="Properties" />
+
+            <ImageButton
+                android:id="@+id/btnPropertiesMore"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:padding="4dp"
+                android:src="@drawable/ic_more_vert" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:background="@drawable/bg_properties_card"
+            android:padding="14dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView style="@style/SketchPropertyLabel" android:text="Position" />
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <TextView style="@style/SketchPropertyKey" android:text="X" />
+                    <TextView android:id="@+id/tvPosX" style="@style/SketchPropertyValue" android:text="0" />
+
+                    <TextView style="@style/SketchPropertyKey" android:layout_marginStart="14dp" android:text="Y" />
+                    <TextView android:id="@+id/tvPosY" style="@style/SketchPropertyValue" android:text="0" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView style="@style/SketchPropertyLabel" android:text="Size" />
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <TextView style="@style/SketchPropertyKey" android:text="W" />
+                    <TextView android:id="@+id/tvSizeW" style="@style/SketchPropertyValue" android:text="100" />
+
+                    <TextView style="@style/SketchPropertyKey" android:layout_marginStart="14dp" android:text="H" />
+                    <TextView android:id="@+id/tvSizeH" style="@style/SketchPropertyValue" android:text="100" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView style="@style/SketchPropertyLabel" android:text="Rotation" />
+
+                <TextView
+                    android:id="@+id/tvRotation"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="0\u00B0"
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Animation & interaction -->
+        <TextView
+            style="@style/SketchSectionLabel"
+            android:layout_marginTop="18dp"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:text="Animation &amp; Interaction" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal">
+
+            <LinearLayout android:id="@+id/actionAnimate" style="@style/SketchAnimColumn">
+                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_animate" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Animate" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionStates" style="@style/SketchAnimColumn">
+                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_states" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="States" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionInteractions" style="@style/SketchAnimColumn">
+                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_link" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Interactions" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionTimeline" style="@style/SketchAnimColumn">
+                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_timeline" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="Timeline" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actionMore" style="@style/SketchAnimColumn">
+                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_more_horiz" />
+                <TextView style="@style/SketchQuickActionLabel" android:text="More" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>
