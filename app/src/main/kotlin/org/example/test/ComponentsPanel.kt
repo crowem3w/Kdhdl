@@ -94,14 +94,17 @@ private val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
 
 
 // Dedicated content for the "Geometry" category, rendered directly in the sidebar rail beneath
-// its icon (not in the main content pane). Create/Edit/Transform/Deform/Animate sit stacked
-// vertically, all centered on the same axis (icon on top, label below). Tapping one plays a
-// "cascading merge": the other icons slide into its position and fade away, staggered by
-// distance, until only the tapped icon remains - its leaf items then appear directly beneath it,
-// left-aligned, as a text-only list with a single continuous vertical line running from the
-// first leaf to the last (rather than a mark per line), echoing the tree in geometry.txt. Tapping
-// the visible icon again reverses the cascade, bringing the other icons back. Nothing is wired up
-// to real content yet (see onClick below).
+// its icon (not in the main content pane), styled after the reference tree UI: each row is
+// icon + label + a chevron that rotates to indicate expanded/collapsed, with a vertical accent
+// line marking the currently open branch. Create/Edit/Transform/Deform/Animate start out as
+// plain neutral rows; tapping one plays a "cascading merge" - the other rows slide into its
+// position and fade away, staggered by distance - leaving just the tapped row, now shown with a
+// blue accent line and a bordered icon box, with its leaf items appearing directly beneath it as
+// a text-only list. That list has a single continuous vertical line running from the first leaf
+// to the last (rather than a mark per line), echoing the tree in geometry.txt, plus a small
+// accent bar next to whichever leaf is currently highlighted (the first one, by default).
+// Nothing is wired up to real content yet - tapping a leaf only changes which one is
+// highlighted.
 // Returns the view plus a `reset` callback that immediately restores everything, for use when
 // the Geometry category itself is deselected in the rail.
 private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Unit> {
@@ -120,51 +123,101 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
     val restoreOffsetPx = dp(14).toFloat()
     val activeColor = Color.WHITE
     val inactiveColor = Color.parseColor("#9A9AA5")
+    val accentColor = Color.parseColor("#3D7EFF")
+    val treeLineColor = Color.parseColor("#4A4A52")
 
     val root = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dp(4)
         }
-        setPadding(dp(4), 0, 0, dp(6))
+        setPadding(0, 0, 0, dp(6))
         clipChildren = false
         clipToPadding = false
     }
 
-    data class Item(val container: LinearLayout, val icon: ImageView, val label: TextView, val childrenContainer: LinearLayout)
+    data class Item(
+        val row: LinearLayout,
+        val accentLine: View,
+        val iconBox: FrameLayout,
+        val icon: ImageView,
+        val label: TextView,
+        val chevron: ImageView,
+        val childrenContainer: LinearLayout
+    )
     val items = mutableListOf<Item>()
     var selectedIndex: Int? = null
 
     // Builds this item's leaf list directly under it: a single continuous vertical line beside
     // the text (rather than a mark per line), stretched once the text column is actually
-    // measured so it runs exactly from the top of the first leaf to the bottom of the last.
+    // measured so it runs exactly from the top of the first leaf to the bottom of the last, plus
+    // a small accent bar beside whichever leaf is highlighted (the first one, to start).
     fun fillChildren(container: LinearLayout, index: Int) {
         container.removeAllViews()
+        val children = GEOMETRY_SUBCATEGORIES[index].children
+        val leafRows = mutableListOf<Pair<View, TextView>>()
+        var highlightedLeaf = 0
+
+        fun applyLeafState(leafIdx: Int, highlighted: Boolean) {
+            val (bar, text) = leafRows[leafIdx]
+            bar.setBackgroundColor(if (highlighted) accentColor else Color.TRANSPARENT)
+            text.setTextColor(if (highlighted) activeColor else inactiveColor)
+        }
+
         val textColumn = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            for (childLabel in GEOMETRY_SUBCATEGORIES[index].children) {
-                addView(TextView(context).apply {
-                    text = childLabel
-                    setTextColor(inactiveColor)
-                    textSize = 11.5f
+            for ((leafIdx, childLabel) in children.withIndex()) {
+                lateinit var bar: View
+                lateinit var text: TextView
+                val leafRow = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
                     isClickable = true
                     isFocusable = true
                     foreground = selectableForeground()
-                    setPadding(dp(10), dp(5), dp(8), dp(5))
                     layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                    // Content intentionally left blank for now - no detail view wired up yet.
-                    setOnClickListener { }
-                })
+                    bar = View(context).apply {
+                        layoutParams = LinearLayout.LayoutParams(dp(2), dp(2))
+                    }
+                    addView(bar)
+                    text = TextView(context).apply {
+                        text = childLabel
+                        textSize = 11.5f
+                        setPadding(dp(8), dp(5), dp(8), dp(5))
+                        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    }
+                    addView(text)
+                }
+                leafRow.post {
+                    val params = bar.layoutParams
+                    params.height = leafRow.height
+                    bar.layoutParams = params
+                }
+                leafRow.setOnClickListener {
+                    // Content intentionally left blank for now - this only moves the highlight,
+                    // no detail view is wired up yet.
+                    if (highlightedLeaf != leafIdx) {
+                        applyLeafState(highlightedLeaf, false)
+                        highlightedLeaf = leafIdx
+                        applyLeafState(highlightedLeaf, true)
+                    }
+                }
+                addView(leafRow)
+                leafRows.add(bar to text)
             }
         }
+        leafRows.forEachIndexed { leafIdx, _ -> applyLeafState(leafIdx, leafIdx == highlightedLeaf) }
+
         val treeLine = View(context).apply {
-            setBackgroundColor(Color.parseColor("#4A4A52"))
+            setBackgroundColor(treeLineColor)
             layoutParams = LinearLayout.LayoutParams(dp(2), dp(2))
         }
         container.addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                marginStart = dp(14)
+            }
             addView(treeLine)
             addView(textColumn)
         })
@@ -175,13 +228,16 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
         }
     }
 
-    fun setHighlight(index: Int?) {
-        items.forEachIndexed { idx, item ->
-            val active = idx == index
-            item.container.setBackgroundResource(if (active) R.drawable.bg_tab_selected else 0)
-            item.icon.setColorFilter(activeColor) // icons stay fully visible either way
-            item.label.setTextColor(if (active) activeColor else inactiveColor)
-        }
+    // Neutral (default, all rows visible) vs. active (the one row left after the merge): a
+    // bordered icon box, blue accent line and bright label mark the active row; a plain icon,
+    // hidden accent line and muted label mark a neutral one. The chevron rotates to match.
+    fun applyRowState(item: Item, active: Boolean) {
+        item.accentLine.visibility = if (active) View.VISIBLE else View.GONE
+        item.iconBox.setBackgroundResource(if (active) R.drawable.bg_icon_box_accent else 0)
+        item.icon.setColorFilter(activeColor) // icons stay fully visible either way
+        item.label.setTextColor(if (active) activeColor else inactiveColor)
+        item.chevron.setColorFilter(if (active) activeColor else inactiveColor)
+        item.chevron.rotation = if (active) -90f else 180f
     }
 
     fun collapseChildrenImmediate(item: Item) {
@@ -193,39 +249,39 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
 
     fun restoreAllImmediate() {
         items.forEach { item ->
-            item.container.animate().cancel()
-            item.container.visibility = View.VISIBLE
-            item.container.alpha = 1f
-            item.container.translationY = 0f
+            item.row.animate().cancel()
+            item.row.visibility = View.VISIBLE
+            item.row.alpha = 1f
+            item.row.translationY = 0f
+            applyRowState(item, active = false)
             collapseChildrenImmediate(item)
         }
-        setHighlight(null)
     }
 
-    // The forward half of the cascade: every other icon slides toward the selected icon's slot
+    // The forward half of the cascade: every other row slides toward the selected row's slot
     // and fades out, staggered by distance, until only the selected one is left; its children
     // then fade in beneath it.
     fun mergeInto(selected: Int) {
-        val tops = items.map { it.container.top }
+        val tops = items.map { it.row.top }
         items.forEachIndexed { idx, item ->
             if (idx == selected) return@forEachIndexed
             val delta = (tops[selected] - tops[idx]).toFloat()
             val delay = kotlin.math.abs(idx - selected) * staggerStepMs
-            item.container.animate().cancel()
-            item.container.visibility = View.VISIBLE
-            item.container.animate()
+            item.row.animate().cancel()
+            item.row.visibility = View.VISIBLE
+            item.row.animate()
                 .translationY(delta)
                 .alpha(0f)
                 .setStartDelay(delay)
                 .setDuration(mergeDurationMs)
                 .setInterpolator(AccelerateInterpolator())
                 .withEndAction {
-                    item.container.visibility = View.GONE
-                    item.container.translationY = 0f
+                    item.row.visibility = View.GONE
+                    item.row.translationY = 0f
                 }
                 .start()
         }
-        setHighlight(selected)
+        applyRowState(items[selected], active = true)
 
         val selectedItem = items[selected]
         fillChildren(selectedItem.childrenContainer, selected)
@@ -240,10 +296,11 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
             .start()
     }
 
-    // The reverse half: hide the selected icon's children, then cascade the other icons back
+    // The reverse half: hide the selected row's children, then cascade the other rows back
     // into view, staggered by distance.
     fun unmerge(selected: Int) {
         val selectedItem = items[selected]
+        applyRowState(selectedItem, active = false)
         selectedItem.childrenContainer.animate().cancel()
         selectedItem.childrenContainer.animate()
             .alpha(0f)
@@ -255,11 +312,11 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
         items.forEachIndexed { idx, item ->
             if (idx == selected) return@forEachIndexed
             val delay = kotlin.math.abs(idx - selected) * staggerStepMs
-            item.container.animate().cancel()
-            item.container.alpha = 0f
-            item.container.translationY = -restoreOffsetPx
-            item.container.visibility = View.VISIBLE
-            item.container.animate()
+            item.row.animate().cancel()
+            item.row.alpha = 0f
+            item.row.translationY = -restoreOffsetPx
+            item.row.visibility = View.VISIBLE
+            item.row.animate()
                 .alpha(1f)
                 .translationY(0f)
                 .setStartDelay(delay)
@@ -267,57 +324,82 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
                 .setInterpolator(DecelerateInterpolator())
                 .start()
         }
-        setHighlight(null)
     }
 
     for ((index, sub) in GEOMETRY_SUBCATEGORIES.withIndex()) {
+        lateinit var accentLine: View
+        lateinit var iconBox: FrameLayout
         lateinit var icon: ImageView
         lateinit var label: TextView
-        val itemContainer = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
+        lateinit var chevron: ImageView
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             isClickable = true
             isFocusable = true
             foreground = selectableForeground()
-            setPadding(dp(6), dp(5), dp(6), dp(5))
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(34)).apply {
                 if (index != 0) topMargin = dp(2)
             }
-            icon = ImageView(context).apply {
-                setImageResource(sub.iconRes)
-                setColorFilter(activeColor)
-                layoutParams = LinearLayout.LayoutParams(dp(20), dp(20))
+            setPadding(dp(10), 0, dp(10), 0)
+            accentLine = View(context).apply {
+                setBackgroundColor(accentColor)
+                visibility = View.GONE
+                layoutParams = LinearLayout.LayoutParams(dp(2), dp(20))
             }
-            addView(icon)
+            addView(accentLine)
+            iconBox = FrameLayout(context).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(26), dp(26)).apply {
+                    marginStart = dp(8)
+                }
+                icon = ImageView(context).apply {
+                    setImageResource(sub.iconRes)
+                    setColorFilter(activeColor)
+                    layoutParams = FrameLayout.LayoutParams(dp(15), dp(15), Gravity.CENTER)
+                }
+                addView(icon)
+            }
+            addView(iconBox)
             label = TextView(context).apply {
                 text = sub.label
                 setTextColor(inactiveColor)
-                textSize = 10f
+                textSize = 12.5f
+                maxLines = 1
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    topMargin = dp(3)
+                    marginStart = dp(8)
                 }
             }
             addView(label)
+            chevron = ImageView(context).apply {
+                setImageResource(R.drawable.ic_chevron_left)
+                setColorFilter(inactiveColor)
+                rotation = 180f
+                layoutParams = LinearLayout.LayoutParams(dp(14), dp(14)).apply {
+                    marginStart = dp(8)
+                }
+            }
+            addView(chevron)
         }
-        // This subcategory's leaf list, inserted right after its own icon so it renders below
-        // it in place (not after the whole icon list) - hidden until this icon is selected.
+        // This subcategory's leaf list, inserted right after its own row so it renders below it
+        // in place (not after the whole row list) - hidden until this row is selected.
         val childrenContainer = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
             alpha = 0f
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(4)
+                topMargin = dp(2)
                 bottomMargin = dp(2)
             }
         }
-        root.addView(itemContainer)
+        root.addView(row)
         root.addView(childrenContainer)
-        items.add(Item(itemContainer, icon, label, childrenContainer))
+        val item = Item(row, accentLine, iconBox, icon, label, chevron, childrenContainer)
+        items.add(item)
 
-        itemContainer.setOnClickListener {
+        row.setOnClickListener {
             when (selectedIndex) {
                 index -> {
-                    // Tapping the visible icon again reverses the cascade.
+                    // Tapping the visible row again reverses the cascade.
                     unmerge(index)
                     selectedIndex = null
                 }
@@ -334,23 +416,8 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
         }
     }
 
-    // All icons are the same size, but their labels differ in width, so their natural
-    // (wrap_content) widths differ too - without this they'd center on slightly different axes.
-    // Once laid out, snap every item to the widest one's width so gravity=CENTER_HORIZONTAL
-    // lines every icon up on the same vertical center.
-    root.post {
-        val maxWidth = items.maxOf { it.container.width }
-        if (maxWidth > 0) {
-            items.forEach { item ->
-                val lp = item.container.layoutParams
-                lp.width = maxWidth
-                item.container.layoutParams = lp
-            }
-        }
-    }
-
     fun reset() {
-        items.forEach { it.container.animate().cancel() }
+        items.forEach { it.row.animate().cancel() }
         restoreAllImmediate()
         selectedIndex = null
     }
@@ -753,10 +820,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         }
     }
 
-    // Cascades every rail row except `index` upward and out (staggered by distance), and
-    // collapses the selected row's own label so only its icon remains. Row 0 ("All") is
-    // excluded - it always stays visible regardless of what else is selected.
-    fun railAnimateSelect(index: Int) {
+    // Cascades every rail row except `index` upward and out (staggered by distance). Row 0
+    // ("All") is excluded - it always stays visible regardless of what else is selected.
+    fun railHideSiblings(index: Int) {
         railEntries.forEachIndexed { idx, entry ->
             if (idx == index || idx == 0) return@forEachIndexed
             val delay = kotlin.math.abs(idx - index) * railStaggerStepMs
@@ -771,20 +837,10 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 .withEndAction { if (entry.view.alpha == 0f) entry.view.visibility = View.GONE }
                 .start()
         }
-        railEntries[index].label?.let { label ->
-            label.animate().cancel()
-            label.visibility = View.VISIBLE
-            label.animate()
-                .alpha(0f)
-                .setDuration(railAnimDurationMs)
-                .withEndAction { if (label.alpha == 0f) label.visibility = View.GONE }
-                .start()
-        }
     }
 
-    // Reverses railAnimateSelect: brings every other row back into place (staggered) and
-    // fades the selected row's label back in. Row 0 ("All") is excluded - always visible.
-    fun railAnimateRestore(index: Int) {
+    // Reverses railHideSiblings: brings every other row back into place, staggered.
+    fun railShowSiblings(index: Int) {
         railEntries.forEachIndexed { idx, entry ->
             if (idx == index || idx == 0) return@forEachIndexed
             val delay = kotlin.math.abs(idx - index) * railStaggerStepMs
@@ -799,6 +855,27 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 .withEndAction(null)
                 .start()
         }
+    }
+
+    // Cascades every other rail row away (see railHideSiblings) and collapses the selected
+    // row's own label so only its icon remains.
+    fun railAnimateSelect(index: Int) {
+        railHideSiblings(index)
+        railEntries[index].label?.let { label ->
+            label.animate().cancel()
+            label.visibility = View.VISIBLE
+            label.animate()
+                .alpha(0f)
+                .setDuration(railAnimDurationMs)
+                .withEndAction { if (label.alpha == 0f) label.visibility = View.GONE }
+                .start()
+        }
+    }
+
+    // Reverses railAnimateSelect: brings every other row back (see railShowSiblings) and fades
+    // the selected row's label back in.
+    fun railAnimateRestore(index: Int) {
+        railShowSiblings(index)
         railEntries[index].label?.let { label ->
             label.animate().cancel()
             label.visibility = View.VISIBLE
@@ -809,6 +886,51 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 .withEndAction(null)
                 .start()
         }
+    }
+
+    // Custom row for "Geometry": unlike other categories, its label stays visible when selected
+    // (no collapse-to-icon) and it gets a chevron plus a subtle highlighted background instead,
+    // matching the reference tree UI.
+    data class GeometryRowRefs(val row: LinearLayout, val label: TextView, val chevron: ImageView)
+    lateinit var geometryRowRefs: GeometryRowRefs
+    fun buildGeometryRailRow(iconRes: Int, labelText: String, onClick: () -> Unit): GeometryRowRefs {
+        lateinit var label: TextView
+        lateinit var chevron: ImageView
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36)).apply {
+                bottomMargin = dp(4)
+            }
+            isClickable = true
+            isFocusable = true
+            foreground = selectableForeground()
+            setPadding(dp(10), 0, dp(10), 0)
+            addView(ImageView(context).apply {
+                setImageResource(iconRes)
+                layoutParams = LinearLayout.LayoutParams(dp(18), dp(18))
+            })
+            label = TextView(context).apply {
+                text = labelText
+                textSize = 12.5f
+                maxLines = 1
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    marginStart = dp(8)
+                }
+            }
+            addView(label)
+            chevron = ImageView(context).apply {
+                setImageResource(R.drawable.ic_chevron_left)
+                setColorFilter(Color.WHITE)
+                rotation = 180f
+                layoutParams = LinearLayout.LayoutParams(dp(14), dp(14)).apply {
+                    marginStart = dp(8)
+                }
+            }
+            addView(chevron)
+            setOnClickListener { onClick() }
+        }
+        return GeometryRowRefs(row, label, chevron)
     }
 
     // "All" sits on top of the rail and is the default state: every section is visible and
@@ -822,6 +944,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         if (activeCategoryId == "shapes") {
             geometryAccordionReset()
             geometryAccordion.visibility = View.GONE
+            geometryRowRefs.row.setBackgroundResource(0)
+            geometryRowRefs.chevron.rotation = 180f
         }
         activeCategoryId = null
         contentScroll.post { contentScroll.smoothScrollTo(0, 0) }
@@ -842,41 +966,81 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
     for (cat in COMPONENT_CATEGORIES) {
         val index = railEntries.size // this row's fixed position, captured before it's appended
-        val item = buildRailRow(cat.iconRes, cat.label) {
-            setActiveCategory(cat.id)
-            when (activeRailIndex) {
-                index -> {
-                    // Deselecting this category (tapped again).
-                    railAnimateRestore(index)
-                    activeRailIndex = null
-                    activeCategoryId = null
-                    showAllContent()
-                    if (cat.id == "shapes") {
+        val isGeometry = cat.id == "shapes"
+        val item: LinearLayout
+        if (isGeometry) {
+            val refs = buildGeometryRailRow(cat.iconRes, cat.label) {
+                setActiveCategory(cat.id)
+                when (activeRailIndex) {
+                    index -> {
+                        // Deselecting Geometry (tapped again).
+                        railShowSiblings(index)
+                        activeRailIndex = null
+                        activeCategoryId = null
+                        showAllContent()
                         geometryAccordionReset()
                         geometryAccordion.visibility = View.GONE
+                        geometryRowRefs.row.setBackgroundResource(0)
+                        geometryRowRefs.chevron.rotation = 180f
+                    }
+                    null -> {
+                        // Nothing was selected - selecting Geometry fresh.
+                        railHideSiblings(index)
+                        activeRailIndex = index
+                        activeCategoryId = cat.id
+                        showEmptyCategoryContent()
+                        geometryAccordion.visibility = View.VISIBLE
+                        geometryRowRefs.row.setBackgroundResource(R.drawable.bg_row_active)
+                        geometryRowRefs.chevron.rotation = -90f
+                    }
+                    else -> {
+                        // A different category was active - switch straight to Geometry.
+                        railResetAllImmediate()
+                        railHideSiblings(index)
+                        activeRailIndex = index
+                        activeCategoryId = cat.id
+                        showEmptyCategoryContent()
+                        geometryAccordion.visibility = View.VISIBLE
+                        geometryRowRefs.row.setBackgroundResource(R.drawable.bg_row_active)
+                        geometryRowRefs.chevron.rotation = -90f
                     }
                 }
-                null -> {
-                    // Nothing was selected - selecting this category fresh.
-                    railAnimateSelect(index)
-                    activeRailIndex = index
-                    activeCategoryId = cat.id
-                    showEmptyCategoryContent()
-                    if (cat.id == "shapes") geometryAccordion.visibility = View.VISIBLE
-                }
-                else -> {
-                    // A different category was active - switch straight to this one. If the
-                    // previous one was Geometry, fold its sidebar accordion back away first.
-                    if (activeCategoryId == "shapes") {
-                        geometryAccordionReset()
-                        geometryAccordion.visibility = View.GONE
+            }
+            geometryRowRefs = refs
+            item = refs.row
+        } else {
+            item = buildRailRow(cat.iconRes, cat.label) {
+                setActiveCategory(cat.id)
+                when (activeRailIndex) {
+                    index -> {
+                        // Deselecting this category (tapped again).
+                        railAnimateRestore(index)
+                        activeRailIndex = null
+                        activeCategoryId = null
+                        showAllContent()
                     }
-                    railResetAllImmediate()
-                    railAnimateSelect(index)
-                    activeRailIndex = index
-                    activeCategoryId = cat.id
-                    showEmptyCategoryContent()
-                    if (cat.id == "shapes") geometryAccordion.visibility = View.VISIBLE
+                    null -> {
+                        // Nothing was selected - selecting this category fresh.
+                        railAnimateSelect(index)
+                        activeRailIndex = index
+                        activeCategoryId = cat.id
+                        showEmptyCategoryContent()
+                    }
+                    else -> {
+                        // A different category was active - switch straight to this one. If the
+                        // previous one was Geometry, fold its sidebar accordion back away first.
+                        if (activeCategoryId == "shapes") {
+                            geometryAccordionReset()
+                            geometryAccordion.visibility = View.GONE
+                            geometryRowRefs.row.setBackgroundResource(0)
+                            geometryRowRefs.chevron.rotation = 180f
+                        }
+                        railResetAllImmediate()
+                        railAnimateSelect(index)
+                        activeRailIndex = index
+                        activeCategoryId = cat.id
+                        showEmptyCategoryContent()
+                    }
                 }
             }
         }
@@ -886,7 +1050,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
         // Geometry's Create/Edit/Transform/Deform/Animate rows sit directly beneath its own
         // row in the sidebar (not in the content pane) - hidden until Geometry is selected.
-        if (cat.id == "shapes") {
+        if (isGeometry) {
             rail.addView(geometryAccordion)
         }
     }
