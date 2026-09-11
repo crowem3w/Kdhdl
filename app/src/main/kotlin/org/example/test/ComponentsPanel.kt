@@ -230,14 +230,34 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
             entry.childrenContainer.removeAllViews()
         }
         // Deselected: label/icon drop back to their regular (non-bold, muted) look, and the
-        // blue "selected" accent bar in front of the label goes transparent.
+        // blue "selected" accent bar swaps back out - sliding right to the end of the label
+        // text and fading, the mirror image of how it slides in on selection - before
+        // resetting to transparent/at-rest so it's ready for the next selection.
         entry.labelView.setTextColor(secondaryText)
         entry.labelView.setTypeface(entry.labelView.typeface, Typeface.NORMAL)
         entry.icon.setColorFilter(secondaryText)
-        entry.accentBar.setBackgroundColor(Color.TRANSPARENT)
+        entry.accentBar.animate().cancel()
+        if (animate) {
+            val textWidth = entry.labelView.paint.measureText(entry.labelView.text.toString())
+            entry.accentBar.animate()
+                .translationX(textWidth)
+                .alpha(0f)
+                .setDuration(180L)
+                .setInterpolator(AccelerateInterpolator())
+                .withEndAction {
+                    entry.accentBar.setBackgroundColor(Color.TRANSPARENT)
+                    entry.accentBar.translationX = 0f
+                    entry.accentBar.alpha = 1f
+                }
+                .start()
+        } else {
+            entry.accentBar.setBackgroundColor(Color.TRANSPARENT)
+            entry.accentBar.translationX = 0f
+            entry.accentBar.alpha = 1f
+        }
     }
 
-    fun expand(index: Int) {
+    fun expand(index: Int, animate: Boolean = true) {
         val entry = rows[index]
         setChevronExpanded(entry.chevron, true)
         entry.childrenContainer.removeAllViews()
@@ -247,11 +267,26 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         entry.childrenContainer.alpha = 0f
         entry.childrenContainer.animate().alpha(1f).setDuration(150L).start()
         // Selected: bold label + icon, plus the same blue "|" accent bar treatment used for
-        // the active Animate/Keyframe leaf, shown here right before the label text.
+        // the active Animate/Keyframe leaf, shown here right before the label text - but rather
+        // than just appearing, it "swaps" in: starting from the end of the label text and
+        // sliding left until it settles in its resting spot just before the label.
         entry.labelView.setTextColor(primaryText)
         entry.labelView.setTypeface(entry.labelView.typeface, Typeface.BOLD)
         entry.icon.setColorFilter(primaryText)
+        entry.accentBar.animate().cancel()
         entry.accentBar.setBackgroundColor(activeBlue)
+        entry.accentBar.alpha = 1f
+        if (animate) {
+            val textWidth = entry.labelView.paint.measureText(entry.labelView.text.toString())
+            entry.accentBar.translationX = textWidth
+            entry.accentBar.animate()
+                .translationX(0f)
+                .setDuration(220L)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+        } else {
+            entry.accentBar.translationX = 0f
+        }
     }
 
     fun toggle(index: Int) {
@@ -330,14 +365,14 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         expandedIndex = null
         val animateIndex = GEOMETRY_SUBCATEGORIES.indexOfFirst { it.label == "Animate" }
         if (animateIndex >= 0) {
-            expand(animateIndex)
+            expand(animateIndex, animate = false)
             expandedIndex = animateIndex
         }
     }
     applyDefaultState()
 
     fun reset() {
-        rows.forEach { it.row.animate().cancel(); it.chevron.animate().cancel() }
+        rows.forEach { it.row.animate().cancel(); it.chevron.animate().cancel(); it.accentBar.animate().cancel() }
         applyDefaultState()
     }
 
