@@ -697,7 +697,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     // Geometry is the top-level, primary category in this rail: a taller (~56px) row with
     // stronger typography than the subordinate rows below it, plus a chevron on the far right
     // that rotates to reflect whether its sidebar tree is expanded or collapsed.
-    fun buildGeometryRailRow(iconRes: Int, label: String, onClick: () -> Unit): Pair<LinearLayout, ImageView> {
+    fun buildGeometryRailRow(iconRes: Int, label: String): Pair<LinearLayout, ImageView> {
         lateinit var chevronRef: ImageView
         val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -729,7 +729,6 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 layoutParams = LinearLayout.LayoutParams(dp(16), dp(16))
             }
             addView(chevronRef)
-            setOnClickListener { onClick() }
         }
         return row to chevronRef
     }
@@ -856,7 +855,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             // Geometry is the primary category in this rail - it gets the taller, bolder row
             // with its own chevron (see buildGeometryRailRow) instead of the generic row used
             // by every other category below.
-            val (row, chevron) = buildGeometryRailRow(cat.iconRes, cat.label) {
+            val (row, chevron) = buildGeometryRailRow(cat.iconRes, cat.label)
+            row.setOnClickListener {
                 setActiveCategory(cat.id)
                 when (activeRailIndex) {
                     index -> {
