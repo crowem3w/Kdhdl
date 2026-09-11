@@ -17,6 +17,7 @@ enum class PartKind(
     val fillColor: Int,
     val cornerRadius: Float,
     val promptNoun: String,
+    val hasBorder: Boolean = true,
 ) {
     BUTTON("Button", 140f, 56f, Color.parseColor("#EADDFF"), 28f, "filled button"),
     FAB("FAB", 64f, 64f, Color.parseColor("#D0BCFF"), 20f, "floating action button"),
@@ -27,6 +28,6 @@ enum class PartKind(
     SWITCH("Switch", 64f, 36f, Color.parseColor("#E8DEF8"), 18f, "switch"),
     TOP_APP_BAR("Top app bar", 0f, 64f, Color.parseColor("#ECE6F0"), 0f, "top app bar"),
     NAV_BAR("Nav bar", 0f, 80f, Color.parseColor("#ECE6F0"), 0f, "bottom navigation bar"),
-    TEXT("Text", 160f, 32f, Color.TRANSPARENT, 0f, "text label"),
+    TEXT("Text", 160f, 32f, Color.TRANSPARENT, 0f, "text label", hasBorder = false),
     IMAGE("Image", 200f, 120f, Color.parseColor("#E6E0E9"), 8f, "image placeholder"),
 }

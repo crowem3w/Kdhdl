@@ -197,7 +197,9 @@ class SketchCanvasView @JvmOverloads constructor(
             fillPaint.color = part.kind.fillColor
             canvas.drawRoundRect(rect, radius, radius, fillPaint)
         }
-        canvas.drawRoundRect(rect, radius, radius, strokePaint)
+        if (part.kind.hasBorder) {
+            canvas.drawRoundRect(rect, radius, radius, strokePaint)
+        }
         val label = part.label.ifBlank { part.kind.displayLabel }
         canvas.drawText(label, rect.centerX(), rect.centerY() + textPaint.textSize / 3f, textPaint)
     }
