@@ -70,17 +70,19 @@ class SketchCanvasView @JvmOverloads constructor(
     private val selectionPad = 10f * density
     private val selectionRadius = 12f * density
 
-    // Purple resize handles on the 4 sides + 4 corners of the selection frame.
-    private val handleRadius = 6f * density
-    private val handleFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = Color.parseColor("#6750A4")
-    }
-    private val handleStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    // Purple resize handles on the 4 sides + 4 corners of the selection frame, drawn as short
+    // straight lines on the sides and small curved (quarter-circle) lines on the corners, sitting
+    // 1px outside the (0px) selection border.
+    private val handleOffset = 1f * density
+    private val handleLineHalfLength = 7f * density
+    private val handleCornerRadius = 5f * density
+    private val handleLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 1.5f * density
-        color = Color.WHITE
+        strokeCap = Paint.Cap.ROUND
+        color = Color.parseColor("#6750A4")
     }
+    private val handleCornerOval = RectF()
     private var selected: SketchPart? = null
     private var draggingPart: SketchPart? = null
     private var dragOffsetX = 0f
@@ -244,19 +246,27 @@ class SketchCanvasView @JvmOverloads constructor(
         val rect = selectionRect(part)
         val midX = rect.centerX()
         val midY = rect.centerY()
-        val handlePositions = listOf(
-            rect.left to rect.top,       // top-left corner
-            midX to rect.top,            // top-mid
-            rect.right to rect.top,      // top-right corner
-            rect.left to midY,           // mid-left
-            rect.right to midY,          // mid-right
-            rect.left to rect.bottom,    // bottom-left corner
-            midX to rect.bottom,         // bottom-mid
-            rect.right to rect.bottom,   // bottom-right corner
-        )
-        for ((hx, hy) in handlePositions) {
-            canvas.drawCircle(hx, hy, handleRadius, handleFillPaint)
-            canvas.drawCircle(hx, hy, handleRadius, handleStrokePaint)
-        }
+        val o = handleOffset
+        val half = handleLineHalfLength
+
+        // 4 sides: short straight lines, 1px outside the border, one horizontal (—) on
+        // top/bottom, one vertical (|) on left/right.
+        canvas.drawLine(midX - half, rect.top - o, midX + half, rect.top - o, handleLinePaint)
+        canvas.drawLine(midX - half, rect.bottom + o, midX + half, rect.bottom + o, handleLinePaint)
+        canvas.drawLine(rect.left - o, midY - half, rect.left - o, midY + half, handleLinePaint)
+        canvas.drawLine(rect.right + o, midY - half, rect.right + o, midY + half, handleLinePaint)
+
+        // 4 corners: small curved (quarter-circle) lines, 1px outside the border, each one
+        // bowing away from the selection and tangent to its two adjacent side lines.
+        val r = handleCornerRadius
+        val d = r * 2f
+        handleCornerOval.set(rect.left - o, rect.top - o, rect.left - o + d, rect.top - o + d)
+        canvas.drawArc(handleCornerOval, 180f, 90f, false, handleLinePaint)
+        handleCornerOval.set(rect.right + o - d, rect.top - o, rect.right + o, rect.top - o + d)
+        canvas.drawArc(handleCornerOval, 270f, 90f, false, handleLinePaint)
+        handleCornerOval.set(rect.right + o - d, rect.bottom + o - d, rect.right + o, rect.bottom + o)
+        canvas.drawArc(handleCornerOval, 0f, 90f, false, handleLinePaint)
+        handleCornerOval.set(rect.left - o, rect.bottom + o - d, rect.left - o + d, rect.bottom + o)
+        canvas.drawArc(handleCornerOval, 90f, 90f, false, handleLinePaint)
     }
 }
