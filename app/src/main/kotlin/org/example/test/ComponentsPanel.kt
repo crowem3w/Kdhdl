@@ -126,12 +126,17 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
     val rowHeightL2 = dp(48)
     val rowHeightL3 = dp(42)
     val outerPadding = dp(16)
-    val iconSize = dp(20)
+    // L2 icon/label are 2dp/2sp smaller than before, and the row's own left padding is pulled
+    // in by 2dp so the icon lands 2dp closer to the true screen edge (see rowPaddingStartL2).
+    val iconSize = dp(18)
     val iconLabelGap = dp(14)
     val chevronSize = dp(16)
+    val rowPaddingStartL2 = outerPadding - dp(2)
+    val accentBarWidth = dp(3)
+    val accentBarHeight = dp(18)
     // Where the leaf list sits, measured from the sidebar's left edge: past the second-level
     // row's own icon + label start, plus a further ~24px so it reads as a nested level.
-    val l3Offset = outerPadding + iconSize + iconLabelGap + dp(24)
+    val l3Offset = rowPaddingStartL2 + iconSize + iconLabelGap + dp(24)
 
     val root = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -140,7 +145,14 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         clipToPadding = false
     }
 
-    data class SubRow(val row: LinearLayout, val chevron: ImageView, val labelView: TextView, val childrenContainer: LinearLayout)
+    data class SubRow(
+        val row: LinearLayout,
+        val icon: ImageView,
+        val accentBar: View,
+        val chevron: ImageView,
+        val labelView: TextView,
+        val childrenContainer: LinearLayout
+    )
     val rows = mutableListOf<SubRow>()
     var expandedIndex: Int? = null
 
@@ -217,7 +229,12 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
             entry.childrenContainer.alpha = 0f
             entry.childrenContainer.removeAllViews()
         }
+        // Deselected: label/icon drop back to their regular (non-bold, muted) look, and the
+        // blue "selected" accent bar in front of the label goes transparent.
         entry.labelView.setTextColor(secondaryText)
+        entry.labelView.setTypeface(entry.labelView.typeface, Typeface.NORMAL)
+        entry.icon.setColorFilter(secondaryText)
+        entry.accentBar.setBackgroundColor(Color.TRANSPARENT)
     }
 
     fun expand(index: Int) {
@@ -229,7 +246,12 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         entry.childrenContainer.visibility = View.VISIBLE
         entry.childrenContainer.alpha = 0f
         entry.childrenContainer.animate().alpha(1f).setDuration(150L).start()
+        // Selected: bold label + icon, plus the same blue "|" accent bar treatment used for
+        // the active Animate/Keyframe leaf, shown here right before the label text.
         entry.labelView.setTextColor(primaryText)
+        entry.labelView.setTypeface(entry.labelView.typeface, Typeface.BOLD)
+        entry.icon.setColorFilter(primaryText)
+        entry.accentBar.setBackgroundColor(activeBlue)
     }
 
     fun toggle(index: Int) {
@@ -245,6 +267,8 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
     }
 
     for ((index, sub) in GEOMETRY_SUBCATEGORIES.withIndex()) {
+        lateinit var icon: ImageView
+        lateinit var accentBar: View
         lateinit var chevron: ImageView
         lateinit var label: TextView
         val row = LinearLayout(context).apply {
@@ -253,21 +277,30 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
             isClickable = true
             isFocusable = true
             foreground = selectableForeground()
-            setPadding(outerPadding, 0, outerPadding, 0)
+            setPadding(rowPaddingStartL2, 0, outerPadding, 0)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowHeightL2)
-            addView(ImageView(context).apply {
+            icon = ImageView(context).apply {
                 setImageResource(sub.iconRes)
                 setColorFilter(secondaryText)
                 layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
-            })
+            }
+            addView(icon)
+            // Selection accent bar, mirroring the active Animate/Keyframe leaf treatment:
+            // transparent (no shift in layout) when this row isn't selected, blue "|" when it is.
+            accentBar = View(context).apply {
+                setBackgroundColor(Color.TRANSPARENT)
+                layoutParams = LinearLayout.LayoutParams(accentBarWidth, accentBarHeight).apply {
+                    marginStart = iconLabelGap
+                    marginEnd = dp(10)
+                }
+            }
+            addView(accentBar)
             label = TextView(context).apply {
                 text = sub.label
                 setTextColor(secondaryText)
-                textSize = 13f
+                textSize = 11f
                 maxLines = 1
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginStart = iconLabelGap
-                }
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
             addView(label)
             chevron = ImageView(context).apply {
@@ -286,7 +319,7 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         }
         root.addView(row)
         root.addView(childrenContainer)
-        rows.add(SubRow(row, chevron, label, childrenContainer))
+        rows.add(SubRow(row, icon, accentBar, chevron, label, childrenContainer))
         row.setOnClickListener { toggle(index) }
     }
 
@@ -308,7 +341,24 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         applyDefaultState()
     }
 
-    return root to ::reset
+    // Continuous vertical guide line running the full height of the L2 list (Create through
+    // Animate, including whichever row's leaf list is currently expanded beneath it) - the
+    // same "spine" treatment used per-leaf-list in buildLeafList, but here spanning the whole
+    // second-level tree. Drawn as an overlay behind `root` (via FrameLayout) so it's purely
+    // decorative and doesn't shift the icon/label positions computed above.
+    val treeGuideLine = View(context).apply {
+        setBackgroundColor(guideLineColor)
+        layoutParams = FrameLayout.LayoutParams(dp(1), ViewGroup.LayoutParams.MATCH_PARENT).apply {
+            marginStart = rowPaddingStartL2 + iconSize / 2
+        }
+    }
+    val tree = FrameLayout(context).apply {
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        addView(treeGuideLine)
+        addView(root)
+    }
+
+    return tree to ::reset
 }
 
 fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
