@@ -171,7 +171,7 @@
                 style="@style/SketchTabColumn">
 
                 <LinearLayout style="@style/SketchTabPill" android:background="@drawable/bg_tab_selected">
-                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_cursor" />
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_select" />
                     <TextView style="@style/SketchTabLabel" android:text="Select" android:textColor="#FFFFFF" />
                 </LinearLayout>
             </LinearLayout>
@@ -181,7 +181,7 @@
                 style="@style/SketchTabColumn">
 
                 <LinearLayout style="@style/SketchTabPill">
-                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_shapes" app:tint="#9A9AA5" />
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_shapes" app:tint="#9A9AA5" />
                     <TextView style="@style/SketchTabLabel" android:text="Shapes" android:textColor="#9A9AA5" />
                 </LinearLayout>
             </LinearLayout>
@@ -191,14 +191,7 @@
                 style="@style/SketchTabColumn">
 
                 <LinearLayout style="@style/SketchTabPill">
-                    <TextView
-                        android:layout_width="20dp"
-                        android:layout_height="20dp"
-                        android:gravity="center"
-                        android:text="T"
-                        android:textColor="#9A9AA5"
-                        android:textStyle="bold"
-                        android:textSize="15sp" />
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_text" app:tint="#9A9AA5" />
                     <TextView style="@style/SketchTabLabel" android:text="Text" android:textColor="#9A9AA5" />
                 </LinearLayout>
             </LinearLayout>
@@ -208,8 +201,8 @@
                 style="@style/SketchTabColumn">
 
                 <LinearLayout style="@style/SketchTabPill">
-                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_media" app:tint="#9A9AA5" />
-                    <TextView style="@style/SketchTabLabel" android:text="Media" android:textColor="#9A9AA5" />
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_upload" app:tint="#9A9AA5" />
+                    <TextView style="@style/SketchTabLabel" android:text="Upload" android:textColor="#9A9AA5" />
                 </LinearLayout>
             </LinearLayout>
 
@@ -218,8 +211,8 @@
                 style="@style/SketchTabColumn">
 
                 <LinearLayout style="@style/SketchTabPill">
-                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_components" app:tint="#9A9AA5" />
-                    <TextView style="@style/SketchTabLabel" android:text="Components" android:textColor="#9A9AA5" />
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_elements" app:tint="#9A9AA5" />
+                    <TextView style="@style/SketchTabLabel" android:text="Elements" android:textColor="#9A9AA5" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>

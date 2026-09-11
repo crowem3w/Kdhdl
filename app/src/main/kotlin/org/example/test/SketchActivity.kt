@@ -399,7 +399,7 @@ class SketchActivity : AppCompatActivity() {
             openPartPickerFromTab(tabText, "Text", listOf(PartKind.TEXT))
         }
         tabMedia.setOnClickListener {
-            openPartPickerFromTab(tabMedia, "Media", listOf(PartKind.IMAGE))
+            openPartPickerFromTab(tabMedia, "Upload", listOf(PartKind.IMAGE))
         }
         tabComponents.setOnClickListener {
             setTabActive(tabComponents)
