@@ -407,6 +407,14 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     val railIcons = mutableMapOf<String, RailRowViews>()
     val sectionViews = mutableMapOf<String, View>()
 
+    // Icon/label sizing for level-1 rows, in their default and selected states. The selected
+    // values only apply to whichever row currently owns the frame (see setActiveCategory) -
+    // every other row (and every row when nothing is selected) uses the default size.
+    val railIconSizeDefault = dp(18)
+    val railIconSizeSelected = dp(20)
+    val railLabelTextSizeDefault = 12.5f
+    val railLabelTextSizeSelected = 10f
+
     // Highlights the active level-1 row, or none at all when `id` is null. "All" is never
     // treated as a real selection here - its click handler always passes null, since it's the
     // default/no-filter view rather than one of the level-1 components (Structure, Layout,
@@ -420,7 +428,16 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             entry.frameBg.visibility = if (active) View.VISIBLE else View.GONE
             val color = Color.parseColor(if (active) "#FFFFFF" else "#9A9AA5")
             entry.icon.setColorFilter(color)
+            // Icon grows slightly and the label shrinks + goes bold once this row is selected,
+            // so the pairing reads as "promoted" without changing its position on screen.
+            val iconSize = if (active) railIconSizeSelected else railIconSizeDefault
+            entry.icon.layoutParams = entry.icon.layoutParams.apply {
+                width = iconSize
+                height = iconSize
+            }
             entry.label.setTextColor(color)
+            entry.label.textSize = if (active) railLabelTextSizeSelected else railLabelTextSizeDefault
+            entry.label.setTypeface(null, if (active) Typeface.BOLD else Typeface.NORMAL)
             // The chevron - like the frame - only appears on the currently selected level-1 row.
             entry.chevron.visibility = if (active) View.VISIBLE else View.GONE
         }
@@ -690,6 +707,14 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     val frameBleedToScreenEdge = dp(16)
     val frameBleedToDivider = dp(4)
 
+    // Icon's distance from the true screen edge: the row's own left edge already sits
+    // frameBleedToScreenEdge (16dp) in from that edge (the bottom panel's own horizontal
+    // padding - see activity_sketch.xml), so the row's left padding is the remainder needed
+    // to land the icon exactly 14dp from the edge. Works out negative (icon sits slightly
+    // inside the panel's own padding), which setPadding allows.
+    val targetIconFromScreenEdge = dp(14)
+    val contentPaddingStart = targetIconFromScreenEdge - frameBleedToScreenEdge
+
     // Shared row for every level-1 entry (All, Structure, Layout, Typography, Geometry, ...) -
     // Geometry intentionally uses the exact same metrics as its siblings rather than its own
     // treatment, so it reads as one of the same list rather than a distinct header. Built as a
@@ -727,15 +752,15 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             // No elevation/shadow on this row - the selected state is communicated purely
             // through the flat background fill and text/icon color, not a raised surface.
             elevation = 0f
-            setPadding(dp(10), 0, dp(10), 0)
+            setPadding(contentPaddingStart, 0, dp(10), 0)
             iconView = ImageView(context).apply {
                 setImageResource(iconRes)
-                layoutParams = LinearLayout.LayoutParams(dp(18), dp(18))
+                layoutParams = LinearLayout.LayoutParams(railIconSizeDefault, railIconSizeDefault)
             }
             addView(iconView)
             labelView = TextView(context).apply {
                 text = label
-                textSize = 12.5f
+                textSize = railLabelTextSizeDefault
                 maxLines = 1
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                     marginStart = dp(8)
