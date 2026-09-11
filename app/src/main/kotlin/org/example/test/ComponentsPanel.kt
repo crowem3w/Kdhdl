@@ -154,15 +154,115 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         chevron.animate().rotation(if (expanded) 270f else 180f).setDuration(150L).start()
     }
 
+    // Extra 2dp added past the end of the label text, so the slide-in/slide-out animation's
+    // start/end point sits a little further right than the text itself, rather than snapping
+    // exactly to its last character.
+    val accentSlideStartOffset = dp(2)
+
+    // Which leaf (child index) is currently active within each subcategory (by subcategory
+    // index), so a leaf's selection survives its parent row being collapsed and reopened -
+    // buildLeafList() rebuilds the leaf views from scratch every time a row expands, so this
+    // has to live outside that function. Animate/Keyframe starts active by default, matching
+    // the rail's default state.
+    val activeLeafIndex = mutableMapOf<Int, Int>()
+    GEOMETRY_SUBCATEGORIES.indexOfFirst { it.label == "Animate" }.takeIf { it >= 0 }?.let { animateIdx ->
+        val keyframeChildIdx = GEOMETRY_SUBCATEGORIES[animateIdx].children.indexOf("Keyframe")
+        if (keyframeChildIdx >= 0) activeLeafIndex[animateIdx] = keyframeChildIdx
+    }
+
+    // Shared select/deselect animation for a row's blue accent bar + label (and, for L2 rows,
+    // its icon) - the "swap" treatment used by both the second-level Create/Edit/Transform/
+    // Deform/Animate rows and their leaf items beneath them:
+    //  - selected + slide: bar starts just past the end of the label text and slides left into
+    //    its resting spot before the label (a genuine select).
+    //  - !selected + slide: the mirror image - bar slides right past the end of the text while
+    //    fading out (a genuine deselect).
+    //  - slide = false: no slide, just a plain fade in/out - used when a different row is
+    //    displacing this one rather than this one being explicitly selected/deselected.
+    //  - animate = false: snaps straight to the resting state, no animation at all (used for
+    //    initial/default state).
+    fun setAccentSelected(
+        accentBar: View,
+        label: TextView,
+        selected: Boolean,
+        animate: Boolean,
+        slide: Boolean,
+        activeTextColor: Int,
+        inactiveTextColor: Int,
+        icon: ImageView? = null,
+        activeIconColor: Int = activeTextColor,
+        inactiveIconColor: Int = inactiveTextColor
+    ) {
+        label.setTextColor(if (selected) activeTextColor else inactiveTextColor)
+        label.setTypeface(label.typeface, if (selected) Typeface.BOLD else Typeface.NORMAL)
+        icon?.setColorFilter(if (selected) activeIconColor else inactiveIconColor)
+        accentBar.animate().cancel()
+        when {
+            !animate -> {
+                accentBar.setBackgroundColor(if (selected) activeBlue else Color.TRANSPARENT)
+                accentBar.translationX = 0f
+                accentBar.alpha = 1f
+            }
+            selected && slide -> {
+                val textWidth = label.paint.measureText(label.text.toString())
+                accentBar.setBackgroundColor(activeBlue)
+                accentBar.alpha = 1f
+                accentBar.translationX = textWidth + accentSlideStartOffset
+                accentBar.animate()
+                    .translationX(0f)
+                    .setDuration(220L)
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
+            }
+            selected && !slide -> {
+                accentBar.setBackgroundColor(activeBlue)
+                accentBar.translationX = 0f
+                accentBar.alpha = 1f
+            }
+            !selected && slide -> {
+                val textWidth = label.paint.measureText(label.text.toString())
+                accentBar.animate()
+                    .translationX(textWidth + accentSlideStartOffset)
+                    .alpha(0f)
+                    .setDuration(180L)
+                    .setInterpolator(AccelerateInterpolator())
+                    .withEndAction {
+                        accentBar.setBackgroundColor(Color.TRANSPARENT)
+                        accentBar.translationX = 0f
+                        accentBar.alpha = 1f
+                    }
+                    .start()
+            }
+            else -> {
+                accentBar.animate()
+                    .alpha(0f)
+                    .setDuration(120L)
+                    .withEndAction {
+                        accentBar.setBackgroundColor(Color.TRANSPARENT)
+                        accentBar.translationX = 0f
+                        accentBar.alpha = 1f
+                    }
+                    .start()
+            }
+        }
+    }
+
     // Builds one subcategory's leaf list: a single continuous vertical guide line running the
-    // full height of the list, with the leaf rows in a text column beside it.
+    // full height of the list, with the leaf rows in a text column beside it. Leaves are
+    // functional - tapping one selects it (bold text + the blue accent bar sliding in from the
+    // end of the text, same animation as the L2 rows above), tapping the active one again
+    // deselects it, and switching straight to a sibling leaf just fades the old one out.
     fun buildLeafList(subIndex: Int): LinearLayout {
         val sub = GEOMETRY_SUBCATEGORIES[subIndex]
+        data class LeafRow(val accentBar: View, val label: TextView)
+        val leafRows = mutableListOf<LeafRow>()
         val textColumn = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            for (childLabel in sub.children) {
-                val isActive = sub.label == "Animate" && childLabel == "Keyframe"
+            sub.children.forEachIndexed { childIndex, childLabel ->
+                lateinit var accentBar: View
+                lateinit var label: TextView
+                val isActive = activeLeafIndex[subIndex] == childIndex
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
@@ -172,19 +272,51 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
                     layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowHeightL3)
                     // Restrained active-state indicator: a short blue bar rather than a filled
                     // background, so only one accent marks the active leaf.
-                    addView(View(context).apply {
-                        setBackgroundColor(if (isActive) activeBlue else Color.TRANSPARENT)
+                    accentBar = View(context).apply {
                         layoutParams = LinearLayout.LayoutParams(dp(3), dp(18)).apply { marginEnd = dp(10) }
-                    })
-                    addView(TextView(context).apply {
+                    }
+                    addView(accentBar)
+                    label = TextView(context).apply {
                         text = childLabel
-                        setTextColor(if (isActive) primaryText else neutralText)
                         textSize = 12.5f
                         maxLines = 1
-                    })
-                    // Content intentionally left blank for now - no detail view wired up yet.
-                    setOnClickListener { }
+                    }
+                    addView(label)
+                    setAccentSelected(
+                        accentBar, label, selected = isActive, animate = false, slide = true,
+                        activeTextColor = primaryText, inactiveTextColor = neutralText
+                    )
+                    setOnClickListener {
+                        val current = activeLeafIndex[subIndex]
+                        if (current == childIndex) {
+                            // Tapping the active leaf again deselects it - mirrors the L2 rows'
+                            // toggle-to-close behavior.
+                            setAccentSelected(
+                                accentBar, label, selected = false, animate = true, slide = true,
+                                activeTextColor = primaryText, inactiveTextColor = neutralText
+                            )
+                            activeLeafIndex.remove(subIndex)
+                        } else {
+                            // Switching straight to a different leaf without deselecting first:
+                            // the outgoing leaf just fades (no slide), the newly tapped one gets
+                            // the full slide-in - same rule as the L2 rows.
+                            current?.let { prevChildIndex ->
+                                leafRows.getOrNull(prevChildIndex)?.let { prevRow ->
+                                    setAccentSelected(
+                                        prevRow.accentBar, prevRow.label, selected = false, animate = true, slide = false,
+                                        activeTextColor = primaryText, inactiveTextColor = neutralText
+                                    )
+                                }
+                            }
+                            setAccentSelected(
+                                accentBar, label, selected = true, animate = true, slide = true,
+                                activeTextColor = primaryText, inactiveTextColor = neutralText
+                            )
+                            activeLeafIndex[subIndex] = childIndex
+                        }
+                    }
                 })
+                leafRows.add(LeafRow(accentBar, label))
             }
         }
         val guideLine = View(context).apply {
@@ -202,11 +334,6 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
             addView(textColumn)
         }
     }
-
-    // Extra 2dp added past the end of the label text, so the slide-in/slide-out animation's
-    // start/end point sits a little further right than the text itself, rather than snapping
-    // exactly to its last character.
-    val accentSlideStartOffset = dp(2)
 
     fun collapse(index: Int, animate: Boolean, slide: Boolean = true) {
         val entry = rows[index]
@@ -227,48 +354,20 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
             entry.childrenContainer.removeAllViews()
         }
         // Deselected: label/icon drop back to their regular (non-bold, muted) look, and the
-        // blue "selected" accent bar swaps back out - sliding right past the end of the label
-        // text and fading, the mirror image of how it slides in on selection - before
-        // resetting to transparent/at-rest so it's ready for the next selection.
-        entry.labelView.setTextColor(secondaryText)
-        entry.labelView.setTypeface(entry.labelView.typeface, Typeface.NORMAL)
-        entry.icon.setColorFilter(secondaryText)
-        entry.accentBar.animate().cancel()
-        when {
-            !animate -> {
-                entry.accentBar.setBackgroundColor(Color.TRANSPARENT)
-                entry.accentBar.translationX = 0f
-                entry.accentBar.alpha = 1f
-            }
-            slide -> {
-                // Explicit deselect (tapping the already-open row closed): full slide-out.
-                val textWidth = entry.labelView.paint.measureText(entry.labelView.text.toString())
-                entry.accentBar.animate()
-                    .translationX(textWidth + accentSlideStartOffset)
-                    .alpha(0f)
-                    .setDuration(180L)
-                    .setInterpolator(AccelerateInterpolator())
-                    .withEndAction {
-                        entry.accentBar.setBackgroundColor(Color.TRANSPARENT)
-                        entry.accentBar.translationX = 0f
-                        entry.accentBar.alpha = 1f
-                    }
-                    .start()
-            }
-            else -> {
-                // Switching straight to a different row (this one wasn't explicitly closed,
-                // just displaced) - plain fade only, no slide.
-                entry.accentBar.animate()
-                    .alpha(0f)
-                    .setDuration(120L)
-                    .withEndAction {
-                        entry.accentBar.setBackgroundColor(Color.TRANSPARENT)
-                        entry.accentBar.translationX = 0f
-                        entry.accentBar.alpha = 1f
-                    }
-                    .start()
-            }
-        }
+        // blue "selected" accent bar swaps back out (or just fades if it's merely being
+        // displaced by another row) - see setAccentSelected above.
+        setAccentSelected(
+            accentBar = entry.accentBar,
+            label = entry.labelView,
+            selected = false,
+            animate = animate,
+            slide = slide,
+            activeTextColor = primaryText,
+            inactiveTextColor = secondaryText,
+            icon = entry.icon,
+            activeIconColor = primaryText,
+            inactiveIconColor = secondaryText
+        )
     }
 
     fun expand(index: Int, animate: Boolean = true) {
@@ -280,27 +379,20 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         entry.childrenContainer.visibility = View.VISIBLE
         entry.childrenContainer.alpha = 0f
         entry.childrenContainer.animate().alpha(1f).setDuration(150L).start()
-        // Selected: bold label + icon, plus the same blue "|" accent bar treatment used for
-        // the active Animate/Keyframe leaf, shown here right before the label text - but rather
-        // than just appearing, it "swaps" in: starting just past the end of the label text and
-        // sliding left until it settles in its resting spot just before the label.
-        entry.labelView.setTextColor(primaryText)
-        entry.labelView.setTypeface(entry.labelView.typeface, Typeface.BOLD)
-        entry.icon.setColorFilter(primaryText)
-        entry.accentBar.animate().cancel()
-        entry.accentBar.setBackgroundColor(activeBlue)
-        entry.accentBar.alpha = 1f
-        if (animate) {
-            val textWidth = entry.labelView.paint.measureText(entry.labelView.text.toString())
-            entry.accentBar.translationX = textWidth + accentSlideStartOffset
-            entry.accentBar.animate()
-                .translationX(0f)
-                .setDuration(220L)
-                .setInterpolator(DecelerateInterpolator())
-                .start()
-        } else {
-            entry.accentBar.translationX = 0f
-        }
+        // Selected: bold label + icon, plus the blue "|" accent bar sliding in from just past
+        // the end of the label text - see setAccentSelected above.
+        setAccentSelected(
+            accentBar = entry.accentBar,
+            label = entry.labelView,
+            selected = true,
+            animate = animate,
+            slide = true,
+            activeTextColor = primaryText,
+            inactiveTextColor = secondaryText,
+            icon = entry.icon,
+            activeIconColor = primaryText,
+            inactiveIconColor = secondaryText
+        )
     }
 
     fun toggle(index: Int) {
@@ -336,6 +428,12 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
                 setImageResource(sub.iconRes)
                 setColorFilter(secondaryText)
                 layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
+                // Deform's icon renders at 16dp x 16dp (2dp smaller than its siblings), but the
+                // ImageView itself keeps the shared 18dp slot via padding, so the label/accent
+                // bar/chevron stay aligned with every other row instead of shifting left.
+                if (sub.label == "Deform") {
+                    setPadding(dp(1), dp(1), dp(1), dp(1))
+                }
             }
             addView(icon)
             // Selection accent bar, mirroring the active Animate/Keyframe leaf treatment:
