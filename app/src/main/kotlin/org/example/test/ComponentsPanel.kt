@@ -394,10 +394,14 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     fun setActiveCategory(id: String) {
         for ((catId, item) in railIcons) {
             val active = catId == id
-            item.setBackgroundResource(if (active) R.drawable.bg_tab_selected else 0)
+            // Flat, edge-to-edge highlight (see bg_rail_row_selected) instead of a floating
+            // rounded pill - keeps the selected row structurally connected to the sidebar.
+            item.setBackgroundResource(if (active) R.drawable.bg_rail_row_selected else 0)
             val color = Color.parseColor(if (active) "#FFFFFF" else "#9A9AA5")
             (item.getChildAt(0) as ImageView).setColorFilter(color)
             (item.getChildAt(1) as TextView).setTextColor(color)
+            // The far-right chevron only appears on the currently selected level-1 row.
+            (item.getChildAt(2) as? ImageView)?.visibility = if (active) View.VISIBLE else View.GONE
         }
     }
 
@@ -655,28 +659,25 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     // Hidden until the Geometry row is selected.
     val (geometryAccordion, geometryAccordionReset) = buildGeometrySidebarTree(context)
     geometryAccordion.visibility = View.GONE
-    // Tracks the chevron on Geometry's own rail row so other rows/the "All" row can reset its
-    // rotation back to "collapsed" when Geometry stops being the active category.
-    var geometryChevron: ImageView? = null
-    fun setChevronCollapsed(chevron: ImageView) {
-        chevron.animate().cancel()
-        chevron.animate().rotation(180f).setDuration(150L).start()
-    }
-    fun setChevronExpandedRail(chevron: ImageView) {
-        chevron.animate().cancel()
-        chevron.animate().rotation(270f).setDuration(150L).start()
-    }
 
+    // Shared row for every level-1 entry (All, Structure, Layout, Typography, Geometry, ...) -
+    // Geometry intentionally uses the exact same metrics as its siblings rather than its own
+    // treatment, so it reads as one of the same list rather than a distinct header. The row
+    // spans the sidebar's full width so its selected-state background (set in setActiveCategory)
+    // extends edge-to-edge, and its chevron is only shown once the row becomes active.
     fun buildRailRow(iconRes: Int, label: String, onClick: () -> Unit): LinearLayout {
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36)).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)).apply {
                 bottomMargin = dp(4)
             }
             isClickable = true
             isFocusable = true
             foreground = selectableForeground()
+            // No elevation/shadow on this row - the selected state is communicated purely
+            // through the flat background fill and text/icon color, not a raised surface.
+            elevation = 0f
             setPadding(dp(10), 0, dp(10), 0)
             addView(ImageView(context).apply {
                 setImageResource(iconRes)
@@ -686,51 +687,21 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 text = label
                 textSize = 12.5f
                 maxLines = 1
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                     marginStart = dp(8)
                 }
             })
+            // Selection indicator - hidden by default, shown only for the active row (see
+            // setActiveCategory), which reaches this view via getChildAt(2).
+            addView(ImageView(context).apply {
+                setImageResource(R.drawable.ic_chevron_left)
+                setColorFilter(Color.WHITE)
+                rotation = 270f
+                visibility = View.GONE
+                layoutParams = LinearLayout.LayoutParams(dp(14), dp(14))
+            })
             setOnClickListener { onClick() }
         }
-    }
-
-    // Geometry is the top-level, primary category in this rail: a taller (~56px) row with
-    // stronger typography than the subordinate rows below it, plus a chevron on the far right
-    // that rotates to reflect whether its sidebar tree is expanded or collapsed.
-    fun buildGeometryRailRow(iconRes: Int, label: String): Pair<LinearLayout, ImageView> {
-        lateinit var chevronRef: ImageView
-        val row = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)).apply {
-                bottomMargin = dp(4)
-            }
-            isClickable = true
-            isFocusable = true
-            foreground = selectableForeground()
-            setPadding(dp(16), 0, dp(16), 0)
-            addView(ImageView(context).apply {
-                setImageResource(iconRes)
-                layoutParams = LinearLayout.LayoutParams(dp(20), dp(20))
-            })
-            addView(TextView(context).apply {
-                text = label
-                textSize = 14.5f
-                setTypeface(typeface, Typeface.BOLD)
-                maxLines = 1
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginStart = dp(14)
-                }
-            })
-            chevronRef = ImageView(context).apply {
-                setImageResource(R.drawable.ic_chevron_left)
-                setColorFilter(Color.parseColor("#9A9AA5"))
-                rotation = 180f
-                layoutParams = LinearLayout.LayoutParams(dp(16), dp(16))
-            }
-            addView(chevronRef)
-        }
-        return row to chevronRef
     }
 
     // Ordered list of every row in the rail (the "All" row, the divider, then each category
@@ -828,7 +799,6 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         if (activeCategoryId == "shapes") {
             geometryAccordionReset()
             geometryAccordion.visibility = View.GONE
-            geometryChevron?.animate()?.rotation(180f)?.setDuration(150L)?.start()
         }
         activeCategoryId = null
         contentScroll.post { contentScroll.smoothScrollTo(0, 0) }
@@ -851,79 +821,41 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         val index = railEntries.size // this row's fixed position, captured before it's appended
         val item: LinearLayout
 
-        if (cat.id == "shapes") {
-            // Geometry is the primary category in this rail - it gets the taller, bolder row
-            // with its own chevron (see buildGeometryRailRow) instead of the generic row used
-            // by every other category below.
-            val (row, chevron) = buildGeometryRailRow(cat.iconRes, cat.label)
-            row.setOnClickListener {
-                setActiveCategory(cat.id)
-                when (activeRailIndex) {
-                    index -> {
-                        // Deselecting Geometry (tapped again).
-                        railAnimateRestore(index)
-                        activeRailIndex = null
-                        activeCategoryId = null
-                        showAllContent()
+        item = buildRailRow(cat.iconRes, cat.label) {
+            setActiveCategory(cat.id)
+            when (activeRailIndex) {
+                index -> {
+                    // Deselecting this category (tapped again).
+                    railAnimateRestore(index)
+                    activeRailIndex = null
+                    activeCategoryId = null
+                    showAllContent()
+                    if (cat.id == "shapes") {
                         geometryAccordionReset()
                         geometryAccordion.visibility = View.GONE
-                        setChevronCollapsed(chevron)
-                    }
-                    null -> {
-                        // Nothing was selected - selecting Geometry fresh.
-                        railAnimateSelect(index)
-                        activeRailIndex = index
-                        activeCategoryId = cat.id
-                        showEmptyCategoryContent()
-                        geometryAccordion.visibility = View.VISIBLE
-                        setChevronExpandedRail(chevron)
-                    }
-                    else -> {
-                        // A different category was active - switch straight to Geometry.
-                        railResetAllImmediate()
-                        railAnimateSelect(index)
-                        activeRailIndex = index
-                        activeCategoryId = cat.id
-                        showEmptyCategoryContent()
-                        geometryAccordion.visibility = View.VISIBLE
-                        setChevronExpandedRail(chevron)
                     }
                 }
-            }
-            geometryChevron = chevron
-            item = row
-        } else {
-            item = buildRailRow(cat.iconRes, cat.label) {
-                setActiveCategory(cat.id)
-                when (activeRailIndex) {
-                    index -> {
-                        // Deselecting this category (tapped again).
-                        railAnimateRestore(index)
-                        activeRailIndex = null
-                        activeCategoryId = null
-                        showAllContent()
+                null -> {
+                    // Nothing was selected - selecting this category fresh.
+                    railAnimateSelect(index)
+                    activeRailIndex = index
+                    activeCategoryId = cat.id
+                    showEmptyCategoryContent()
+                    if (cat.id == "shapes") geometryAccordion.visibility = View.VISIBLE
+                }
+                else -> {
+                    // A different category was active - switch straight to this one. If the
+                    // previous one was Geometry, fold its sidebar tree back away first.
+                    if (activeCategoryId == "shapes") {
+                        geometryAccordionReset()
+                        geometryAccordion.visibility = View.GONE
                     }
-                    null -> {
-                        // Nothing was selected - selecting this category fresh.
-                        railAnimateSelect(index)
-                        activeRailIndex = index
-                        activeCategoryId = cat.id
-                        showEmptyCategoryContent()
-                    }
-                    else -> {
-                        // A different category was active - switch straight to this one. If the
-                        // previous one was Geometry, fold its sidebar tree back away first.
-                        if (activeCategoryId == "shapes") {
-                            geometryAccordionReset()
-                            geometryAccordion.visibility = View.GONE
-                            geometryChevron?.let { setChevronCollapsed(it) }
-                        }
-                        railResetAllImmediate()
-                        railAnimateSelect(index)
-                        activeRailIndex = index
-                        activeCategoryId = cat.id
-                        showEmptyCategoryContent()
-                    }
+                    railResetAllImmediate()
+                    railAnimateSelect(index)
+                    activeRailIndex = index
+                    activeCategoryId = cat.id
+                    showEmptyCategoryContent()
+                    if (cat.id == "shapes") geometryAccordion.visibility = View.VISIBLE
                 }
             }
         }
