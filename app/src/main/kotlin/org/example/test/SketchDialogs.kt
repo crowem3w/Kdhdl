@@ -139,20 +139,34 @@ fun showTextInputDialog(
         }
     }
 
-    val cancelButton = MaterialButton(context).apply {
+    val cancelButton = MaterialButton(context, null, android.R.attr.borderlessButtonStyle).apply {
         text = "Cancel"
         isAllCaps = false
-        setBackgroundColor(Color.parseColor("#F1F0F4"))
+        backgroundTintList = null
+        setBackgroundColor(Color.TRANSPARENT)
+        cornerRadius = 0
+        elevation = 0f
+        stateListAnimator = null
         setTextColor(Color.parseColor("#4A4A52"))
-        setOnClickListener { finish(confirmed = false) }
+        setOnClickListener {
+            setTextColor(Color.parseColor("#E53935"))
+            finish(confirmed = false)
+        }
     }
 
-    val addButton = MaterialButton(context).apply {
+    val addButton = MaterialButton(context, null, android.R.attr.borderlessButtonStyle).apply {
         text = "Add"
         isAllCaps = false
-        setBackgroundColor(Color.parseColor("#D0BCFF"))
-        setTextColor(Color.parseColor("#381E72"))
-        setOnClickListener { finish(confirmed = true) }
+        backgroundTintList = null
+        setBackgroundColor(Color.TRANSPARENT)
+        cornerRadius = 0
+        elevation = 0f
+        stateListAnimator = null
+        setTextColor(Color.parseColor("#4A4A52"))
+        setOnClickListener {
+            setTextColor(Color.parseColor("#2E7D32"))
+            finish(confirmed = true)
+        }
     }
 
     val buttonRow = LinearLayout(context).apply {
