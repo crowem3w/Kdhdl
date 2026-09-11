@@ -939,7 +939,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     cat.label.lowercase().contains(query) ||
                     COMPONENT_ITEMS[cat.id].orEmpty().any { it.lowercase().contains(query) }
                 sectionViews[cat.id]?.visibility = if (matches) View.VISIBLE else View.GONE
-                railIcons[cat.id]?.alpha = if (matches) 1f else 0.35f
+                railIcons[cat.id]?.wrapper?.alpha = if (matches) 1f else 0.35f
             }
         }
     })
