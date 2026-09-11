@@ -130,6 +130,8 @@
         android:paddingHorizontal="16dp"
         android:paddingTop="10dp"
         android:paddingBottom="18dp"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
         app:behavior_hideable="true"
         app:behavior_skipCollapsed="false"
@@ -229,7 +231,8 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:layout_marginTop="14dp">
+            android:layout_marginTop="14dp"
+            android:clipChildren="false">
 
             <androidx.core.widget.NestedScrollView
                 android:id="@+id/defaultToolsContentScroll"
@@ -427,6 +430,7 @@
                 android:id="@+id/componentsContentContainer"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
+                android:clipChildren="false"
                 android:visibility="gone" />
         </FrameLayout>
     </LinearLayout>

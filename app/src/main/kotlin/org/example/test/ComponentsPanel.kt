@@ -324,6 +324,11 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     val root = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        // Left un-clipped so the selected level-1 row's background (frameBg, see buildRailRow)
+        // can bleed all the way out to the panel's true edge instead of stopping at this
+        // container's own bounds.
+        clipChildren = false
+        clipToPadding = false
     }
 
     
@@ -388,20 +393,36 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     })
 
     
-    val railIcons = mutableMapOf<String, LinearLayout>()
+    // Live view refs for each level-1 row (All, Structure, Layout, Typography, Geometry, ...).
+    // Split out from the row's own layout since a plain LinearLayout can't give us a background
+    // that bleeds past its own bounds (frameBg) while the icon/label/chevron on top stay put -
+    // see buildRailRow below.
+    data class RailRowViews(
+        val wrapper: FrameLayout,
+        val frameBg: View,
+        val icon: ImageView,
+        val label: TextView,
+        val chevron: ImageView
+    )
+    val railIcons = mutableMapOf<String, RailRowViews>()
     val sectionViews = mutableMapOf<String, View>()
 
-    fun setActiveCategory(id: String) {
-        for ((catId, item) in railIcons) {
-            val active = catId == id
+    // Highlights the active level-1 row, or none at all when `id` is null. "All" is never
+    // treated as a real selection here - its click handler always passes null, since it's the
+    // default/no-filter view rather than one of the level-1 components (Structure, Layout,
+    // Typography, Geometry, ...). So with nothing selected (including the initial state, and
+    // whenever "All" is showing) no row shows the frame or the chevron.
+    fun setActiveCategory(id: String?) {
+        for ((catId, entry) in railIcons) {
+            val active = id != null && catId == id
             // Flat, edge-to-edge highlight (see bg_rail_row_selected) instead of a floating
             // rounded pill - keeps the selected row structurally connected to the sidebar.
-            item.setBackgroundResource(if (active) R.drawable.bg_rail_row_selected else 0)
+            entry.frameBg.visibility = if (active) View.VISIBLE else View.GONE
             val color = Color.parseColor(if (active) "#FFFFFF" else "#9A9AA5")
-            (item.getChildAt(0) as ImageView).setColorFilter(color)
-            (item.getChildAt(1) as TextView).setTextColor(color)
-            // The far-right chevron only appears on the currently selected level-1 row.
-            (item.getChildAt(2) as? ImageView)?.visibility = if (active) View.VISIBLE else View.GONE
+            entry.icon.setColorFilter(color)
+            entry.label.setTextColor(color)
+            // The chevron - like the frame - only appears on the currently selected level-1 row.
+            entry.chevron.visibility = if (active) View.VISIBLE else View.GONE
         }
     }
 
@@ -660,18 +681,46 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     val (geometryAccordion, geometryAccordionReset) = buildGeometrySidebarTree(context)
     geometryAccordion.visibility = View.GONE
 
+    // How far the selected row's background (frameBg, below) bleeds past its own row bounds:
+    // left all the way to the true edge of the screen, undoing the bottom panel's own
+    // android:paddingHorizontal (see activity_sketch.xml); right up to the vertical divider
+    // that separates this sidebar from the content pane, undoing the rail's own marginEnd
+    // (see `rail` above). Kept as named constants here since both bleed amounts have to match
+    // paddings/margins declared elsewhere for the frame to land exactly on those edges.
+    val frameBleedToScreenEdge = dp(16)
+    val frameBleedToDivider = dp(4)
+
     // Shared row for every level-1 entry (All, Structure, Layout, Typography, Geometry, ...) -
     // Geometry intentionally uses the exact same metrics as its siblings rather than its own
-    // treatment, so it reads as one of the same list rather than a distinct header. The row
-    // spans the sidebar's full width so its selected-state background (set in setActiveCategory)
-    // extends edge-to-edge, and its chevron is only shown once the row becomes active.
-    fun buildRailRow(iconRes: Int, label: String, onClick: () -> Unit): LinearLayout {
-        return LinearLayout(context).apply {
+    // treatment, so it reads as one of the same list rather than a distinct header. Built as a
+    // FrameLayout of two layers rather than one plain row:
+    //  - frameBg: the selected-state background. Hidden until this row is the active selection
+    //    (see setActiveCategory) - a level-1 row with nothing selected shows no frame at all.
+    //    Sized past the row's own bounds (negative margins) so once visible it reaches the true
+    //    screen edge on the left and the sidebar/content divider on the right, rather than
+    //    stopping at the row's own padding.
+    //  - content: the icon/label/chevron, unaffected by the background's bleed and kept at the
+    //    row's normal padded position. The chevron is likewise hidden until this row is selected.
+    fun buildRailRow(iconRes: Int, label: String, onClick: () -> Unit): RailRowViews {
+        lateinit var iconView: ImageView
+        lateinit var labelView: TextView
+        lateinit var chevronView: ImageView
+
+        val frameBg = View(context).apply {
+            setBackgroundResource(R.drawable.bg_rail_row_selected)
+            visibility = View.GONE
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            ).apply {
+                marginStart = -frameBleedToScreenEdge
+                marginEnd = -frameBleedToDivider
+            }
+        }
+
+        val content = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)).apply {
-                bottomMargin = dp(4)
-            }
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             isClickable = true
             isFocusable = true
             foreground = selectableForeground()
@@ -679,29 +728,44 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             // through the flat background fill and text/icon color, not a raised surface.
             elevation = 0f
             setPadding(dp(10), 0, dp(10), 0)
-            addView(ImageView(context).apply {
+            iconView = ImageView(context).apply {
                 setImageResource(iconRes)
                 layoutParams = LinearLayout.LayoutParams(dp(18), dp(18))
-            })
-            addView(TextView(context).apply {
+            }
+            addView(iconView)
+            labelView = TextView(context).apply {
                 text = label
                 textSize = 12.5f
                 maxLines = 1
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                     marginStart = dp(8)
                 }
-            })
+            }
+            addView(labelView)
             // Selection indicator - hidden by default, shown only for the active row (see
-            // setActiveCategory), which reaches this view via getChildAt(2).
-            addView(ImageView(context).apply {
+            // setActiveCategory).
+            chevronView = ImageView(context).apply {
                 setImageResource(R.drawable.ic_chevron_left)
                 setColorFilter(Color.WHITE)
                 rotation = 270f
                 visibility = View.GONE
                 layoutParams = LinearLayout.LayoutParams(dp(14), dp(14))
-            })
+            }
+            addView(chevronView)
             setOnClickListener { onClick() }
         }
+
+        val wrapper = FrameLayout(context).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)).apply {
+                bottomMargin = dp(4)
+            }
+            clipChildren = false
+            clipToPadding = false
+            addView(frameBg)
+            addView(content)
+        }
+
+        return RailRowViews(wrapper, frameBg, iconView, labelView, chevronView)
     }
 
     // Ordered list of every row in the rail (the "All" row, the divider, then each category
@@ -730,12 +794,15 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         }
     }
 
-    // Cascades every rail row except `index` upward and out (staggered by distance), and
-    // collapses the selected row's own label so only its icon remains. Row 0 ("All") is
-    // excluded - it always stays visible regardless of what else is selected.
+    // Cascades every other rail row - including "All" (row 0) and its divider - upward and out
+    // (staggered by distance), leaving only the selected row in place. Since the others
+    // collapse to GONE rather than just hiding, the selected row ends up sitting where "All"
+    // used to be: "All" and every other level-1 component vanish together, and the selected
+    // one takes its spot at the top of the rail. The selected row's own label is left alone
+    // (see buildRailRow/content) so its name stays visible next to its icon.
     fun railAnimateSelect(index: Int) {
         railEntries.forEachIndexed { idx, entry ->
-            if (idx == index || idx == 0) return@forEachIndexed
+            if (idx == index) return@forEachIndexed
             val delay = kotlin.math.abs(idx - index) * railStaggerStepMs
             entry.view.animate().cancel()
             entry.view.visibility = View.VISIBLE
@@ -748,22 +815,13 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 .withEndAction { if (entry.view.alpha == 0f) entry.view.visibility = View.GONE }
                 .start()
         }
-        railEntries[index].label?.let { label ->
-            label.animate().cancel()
-            label.visibility = View.VISIBLE
-            label.animate()
-                .alpha(0f)
-                .setDuration(railAnimDurationMs)
-                .withEndAction { if (label.alpha == 0f) label.visibility = View.GONE }
-                .start()
-        }
     }
 
-    // Reverses railAnimateSelect: brings every other row back into place (staggered) and
-    // fades the selected row's label back in. Row 0 ("All") is excluded - always visible.
+    // Reverses railAnimateSelect: brings "All", its divider, and every other row back into
+    // place (staggered).
     fun railAnimateRestore(index: Int) {
         railEntries.forEachIndexed { idx, entry ->
-            if (idx == index || idx == 0) return@forEachIndexed
+            if (idx == index) return@forEachIndexed
             val delay = kotlin.math.abs(idx - index) * railStaggerStepMs
             entry.view.animate().cancel()
             entry.view.visibility = View.VISIBLE
@@ -776,23 +834,15 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 .withEndAction(null)
                 .start()
         }
-        railEntries[index].label?.let { label ->
-            label.animate().cancel()
-            label.visibility = View.VISIBLE
-            label.alpha = 0f
-            label.animate()
-                .alpha(1f)
-                .setDuration(railAnimDurationMs)
-                .withEndAction(null)
-                .start()
-        }
     }
 
     // "All" sits on top of the rail and is the default state: every section is visible and
     // nothing is filtered out. Selecting it restores the rail if something else is collapsed,
     // then scrolls back to the top.
     val allItem = buildRailRow(ALL_CATEGORY.iconRes, ALL_CATEGORY.label) {
-        setActiveCategory(ALL_CATEGORY.id)
+        // "All" is never a real selection (see setActiveCategory) - passing null both clears
+        // the frame/chevron from wherever they were showing and marks nothing as selected.
+        setActiveCategory(null)
         showAllContent()
         activeRailIndex?.let { railAnimateRestore(it) }
         activeRailIndex = null
@@ -803,9 +853,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         activeCategoryId = null
         contentScroll.post { contentScroll.smoothScrollTo(0, 0) }
     }
-    rail.addView(allItem)
+    rail.addView(allItem.wrapper)
     railIcons[ALL_CATEGORY.id] = allItem
-    railEntries.add(RailEntry(allItem, allItem.getChildAt(1) as TextView))
+    railEntries.add(RailEntry(allItem.wrapper, allItem.label))
 
     val railDivider = View(context).apply {
         setBackgroundColor(Color.parseColor("#2A2A31"))
@@ -819,13 +869,14 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
     for (cat in COMPONENT_CATEGORIES) {
         val index = railEntries.size // this row's fixed position, captured before it's appended
-        val item: LinearLayout
+        val item: RailRowViews
 
         item = buildRailRow(cat.iconRes, cat.label) {
-            setActiveCategory(cat.id)
             when (activeRailIndex) {
                 index -> {
-                    // Deselecting this category (tapped again).
+                    // Deselecting this category (tapped again) - back to the default "All"
+                    // state, so no level-1 row shows the frame or chevron.
+                    setActiveCategory(null)
                     railAnimateRestore(index)
                     activeRailIndex = null
                     activeCategoryId = null
@@ -836,7 +887,10 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     }
                 }
                 null -> {
-                    // Nothing was selected - selecting this category fresh.
+                    // Nothing was selected - selecting this category fresh. It takes over
+                    // "All"'s spot at the top of the rail as everything else (All included)
+                    // collapses away - see railAnimateSelect.
+                    setActiveCategory(cat.id)
                     railAnimateSelect(index)
                     activeRailIndex = index
                     activeCategoryId = cat.id
@@ -846,6 +900,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 else -> {
                     // A different category was active - switch straight to this one. If the
                     // previous one was Geometry, fold its sidebar tree back away first.
+                    setActiveCategory(cat.id)
                     if (activeCategoryId == "shapes") {
                         geometryAccordionReset()
                         geometryAccordion.visibility = View.GONE
@@ -860,9 +915,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             }
         }
 
-        rail.addView(item)
+        rail.addView(item.wrapper)
         railIcons[cat.id] = item
-        railEntries.add(RailEntry(item, item.getChildAt(1) as TextView))
+        railEntries.add(RailEntry(item.wrapper, item.label))
 
         // Geometry's Create/Edit/Transform/Deform/Animate tree sits directly beneath its own
         // row in the sidebar (not in the content pane) - hidden until Geometry is selected.
@@ -870,7 +925,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             rail.addView(geometryAccordion)
         }
     }
-    setActiveCategory(ALL_CATEGORY.id)
+    // Initial state: nothing selected, so no level-1 row shows the frame or chevron ("All" is
+    // just the default view, not a selection).
+    setActiveCategory(null)
 
     searchInput.addTextChangedListener(object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -890,6 +947,10 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     root.addView(LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+        // Un-clipped for the same reason as `root` above - lets the selected level-1 row's
+        // background bleed out past the rail into the screen edge on its left.
+        clipChildren = false
+        clipToPadding = false
         addView(rail)
         addView(View(context).apply {
             setBackgroundColor(Color.parseColor("#2A2A31"))
