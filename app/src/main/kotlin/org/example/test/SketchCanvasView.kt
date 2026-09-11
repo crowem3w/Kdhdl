@@ -3,7 +3,6 @@ package org.example.test
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.RectF
 import android.util.AttributeSet
@@ -26,6 +25,12 @@ class SketchCanvasView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
 ) : View(context, attrs) {
+
+    init {
+        // A software layer is required for Paint#setShadowLayer to render on shapes (not just
+        // text) reliably across API levels — used for the shadow-only selection frame below.
+        setLayerType(LAYER_TYPE_SOFTWARE, null)
+    }
 
     interface Listener {
         fun onLongPressEmptySpace(x: Float, y: Float)
@@ -54,11 +59,27 @@ class SketchCanvasView @JvmOverloads constructor(
         textSize = 13f * density
         textAlign = Paint.Align.CENTER
     }
-    private val selectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    // Selection frame: 0px border, 12dp corner radius, rendered as a white card matching the
+    // canvas background so it reads as a soft drop shadow around the selected element rather
+    // than a visible box outline.
+    private val selectionFramePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
+        setShadowLayer(10f * density, 0f, 3f * density, Color.parseColor("#40000000"))
+    }
+    private val selectionPad = 10f * density
+    private val selectionRadius = 12f * density
+
+    // Purple resize handles on the 4 sides + 4 corners of the selection frame.
+    private val handleRadius = 6f * density
+    private val handleFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#6750A4")
+    }
+    private val handleStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 2.5f * density
-        color = Color.parseColor("#B3261E")
-        pathEffect = DashPathEffect(floatArrayOf(12f * density, 8f * density), 0f)
+        strokeWidth = 1.5f * density
+        color = Color.WHITE
     }
     private var selected: SketchPart? = null
     private var draggingPart: SketchPart? = null
@@ -185,8 +206,13 @@ class SketchCanvasView @JvmOverloads constructor(
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
         val saveCount = canvas.save()
         canvas.scale(scaleFactor, scaleFactor, zoomPivotX, zoomPivotY)
-        for (part in parts) drawPart(canvas, part)
-        selected?.let { drawSelection(canvas, it) }
+        for (part in parts) {
+            // Draw the shadow frame behind the part first so the frame never covers its content.
+            if (part === selected) drawSelectionFrame(canvas, part)
+            drawPart(canvas, part)
+        }
+        // Handles are drawn last, on top of every part, so they stay grabbable.
+        selected?.let { drawSelectionHandles(canvas, it) }
         canvas.restoreToCount(saveCount)
     }
 
@@ -204,10 +230,33 @@ class SketchCanvasView @JvmOverloads constructor(
         canvas.drawText(label, rect.centerX(), rect.centerY() + textPaint.textSize / 3f, textPaint)
     }
 
-    private fun drawSelection(canvas: Canvas, part: SketchPart) {
-        val pad = 6f * density
-        val rect = RectF(part.x - pad, part.y - pad, part.x + part.w + pad, part.y + part.h + pad)
-        val radius = part.kind.cornerRadius * density + pad
-        canvas.drawRoundRect(rect, radius, radius, selectionPaint)
+    private fun selectionRect(part: SketchPart): RectF {
+        val pad = selectionPad
+        return RectF(part.x - pad, part.y - pad, part.x + part.w + pad, part.y + part.h + pad)
+    }
+
+    private fun drawSelectionFrame(canvas: Canvas, part: SketchPart) {
+        val rect = selectionRect(part)
+        canvas.drawRoundRect(rect, selectionRadius, selectionRadius, selectionFramePaint)
+    }
+
+    private fun drawSelectionHandles(canvas: Canvas, part: SketchPart) {
+        val rect = selectionRect(part)
+        val midX = rect.centerX()
+        val midY = rect.centerY()
+        val handlePositions = listOf(
+            rect.left to rect.top,       // top-left corner
+            midX to rect.top,            // top-mid
+            rect.right to rect.top,      // top-right corner
+            rect.left to midY,           // mid-left
+            rect.right to midY,          // mid-right
+            rect.left to rect.bottom,    // bottom-left corner
+            midX to rect.bottom,         // bottom-mid
+            rect.right to rect.bottom,   // bottom-right corner
+        )
+        for ((hx, hy) in handlePositions) {
+            canvas.drawCircle(hx, hy, handleRadius, handleFillPaint)
+            canvas.drawCircle(hx, hy, handleRadius, handleStrokePaint)
+        }
     }
 }
