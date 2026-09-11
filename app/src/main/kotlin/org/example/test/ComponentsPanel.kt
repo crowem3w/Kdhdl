@@ -5,7 +5,6 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.text.Editable
 import android.text.TextWatcher
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -109,12 +108,6 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
 
-    fun selectableForeground(): android.graphics.drawable.Drawable? {
-        val outValue = TypedValue()
-        context.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, outValue, true)
-        return if (outValue.resourceId != 0) context.getDrawable(outValue.resourceId) else null
-    }
-
     // Palette + metrics shared by every row in the tree - kept in one place so the second and
     // third levels read as clearly related but progressively less emphasized.
     val primaryText = Color.WHITE
@@ -175,7 +168,6 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
                     gravity = Gravity.CENTER_VERTICAL
                     isClickable = true
                     isFocusable = true
-                    foreground = selectableForeground()
                     setPadding(dp(12), 0, outerPadding, 0)
                     layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowHeightL3)
                     // Restrained active-state indicator: a short blue bar rather than a filled
@@ -211,7 +203,12 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         }
     }
 
-    fun collapse(index: Int, animate: Boolean) {
+    // Extra 2dp added past the end of the label text, so the slide-in/slide-out animation's
+    // start/end point sits a little further right than the text itself, rather than snapping
+    // exactly to its last character.
+    val accentSlideStartOffset = dp(2)
+
+    fun collapse(index: Int, animate: Boolean, slide: Boolean = true) {
         val entry = rows[index]
         setChevronExpanded(entry.chevron, false)
         entry.childrenContainer.animate().cancel()
@@ -230,30 +227,47 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
             entry.childrenContainer.removeAllViews()
         }
         // Deselected: label/icon drop back to their regular (non-bold, muted) look, and the
-        // blue "selected" accent bar swaps back out - sliding right to the end of the label
+        // blue "selected" accent bar swaps back out - sliding right past the end of the label
         // text and fading, the mirror image of how it slides in on selection - before
         // resetting to transparent/at-rest so it's ready for the next selection.
         entry.labelView.setTextColor(secondaryText)
         entry.labelView.setTypeface(entry.labelView.typeface, Typeface.NORMAL)
         entry.icon.setColorFilter(secondaryText)
         entry.accentBar.animate().cancel()
-        if (animate) {
-            val textWidth = entry.labelView.paint.measureText(entry.labelView.text.toString())
-            entry.accentBar.animate()
-                .translationX(textWidth)
-                .alpha(0f)
-                .setDuration(180L)
-                .setInterpolator(AccelerateInterpolator())
-                .withEndAction {
-                    entry.accentBar.setBackgroundColor(Color.TRANSPARENT)
-                    entry.accentBar.translationX = 0f
-                    entry.accentBar.alpha = 1f
-                }
-                .start()
-        } else {
-            entry.accentBar.setBackgroundColor(Color.TRANSPARENT)
-            entry.accentBar.translationX = 0f
-            entry.accentBar.alpha = 1f
+        when {
+            !animate -> {
+                entry.accentBar.setBackgroundColor(Color.TRANSPARENT)
+                entry.accentBar.translationX = 0f
+                entry.accentBar.alpha = 1f
+            }
+            slide -> {
+                // Explicit deselect (tapping the already-open row closed): full slide-out.
+                val textWidth = entry.labelView.paint.measureText(entry.labelView.text.toString())
+                entry.accentBar.animate()
+                    .translationX(textWidth + accentSlideStartOffset)
+                    .alpha(0f)
+                    .setDuration(180L)
+                    .setInterpolator(AccelerateInterpolator())
+                    .withEndAction {
+                        entry.accentBar.setBackgroundColor(Color.TRANSPARENT)
+                        entry.accentBar.translationX = 0f
+                        entry.accentBar.alpha = 1f
+                    }
+                    .start()
+            }
+            else -> {
+                // Switching straight to a different row (this one wasn't explicitly closed,
+                // just displaced) - plain fade only, no slide.
+                entry.accentBar.animate()
+                    .alpha(0f)
+                    .setDuration(120L)
+                    .withEndAction {
+                        entry.accentBar.setBackgroundColor(Color.TRANSPARENT)
+                        entry.accentBar.translationX = 0f
+                        entry.accentBar.alpha = 1f
+                    }
+                    .start()
+            }
         }
     }
 
@@ -268,7 +282,7 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         entry.childrenContainer.animate().alpha(1f).setDuration(150L).start()
         // Selected: bold label + icon, plus the same blue "|" accent bar treatment used for
         // the active Animate/Keyframe leaf, shown here right before the label text - but rather
-        // than just appearing, it "swaps" in: starting from the end of the label text and
+        // than just appearing, it "swaps" in: starting just past the end of the label text and
         // sliding left until it settles in its resting spot just before the label.
         entry.labelView.setTextColor(primaryText)
         entry.labelView.setTypeface(entry.labelView.typeface, Typeface.BOLD)
@@ -278,7 +292,7 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         entry.accentBar.alpha = 1f
         if (animate) {
             val textWidth = entry.labelView.paint.measureText(entry.labelView.text.toString())
-            entry.accentBar.translationX = textWidth
+            entry.accentBar.translationX = textWidth + accentSlideStartOffset
             entry.accentBar.animate()
                 .translationX(0f)
                 .setDuration(220L)
@@ -292,10 +306,15 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
     fun toggle(index: Int) {
         val current = expandedIndex
         if (current == index) {
-            collapse(index, animate = true)
+            // User closed the currently-open row: this is a real "deselect", so its accent
+            // bar gets the full slide-out.
+            collapse(index, animate = true, slide = true)
             expandedIndex = null
         } else {
-            current?.let { collapse(it, animate = true) }
+            // User switched straight to a different row without closing the current one first:
+            // the outgoing row's accent bar just fades (no slide), while the newly selected
+            // row's bar still gets the full slide-in - only true select/deselect get the slide.
+            current?.let { collapse(it, animate = true, slide = false) }
             expand(index)
             expandedIndex = index
         }
@@ -311,7 +330,6 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
             gravity = Gravity.CENTER_VERTICAL
             isClickable = true
             isFocusable = true
-            foreground = selectableForeground()
             setPadding(rowPaddingStartL2, 0, outerPadding, 0)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowHeightL2)
             icon = ImageView(context).apply {
@@ -400,12 +418,6 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
 
-    fun selectableForeground(): android.graphics.drawable.Drawable? {
-        val outValue = TypedValue()
-        context.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, outValue, true)
-        return if (outValue.resourceId != 0) context.getDrawable(outValue.resourceId) else null
-    }
-
     val root = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
@@ -422,7 +434,6 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         layoutParams = LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginEnd = dp(8) }
         isClickable = true
         isFocusable = true
-        foreground = selectableForeground()
         contentDescription = "Back"
         addView(ImageView(context).apply {
             setImageResource(R.drawable.ic_back_return)
@@ -587,7 +598,6 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             })
             addView(ImageButton(context).apply {
                 setImageResource(R.drawable.ic_more_horiz)
-                background = selectableForeground()
                 setColorFilter(Color.parseColor("#6F707A"))
                 layoutParams = LinearLayout.LayoutParams(dp(28), dp(28))
                 setOnClickListener {
@@ -704,7 +714,6 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     gravity = Gravity.CENTER_HORIZONTAL
                     isClickable = true
                     isFocusable = true
-                    foreground = selectableForeground()
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                         if (i != 0) marginStart = dp(8)
                     }
@@ -833,7 +842,6 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             isClickable = true
             isFocusable = true
-            foreground = selectableForeground()
             // No elevation/shadow on this row - the selected state is communicated purely
             // through the flat background fill and text/icon color, not a raised surface.
             elevation = 0f
