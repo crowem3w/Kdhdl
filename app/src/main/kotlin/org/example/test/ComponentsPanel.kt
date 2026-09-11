@@ -94,13 +94,15 @@ private val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
 
 
 // Dedicated content for the "Geometry" category, rendered directly in the sidebar rail beneath
-// its icon (not in the main content pane). Laid out as a small tree, mirroring geometry.txt:
-// Create/Edit/Transform/Deform/Animate sit stacked vertically (icon on top, label below, hugging
-// the left edge), and tapping one reveals its leaf items underneath as a text-only list, with a
-// single continuous vertical line running from the first leaf to the last rather than a mark per
-// line. Those leaves have no icons of their own. Nothing is wired up to real content yet (see
-// onClick below).
-// Returns the view plus a `reset` callback that immediately collapses everything, for use when
+// its icon (not in the main content pane). Create/Edit/Transform/Deform/Animate sit stacked
+// vertically, all centered on the same axis (icon on top, label below). Tapping one plays a
+// "cascading merge": the other icons slide into its position and fade away, staggered by
+// distance, until only the tapped icon remains - its leaf items then appear directly beneath it,
+// left-aligned, as a text-only list with a single continuous vertical line running from the
+// first leaf to the last (rather than a mark per line), echoing the tree in geometry.txt. Tapping
+// the visible icon again reverses the cascade, bringing the other icons back. Nothing is wired up
+// to real content yet (see onClick below).
+// Returns the view plus a `reset` callback that immediately restores everything, for use when
 // the Geometry category itself is deselected in the rail.
 private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Unit> {
     val d = context.resources.displayMetrics.density
@@ -112,7 +114,10 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
         return if (outValue.resourceId != 0) context.getDrawable(outValue.resourceId) else null
     }
 
-    val animDurationMs = 150L
+    val staggerStepMs = 45L
+    val mergeDurationMs = 220L
+    val restoreDurationMs = 200L
+    val restoreOffsetPx = dp(14).toFloat()
     val activeColor = Color.WHITE
     val inactiveColor = Color.parseColor("#9A9AA5")
 
@@ -126,46 +131,15 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
         clipToPadding = false
     }
 
-    // Icon column: Create/Edit/Transform/Deform/Animate stacked top to bottom, hugging the
-    // left edge. Each icon has its label below it rather than beside it.
-    val iconColumn = LinearLayout(context).apply {
-        orientation = LinearLayout.VERTICAL
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        clipChildren = false
-        clipToPadding = false
-    }
-
-    // Text-only leaf list for whichever icon is currently selected, underneath the icon column.
-    // A single continuous line runs alongside it from the first leaf to the last (see
-    // fillChildren), echoing the tree structure in geometry.txt, rather than a mark per line.
-    val childrenContainer = LinearLayout(context).apply {
-        orientation = LinearLayout.VERTICAL
-        visibility = View.GONE
-        alpha = 0f
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = dp(4)
-        }
-    }
-
-    root.addView(iconColumn)
-    root.addView(childrenContainer)
-
-    data class IconItem(val container: LinearLayout, val icon: ImageView, val label: TextView)
-    val iconItems = mutableListOf<IconItem>()
+    data class Item(val container: LinearLayout, val icon: ImageView, val label: TextView, val childrenContainer: LinearLayout)
+    val items = mutableListOf<Item>()
     var selectedIndex: Int? = null
 
-    fun setSelected(index: Int?) {
-        iconItems.forEachIndexed { idx, item ->
-            val active = idx == index
-            item.container.setBackgroundResource(if (active) R.drawable.bg_tab_selected else 0)
-            val color = if (active) activeColor else inactiveColor
-            item.icon.setColorFilter(activeColor) // icons stay fully visible either way
-            item.label.setTextColor(color)
-        }
-    }
-
-    fun fillChildren(index: Int) {
-        childrenContainer.removeAllViews()
+    // Builds this item's leaf list directly under it: a single continuous vertical line beside
+    // the text (rather than a mark per line), stretched once the text column is actually
+    // measured so it runs exactly from the top of the first leaf to the bottom of the last.
+    fun fillChildren(container: LinearLayout, index: Int) {
+        container.removeAllViews()
         val textColumn = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -184,14 +158,11 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
                 })
             }
         }
-        // One continuous vertical line beside the whole list, rather than a mark per line.
-        // Its height is fixed up once textColumn has actually been measured, so it runs exactly
-        // from the top of the first leaf to the bottom of the last.
         val treeLine = View(context).apply {
             setBackgroundColor(Color.parseColor("#4A4A52"))
             layoutParams = LinearLayout.LayoutParams(dp(2), dp(2))
         }
-        childrenContainer.addView(LinearLayout(context).apply {
+        container.addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             addView(treeLine)
@@ -204,29 +175,99 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
         }
     }
 
-    fun hideChildren(onHidden: () -> Unit = {}) {
-        childrenContainer.animate().cancel()
-        childrenContainer.animate()
-            .alpha(0f)
-            .setDuration(animDurationMs)
-            .setInterpolator(AccelerateInterpolator())
-            .withEndAction {
-                childrenContainer.visibility = View.GONE
-                onHidden()
-            }
+    fun setHighlight(index: Int?) {
+        items.forEachIndexed { idx, item ->
+            val active = idx == index
+            item.container.setBackgroundResource(if (active) R.drawable.bg_tab_selected else 0)
+            item.icon.setColorFilter(activeColor) // icons stay fully visible either way
+            item.label.setTextColor(if (active) activeColor else inactiveColor)
+        }
+    }
+
+    fun collapseChildrenImmediate(item: Item) {
+        item.childrenContainer.animate().cancel()
+        item.childrenContainer.visibility = View.GONE
+        item.childrenContainer.alpha = 0f
+        item.childrenContainer.removeAllViews()
+    }
+
+    fun restoreAllImmediate() {
+        items.forEach { item ->
+            item.container.animate().cancel()
+            item.container.visibility = View.VISIBLE
+            item.container.alpha = 1f
+            item.container.translationY = 0f
+            collapseChildrenImmediate(item)
+        }
+        setHighlight(null)
+    }
+
+    // The forward half of the cascade: every other icon slides toward the selected icon's slot
+    // and fades out, staggered by distance, until only the selected one is left; its children
+    // then fade in beneath it.
+    fun mergeInto(selected: Int) {
+        val tops = items.map { it.container.top }
+        items.forEachIndexed { idx, item ->
+            if (idx == selected) return@forEachIndexed
+            val delta = (tops[selected] - tops[idx]).toFloat()
+            val delay = kotlin.math.abs(idx - selected) * staggerStepMs
+            item.container.animate().cancel()
+            item.container.visibility = View.VISIBLE
+            item.container.animate()
+                .translationY(delta)
+                .alpha(0f)
+                .setStartDelay(delay)
+                .setDuration(mergeDurationMs)
+                .setInterpolator(AccelerateInterpolator())
+                .withEndAction {
+                    item.container.visibility = View.GONE
+                    item.container.translationY = 0f
+                }
+                .start()
+        }
+        setHighlight(selected)
+
+        val selectedItem = items[selected]
+        fillChildren(selectedItem.childrenContainer, selected)
+        selectedItem.childrenContainer.animate().cancel()
+        selectedItem.childrenContainer.visibility = View.VISIBLE
+        selectedItem.childrenContainer.alpha = 0f
+        selectedItem.childrenContainer.animate()
+            .alpha(1f)
+            .setStartDelay(staggerStepMs)
+            .setDuration(mergeDurationMs)
+            .setInterpolator(DecelerateInterpolator())
             .start()
     }
 
-    fun showChildren(index: Int) {
-        fillChildren(index)
-        childrenContainer.animate().cancel()
-        childrenContainer.visibility = View.VISIBLE
-        childrenContainer.alpha = 0f
-        childrenContainer.animate()
-            .alpha(1f)
-            .setDuration(animDurationMs)
-            .setInterpolator(DecelerateInterpolator())
+    // The reverse half: hide the selected icon's children, then cascade the other icons back
+    // into view, staggered by distance.
+    fun unmerge(selected: Int) {
+        val selectedItem = items[selected]
+        selectedItem.childrenContainer.animate().cancel()
+        selectedItem.childrenContainer.animate()
+            .alpha(0f)
+            .setDuration(restoreDurationMs)
+            .setInterpolator(AccelerateInterpolator())
+            .withEndAction { collapseChildrenImmediate(selectedItem) }
             .start()
+
+        items.forEachIndexed { idx, item ->
+            if (idx == selected) return@forEachIndexed
+            val delay = kotlin.math.abs(idx - selected) * staggerStepMs
+            item.container.animate().cancel()
+            item.container.alpha = 0f
+            item.container.translationY = -restoreOffsetPx
+            item.container.visibility = View.VISIBLE
+            item.container.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setStartDelay(delay)
+                .setDuration(restoreDurationMs)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+        }
+        setHighlight(null)
     }
 
     for ((index, sub) in GEOMETRY_SUBCATEGORIES.withIndex()) {
@@ -258,37 +299,59 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
             }
             addView(label)
         }
-        iconColumn.addView(itemContainer)
-        iconItems.add(IconItem(itemContainer, icon, label))
+        // This subcategory's leaf list, inserted right after its own icon so it renders below
+        // it in place (not after the whole icon list) - hidden until this icon is selected.
+        val childrenContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            alpha = 0f
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(4)
+                bottomMargin = dp(2)
+            }
+        }
+        root.addView(itemContainer)
+        root.addView(childrenContainer)
+        items.add(Item(itemContainer, icon, label, childrenContainer))
 
         itemContainer.setOnClickListener {
             when (selectedIndex) {
                 index -> {
-                    // Tapping the already-selected icon collapses the tree back up.
-                    setSelected(null)
+                    // Tapping the visible icon again reverses the cascade.
+                    unmerge(index)
                     selectedIndex = null
-                    hideChildren()
                 }
                 null -> {
-                    setSelected(index)
+                    mergeInto(index)
                     selectedIndex = index
-                    showChildren(index)
                 }
                 else -> {
-                    setSelected(index)
+                    restoreAllImmediate()
+                    mergeInto(index)
                     selectedIndex = index
-                    hideChildren { showChildren(index) }
                 }
             }
         }
     }
 
+    // All icons are the same size, but their labels differ in width, so their natural
+    // (wrap_content) widths differ too - without this they'd center on slightly different axes.
+    // Once laid out, snap every item to the widest one's width so gravity=CENTER_HORIZONTAL
+    // lines every icon up on the same vertical center.
+    root.post {
+        val maxWidth = items.maxOf { it.container.width }
+        if (maxWidth > 0) {
+            items.forEach { item ->
+                val lp = item.container.layoutParams
+                lp.width = maxWidth
+                item.container.layoutParams = lp
+            }
+        }
+    }
+
     fun reset() {
-        childrenContainer.animate().cancel()
-        childrenContainer.visibility = View.GONE
-        childrenContainer.alpha = 0f
-        childrenContainer.removeAllViews()
-        setSelected(null)
+        items.forEach { it.container.animate().cancel() }
+        restoreAllImmediate()
         selectedIndex = null
     }
 
