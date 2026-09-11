@@ -95,10 +95,11 @@ private val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
 
 // Dedicated content for the "Geometry" category, rendered directly in the sidebar rail beneath
 // its icon (not in the main content pane). Laid out as a small tree, mirroring geometry.txt:
-// Create/Edit/Transform/Deform/Animate sit in an icon row (icon on top, label below, hugging the
-// left edge), and tapping one reveals its leaf items underneath as a text-only list, each line
-// prefixed with "|" to read as a branch of the selected icon. Those leaves have no icons of
-// their own. Nothing is wired up to real content yet (see onClick below).
+// Create/Edit/Transform/Deform/Animate sit stacked vertically (icon on top, label below, hugging
+// the left edge), and tapping one reveals its leaf items underneath as a text-only list, with a
+// single continuous vertical line running from the first leaf to the last rather than a mark per
+// line. Those leaves have no icons of their own. Nothing is wired up to real content yet (see
+// onClick below).
 // Returns the view plus a `reset` callback that immediately collapses everything, for use when
 // the Geometry category itself is deselected in the rail.
 private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Unit> {
@@ -125,19 +126,18 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
         clipToPadding = false
     }
 
-    // Icon row: Create/Edit/Transform/Deform/Animate side by side, hugging the left edge (the
-    // row is wrap_content, not stretched full width). Each icon has its label below it rather
-    // than beside it.
-    val iconRow = LinearLayout(context).apply {
-        orientation = LinearLayout.HORIZONTAL
+    // Icon column: Create/Edit/Transform/Deform/Animate stacked top to bottom, hugging the
+    // left edge. Each icon has its label below it rather than beside it.
+    val iconColumn = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         clipChildren = false
         clipToPadding = false
     }
 
-    // Text-only leaf list for whichever icon is currently selected, underneath the icon row.
-    // Each line is prefixed with "|" so it reads as a branch off the selected icon above,
-    // echoing the tree structure in geometry.txt.
+    // Text-only leaf list for whichever icon is currently selected, underneath the icon column.
+    // A single continuous line runs alongside it from the first leaf to the last (see
+    // fillChildren), echoing the tree structure in geometry.txt, rather than a mark per line.
     val childrenContainer = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         visibility = View.GONE
@@ -147,7 +147,7 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
         }
     }
 
-    root.addView(iconRow)
+    root.addView(iconColumn)
     root.addView(childrenContainer)
 
     data class IconItem(val container: LinearLayout, val icon: ImageView, val label: TextView)
@@ -166,19 +166,41 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
 
     fun fillChildren(index: Int) {
         childrenContainer.removeAllViews()
-        for (childLabel in GEOMETRY_SUBCATEGORIES[index].children) {
-            childrenContainer.addView(TextView(context).apply {
-                text = "|  $childLabel"
-                setTextColor(inactiveColor)
-                textSize = 11.5f
-                isClickable = true
-                isFocusable = true
-                foreground = selectableForeground()
-                setPadding(dp(4), dp(5), dp(8), dp(5))
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                // Content intentionally left blank for now - no detail view wired up yet.
-                setOnClickListener { }
-            })
+        val textColumn = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            for (childLabel in GEOMETRY_SUBCATEGORIES[index].children) {
+                addView(TextView(context).apply {
+                    text = childLabel
+                    setTextColor(inactiveColor)
+                    textSize = 11.5f
+                    isClickable = true
+                    isFocusable = true
+                    foreground = selectableForeground()
+                    setPadding(dp(10), dp(5), dp(8), dp(5))
+                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    // Content intentionally left blank for now - no detail view wired up yet.
+                    setOnClickListener { }
+                })
+            }
+        }
+        // One continuous vertical line beside the whole list, rather than a mark per line.
+        // Its height is fixed up once textColumn has actually been measured, so it runs exactly
+        // from the top of the first leaf to the bottom of the last.
+        val treeLine = View(context).apply {
+            setBackgroundColor(Color.parseColor("#4A4A52"))
+            layoutParams = LinearLayout.LayoutParams(dp(2), dp(2))
+        }
+        childrenContainer.addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            addView(treeLine)
+            addView(textColumn)
+        })
+        textColumn.post {
+            val params = treeLine.layoutParams
+            params.height = textColumn.height
+            treeLine.layoutParams = params
         }
     }
 
@@ -218,7 +240,7 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
             foreground = selectableForeground()
             setPadding(dp(6), dp(5), dp(6), dp(5))
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                if (index != 0) marginStart = dp(2)
+                if (index != 0) topMargin = dp(2)
             }
             icon = ImageView(context).apply {
                 setImageResource(sub.iconRes)
@@ -236,7 +258,7 @@ private fun buildGeometrySidebarAccordion(context: Context): Pair<View, () -> Un
             }
             addView(label)
         }
-        iconRow.addView(itemContainer)
+        iconColumn.addView(itemContainer)
         iconItems.add(IconItem(itemContainer, icon, label))
 
         itemContainer.setOnClickListener {
