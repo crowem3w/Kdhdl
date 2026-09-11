@@ -17,8 +17,10 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-        <!-- Top bar -->
+        <!-- Top bar. Auto-hides after a few seconds to maximize canvas space for sketching;
+             see setupTopBarAutoHide() in SketchActivity. -->
         <LinearLayout
+            android:id="@+id/topBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="top"

@@ -3,6 +3,8 @@ package org.example.test
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
@@ -39,6 +41,14 @@ import kotlin.math.roundToInt
 class SketchActivity : AppCompatActivity() {
 
     private lateinit var canvas: SketchCanvasView
+
+    // Top bar auto-hide: hidden after TOP_BAR_AUTO_HIDE_DELAY_MS of the activity being focused,
+    // so sketching gets the full screen. It's brought back only by pulling down the notification
+    // shade / Quick Settings (which takes window focus away, see onWindowFocusChanged) or by
+    // reopening this screen (onResume) - never by touches on the canvas.
+    private lateinit var topBar: LinearLayout
+    private val topBarHideHandler = Handler(Looper.getMainLooper())
+    private val hideTopBarRunnable = Runnable { hideTopBar() }
 
     private lateinit var tabSelect: LinearLayout
     private lateinit var tabShapes: LinearLayout
@@ -79,11 +89,17 @@ class SketchActivity : AppCompatActivity() {
 
     private var nextId = 1L
 
+    companion object {
+        private const val TOP_BAR_AUTO_HIDE_DELAY_MS = 5_000L
+        private const val TOP_BAR_FADE_MS = 150L
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_sketch)
 
         canvas = findViewById(R.id.sketchCanvas)
+        topBar = findViewById(R.id.topBar)
 
         tabSelect = findViewById(R.id.tabSelect)
         tabShapes = findViewById(R.id.tabShapes)
@@ -141,9 +157,62 @@ class SketchActivity : AppCompatActivity() {
         setupHiddenReveal()
 
         updateProperties(null)
+
+        // Top bar starts visible and begins its 5s countdown to hide as soon as the sketch
+        // screen is first shown.
+        showTopBar()
     }
 
-    
+    override fun onResume() {
+        super.onResume()
+        // Reopening the sketch screen (coming back from another activity, the recents list,
+        // etc.) brings the top bar back and restarts the auto-hide countdown.
+        showTopBar()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            // Window regained focus (e.g. Quick Settings / notification shade was closed):
+            // show the bar and start counting back down to hidden.
+            showTopBar()
+        } else {
+            // Window lost focus - most commonly because the notification shade / Quick
+            // Settings was pulled down over the screen. Reveal the bar and hold it visible
+            // (don't schedule the auto-hide) until focus returns.
+            showTopBar(autoHideAfterDelay = false)
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        topBarHideHandler.removeCallbacksAndMessages(null)
+    }
+
+    /** Shows the top bar (fading in if it was hidden) and, unless told not to, schedules it to
+     *  auto-hide again after [TOP_BAR_AUTO_HIDE_DELAY_MS]. */
+    private fun showTopBar(autoHideAfterDelay: Boolean = true) {
+        topBarHideHandler.removeCallbacks(hideTopBarRunnable)
+        if (topBar.visibility != View.VISIBLE || topBar.alpha < 1f) {
+            topBar.animate().cancel()
+            topBar.alpha = 0f
+            topBar.visibility = View.VISIBLE
+            topBar.animate().alpha(1f).setDuration(TOP_BAR_FADE_MS).start()
+        }
+        if (autoHideAfterDelay) {
+            topBarHideHandler.postDelayed(hideTopBarRunnable, TOP_BAR_AUTO_HIDE_DELAY_MS)
+        }
+    }
+
+    private fun hideTopBar() {
+        if (topBar.visibility != View.VISIBLE) return
+        topBar.animate().cancel()
+        topBar.animate()
+            .alpha(0f)
+            .setDuration(TOP_BAR_FADE_MS)
+            .withEndAction { topBar.visibility = View.GONE }
+            .start()
+    }
 
     private fun setupTopBar() {
         findViewById<View>(R.id.btnBack).setOnClickListener { finish() }
