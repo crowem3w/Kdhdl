@@ -42,10 +42,10 @@ class SketchActivity : AppCompatActivity() {
 
     private lateinit var canvas: SketchCanvasView
 
-    // Top bar auto-hide: hidden after TOP_BAR_AUTO_HIDE_DELAY_MS of the activity being focused,
-    // so sketching gets the full screen. It's brought back only by pulling down the notification
-    // shade / Quick Settings (which takes window focus away, see onWindowFocusChanged) or by
-    // reopening this screen (onResume) - never by touches on the canvas.
+    
+    
+    
+    
     private lateinit var topBar: LinearLayout
     private val topBarHideHandler = Handler(Looper.getMainLooper())
     private val hideTopBarRunnable = Runnable { hideTopBar() }
@@ -74,13 +74,13 @@ class SketchActivity : AppCompatActivity() {
     private var componentsContentBuilt = false
     private var showingComponents = false
 
-    // Panel resize bounds, computed once the panel has laid out (see setupBottomPanel).
-    // - minPanelHeight: smallest height that still shows the handle + tabs row.
-    // - maxPanelHeight: full-screen height (the panel's parent height).
-    // - defaultPanelHeight: the panel's resting size when first shown/revealed. Uses the
-    //   standard Material/Android "half-expanded" convention of 50% of screen height
-    //   (com.google.android.material.bottomsheet.BottomSheetBehavior.DEFAULT_HALF_EXPANDED_RATIO)
-    //   as the HCI-standard default length for a resizable bottom panel.
+    
+    
+    
+    
+    
+    
+    
     private var minPanelHeight = 0
     private var maxPanelHeight = 0
     private var defaultPanelHeight = 0
@@ -158,28 +158,28 @@ class SketchActivity : AppCompatActivity() {
 
         updateProperties(null)
 
-        // Top bar starts visible and begins its 5s countdown to hide as soon as the sketch
-        // screen is first shown.
+        
+        
         showTopBar()
     }
 
     override fun onResume() {
         super.onResume()
-        // Reopening the sketch screen (coming back from another activity, the recents list,
-        // etc.) brings the top bar back and restarts the auto-hide countdown.
+        
+        
         showTopBar()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
-            // Window regained focus (e.g. Quick Settings / notification shade was closed):
-            // show the bar and start counting back down to hidden.
+            
+            
             showTopBar()
         } else {
-            // Window lost focus - most commonly because the notification shade / Quick
-            // Settings was pulled down over the screen. Reveal the bar and hold it visible
-            // (don't schedule the auto-hide) until focus returns.
+            
+            
+            
             showTopBar(autoHideAfterDelay = false)
         }
     }
@@ -189,8 +189,8 @@ class SketchActivity : AppCompatActivity() {
         topBarHideHandler.removeCallbacksAndMessages(null)
     }
 
-    /** Shows the top bar (fading in if it was hidden) and, unless told not to, schedules it to
-     *  auto-hide again after [TOP_BAR_AUTO_HIDE_DELAY_MS]. */
+    
+
     private fun showTopBar(autoHideAfterDelay: Boolean = true) {
         topBarHideHandler.removeCallbacks(hideTopBarRunnable)
         if (topBar.visibility != View.VISIBLE || topBar.alpha < 1f) {
@@ -242,20 +242,20 @@ class SketchActivity : AppCompatActivity() {
 
 
     private fun setupBottomPanel() {
-        bottomSheetBehavior.isDraggable = false // dragHandle drives resizing manually; see setupDragHandle
+        bottomSheetBehavior.isDraggable = false 
         bottomPanel.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
                 val rootHeight = (bottomPanel.parent as? View)?.height ?: 0
                 if (panelContentContainer.top > 0 && rootHeight > 0) {
-                    // Smallest height that still shows the handle + tabs row, with no content
-                    // area showing yet.
+                    
+                    
                     minPanelHeight = panelContentContainer.top + bottomPanel.paddingBottom
-                    // Full screen, since bottomPanel's height is match_parent.
+                    
                     maxPanelHeight = rootHeight
-                    // HCI-standard resting size: 50% of screen height (the same half-expanded
-                    // ratio Material's own BottomSheetBehavior defaults to for resizable
-                    // sheets), clamped so it never shows less than the tabs row or more than
-                    // the full screen.
+                    
+                    
+                    
+                    
                     defaultPanelHeight = (rootHeight * 0.5f).roundToInt()
                         .coerceIn(minPanelHeight, maxPanelHeight)
 
@@ -269,27 +269,27 @@ class SketchActivity : AppCompatActivity() {
 
     
 
-    /**
-     * Lets the small pill handle at the top of the panel resize it freely: the panel height
-     * tracks the finger 1:1 while dragging (no snapping mid-drag), matching whatever height the
-     * user needs. Only on release, if the drag went past one of the extremes, does it
-     * auto-complete into fully hidden or full screen; anywhere else it simply stays put at the
-     * size the user left it.
-     */
+    
+
+
+
+
+
+
     private fun setupDragHandle() {
         var startRawY = 0f
         var startHeight = 0
 
         dragHandle.setOnTouchListener { _, event ->
-            if (maxPanelHeight == 0) return@setOnTouchListener false // not laid out yet
+            if (maxPanelHeight == 0) return@setOnTouchListener false 
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     if (showingComponents) closeComponentsContent()
                     startRawY = event.rawY
                     startHeight = currentPanelHeight()
-                    // Normalize to COLLAPSED at the current visible height so peekHeight takes
-                    // over the drag from here with no visual jump, regardless of which state
-                    // (collapsed/expanded/hidden) the panel was resting in.
+                    
+                    
+                    
                     bottomSheetBehavior.setPeekHeight(startHeight, false)
                     bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
                     true
@@ -309,8 +309,8 @@ class SketchActivity : AppCompatActivity() {
                         finalHeight >= fullscreenThreshold ->
                             bottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
                         else -> {
-                            // Resting mid-drag: keep the exact height the user chose, and make
-                            // sure it doesn't end up below the usable minimum.
+                            
+                            
                             bottomSheetBehavior.setPeekHeight(
                                 finalHeight.coerceAtLeast(minPanelHeight),
                                 false,
@@ -396,7 +396,7 @@ class SketchActivity : AppCompatActivity() {
             openPartPickerFromTab(tabShapes, "Shapes", listOf(PartKind.CARD, PartKind.IMAGE, PartKind.CHIP))
         }
         tabText.setOnClickListener {
-            openPartPickerFromTab(tabText, "Text", listOf(PartKind.TEXT))
+            openTextInputModal()
         }
         tabMedia.setOnClickListener {
             openPartPickerFromTab(tabMedia, "Upload", listOf(PartKind.IMAGE))
@@ -408,6 +408,33 @@ class SketchActivity : AppCompatActivity() {
         tabSelect.setOnClickListener {
             if (showingComponents) closeComponentsContent() else setTabActive(tabSelect)
         }
+    }
+
+    
+    
+    private fun openTextInputModal() {
+        if (showingComponents) closeComponentsContent()
+        setTabActive(tabText)
+
+        
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+
+        showTextInputDialog(
+            context = this,
+            onConfirm = { text ->
+                if (text.isNotBlank()) {
+                    addPart(PartKind.TEXT, canvas.width / 2f, canvas.height / 2f, label = text)
+                }
+                restorePanelAfterTextModal()
+            },
+            onCancel = { restorePanelAfterTextModal() },
+        )
+    }
+
+    private fun restorePanelAfterTextModal() {
+        setTabActive(tabSelect)
+        if (defaultPanelHeight > 0) bottomSheetBehavior.setPeekHeight(defaultPanelHeight, false)
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
 
     private fun openPartPickerFromTab(tab: LinearLayout, title: String, kinds: List<PartKind>) {
@@ -512,7 +539,7 @@ class SketchActivity : AppCompatActivity() {
         )
     }
 
-    private fun addPart(kind: PartKind, x: Float, y: Float) {
+    private fun addPart(kind: PartKind, x: Float, y: Float, label: String = ""): SketchPart {
         val density = resources.displayMetrics.density
         val fullWidth = kind == PartKind.TOP_APP_BAR || kind == PartKind.NAV_BAR
         val w = if (fullWidth) canvas.width.toFloat() else kind.defaultW * density
@@ -523,7 +550,9 @@ class SketchActivity : AppCompatActivity() {
             PartKind.NAV_BAR -> (canvas.height - h).coerceAtLeast(0f)
             else -> (y - h / 2f).coerceIn(0f, (canvas.height - h).coerceAtLeast(0f))
         }
-        canvas.addPart(SketchPart(nextId++, kind, px, py, w, h))
+        val part = SketchPart(nextId++, kind, px, py, w, h, label)
+        canvas.addPart(part)
+        return part
     }
 
     

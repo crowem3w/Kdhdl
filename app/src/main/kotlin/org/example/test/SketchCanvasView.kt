@@ -66,9 +66,9 @@ class SketchCanvasView @JvmOverloads constructor(
     private var dragOffsetY = 0f
     private var dragMoved = false
 
-    // Zoom state. Scaling pivots around the view's center; content-space coordinates (used for
-    // hit-testing/dragging) are derived from screen coordinates via the pivot + scaleFactor, see
-    // toContentX/toContentY.
+    
+    
+    
     private var scaleFactor = 1f
     private val minScale = 0.5f
     private val maxScale = 4f

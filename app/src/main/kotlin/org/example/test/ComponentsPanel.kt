@@ -22,10 +22,10 @@ import android.widget.Toast
 
 private data class ComponentCategory(val id: String, val label: String, val iconRes: Int)
 
-// The "Geometry" category (id "shapes" in COMPONENT_CATEGORIES) gets its own dedicated content
-// instead of the generic blank placeholder: an accordion of Create/Edit/Transform/Deform/Animate
-// sub-sections, each with its own icon, that expand to reveal their leaf items. The leaf items
-// have no icons of their own, so they're rendered as text-only rows.
+
+
+
+
 private data class GeometrySubCategory(val label: String, val iconRes: Int, val children: List<String>)
 
 private val GEOMETRY_SUBCATEGORIES = listOf(
@@ -36,8 +36,8 @@ private val GEOMETRY_SUBCATEGORIES = listOf(
     GeometrySubCategory("Animate", R.drawable.ic_geo_animate, listOf("Keyframe", "Motion Path", "Constraint", "Timeline", "Graph Editor")),
 )
 
-// Pseudo-category shown at the top of the rail. Selecting it is the default/all-components
-// view (every section visible, nothing filtered out) rather than jumping to one category.
+
+
 private val ALL_CATEGORY = ComponentCategory("all", "All", R.drawable.ic_components)
 
 private val COMPONENT_CATEGORIES = listOf(
@@ -55,8 +55,8 @@ private val COMPONENT_CATEGORIES = listOf(
     ComponentCategory("prototype", "Prototype", R.drawable.ic_cat_prototype),
 )
 
-// Named, empty placeholder components shown inside each category's section. These aren't wired
-// up to anything yet (see bg_component_placeholder tiles below) - just labeled slots.
+
+
 private val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
     "structure" to listOf("Frame", "Section", "Container", "Group"),
     "layout" to listOf("Row", "Column", "Grid", "Stack"),
@@ -92,24 +92,24 @@ private val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
 
 
 
-// Dedicated content for the "Geometry" category, rendered directly in the sidebar rail beneath
-// its own row (not in the main content pane): a compact three-level navigation tree. Each of
-// Create/Edit/Transform/Deform/Animate sits as a second-level row - icon, label, and an
-// expand/collapse chevron - directly under Geometry. Tapping one reveals its leaf items
-// indented beneath it, offset from the row's own text and marked with a single thin vertical
-// guide line running the full height of the list (rather than a mark per leaf). Only one
-// second-level row is expanded at a time. "Animate" starts expanded by default with "Keyframe"
-// as the active leaf (a small blue accent + brighter text), matching the rail's default state;
-// every other leaf uses neutral secondary text. Nothing beyond this active-state styling is
-// wired up to real content yet (see onClick below).
-// Returns the view plus a `reset` callback that restores this default state, used whenever the
-// Geometry category itself is deselected/reselected in the rail.
+
+
+
+
+
+
+
+
+
+
+
+
 private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
 
-    // Palette + metrics shared by every row in the tree - kept in one place so the second and
-    // third levels read as clearly related but progressively less emphasized.
+    
+    
     val primaryText = Color.WHITE
     val secondaryText = Color.parseColor("#C7C7CF")
     val neutralText = Color.parseColor("#9A9AA5")
@@ -119,16 +119,16 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
     val rowHeightL2 = dp(48)
     val rowHeightL3 = dp(42)
     val outerPadding = dp(16)
-    // L2 icon/label are 2dp/2sp smaller than before, and the row's own left padding is pulled
-    // in by 2dp so the icon lands 2dp closer to the true screen edge (see rowPaddingStartL2).
+    
+    
     val iconSize = dp(18)
     val iconLabelGap = dp(14)
     val chevronSize = dp(16)
     val rowPaddingStartL2 = outerPadding - dp(2)
     val accentBarWidth = dp(3)
     val accentBarHeight = dp(18)
-    // Where the leaf list sits, measured from the sidebar's left edge: past the second-level
-    // row's own icon + label start, plus a further ~24px so it reads as a nested level.
+    
+    
     val l3Offset = rowPaddingStartL2 + iconSize + iconLabelGap + dp(24)
 
     val root = LinearLayout(context).apply {
@@ -154,33 +154,33 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         chevron.animate().rotation(if (expanded) 270f else 180f).setDuration(150L).start()
     }
 
-    // Extra 2dp added past the end of the label text, so the slide-in/slide-out animation's
-    // start/end point sits a little further right than the text itself, rather than snapping
-    // exactly to its last character.
+    
+    
+    
     val accentSlideStartOffset = dp(2)
 
-    // Which leaf (child index) is currently active within each subcategory (by subcategory
-    // index), so a leaf's selection survives its parent row being collapsed and reopened -
-    // buildLeafList() rebuilds the leaf views from scratch every time a row expands, so this
-    // has to live outside that function. Animate/Keyframe starts active by default, matching
-    // the rail's default state.
+    
+    
+    
+    
+    
     val activeLeafIndex = mutableMapOf<Int, Int>()
     GEOMETRY_SUBCATEGORIES.indexOfFirst { it.label == "Animate" }.takeIf { it >= 0 }?.let { animateIdx ->
         val keyframeChildIdx = GEOMETRY_SUBCATEGORIES[animateIdx].children.indexOf("Keyframe")
         if (keyframeChildIdx >= 0) activeLeafIndex[animateIdx] = keyframeChildIdx
     }
 
-    // Shared select/deselect animation for a row's blue accent bar + label (and, for L2 rows,
-    // its icon) - the "swap" treatment used by both the second-level Create/Edit/Transform/
-    // Deform/Animate rows and their leaf items beneath them:
-    //  - selected + slide: bar starts just past the end of the label text and slides left into
-    //    its resting spot before the label (a genuine select).
-    //  - !selected + slide: the mirror image - bar slides right past the end of the text while
-    //    fading out (a genuine deselect).
-    //  - slide = false: no slide, just a plain fade in/out - used when a different row is
-    //    displacing this one rather than this one being explicitly selected/deselected.
-    //  - animate = false: snaps straight to the resting state, no animation at all (used for
-    //    initial/default state).
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     fun setAccentSelected(
         accentBar: View,
         label: TextView,
@@ -247,11 +247,11 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         }
     }
 
-    // Builds one subcategory's leaf list: a single continuous vertical guide line running the
-    // full height of the list, with the leaf rows in a text column beside it. Leaves are
-    // functional - tapping one selects it (bold text + the blue accent bar sliding in from the
-    // end of the text, same animation as the L2 rows above), tapping the active one again
-    // deselects it, and switching straight to a sibling leaf just fades the old one out.
+    
+    
+    
+    
+    
     fun buildLeafList(subIndex: Int): LinearLayout {
         val sub = GEOMETRY_SUBCATEGORIES[subIndex]
         data class LeafRow(val accentBar: View, val label: TextView)
@@ -270,8 +270,8 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
                     isFocusable = true
                     setPadding(dp(12), 0, outerPadding, 0)
                     layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowHeightL3)
-                    // Restrained active-state indicator: a short blue bar rather than a filled
-                    // background, so only one accent marks the active leaf.
+                    
+                    
                     accentBar = View(context).apply {
                         layoutParams = LinearLayout.LayoutParams(dp(3), dp(18)).apply { marginEnd = dp(10) }
                     }
@@ -289,17 +289,17 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
                     setOnClickListener {
                         val current = activeLeafIndex[subIndex]
                         if (current == childIndex) {
-                            // Tapping the active leaf again deselects it - mirrors the L2 rows'
-                            // toggle-to-close behavior.
+                            
+                            
                             setAccentSelected(
                                 accentBar, label, selected = false, animate = true, slide = true,
                                 activeTextColor = primaryText, inactiveTextColor = neutralText
                             )
                             activeLeafIndex.remove(subIndex)
                         } else {
-                            // Switching straight to a different leaf without deselecting first:
-                            // the outgoing leaf just fades (no slide), the newly tapped one gets
-                            // the full slide-in - same rule as the L2 rows.
+                            
+                            
+                            
                             current?.let { prevChildIndex ->
                                 leafRows.getOrNull(prevChildIndex)?.let { prevRow ->
                                     setAccentSelected(
@@ -353,9 +353,9 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
             entry.childrenContainer.alpha = 0f
             entry.childrenContainer.removeAllViews()
         }
-        // Deselected: label/icon drop back to their regular (non-bold, muted) look, and the
-        // blue "selected" accent bar swaps back out (or just fades if it's merely being
-        // displaced by another row) - see setAccentSelected above.
+        
+        
+        
         setAccentSelected(
             accentBar = entry.accentBar,
             label = entry.labelView,
@@ -379,8 +379,8 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         entry.childrenContainer.visibility = View.VISIBLE
         entry.childrenContainer.alpha = 0f
         entry.childrenContainer.animate().alpha(1f).setDuration(150L).start()
-        // Selected: bold label + icon, plus the blue "|" accent bar sliding in from just past
-        // the end of the label text - see setAccentSelected above.
+        
+        
         setAccentSelected(
             accentBar = entry.accentBar,
             label = entry.labelView,
@@ -398,14 +398,14 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
     fun toggle(index: Int) {
         val current = expandedIndex
         if (current == index) {
-            // User closed the currently-open row: this is a real "deselect", so its accent
-            // bar gets the full slide-out.
+            
+            
             collapse(index, animate = true, slide = true)
             expandedIndex = null
         } else {
-            // User switched straight to a different row without closing the current one first:
-            // the outgoing row's accent bar just fades (no slide), while the newly selected
-            // row's bar still gets the full slide-in - only true select/deselect get the slide.
+            
+            
+            
             current?.let { collapse(it, animate = true, slide = false) }
             expand(index)
             expandedIndex = index
@@ -428,16 +428,16 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
                 setImageResource(sub.iconRes)
                 setColorFilter(secondaryText)
                 layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
-                // Deform's icon renders at 16dp x 16dp (2dp smaller than its siblings), but the
-                // ImageView itself keeps the shared 18dp slot via padding, so the label/accent
-                // bar/chevron stay aligned with every other row instead of shifting left.
+                
+                
+                
                 if (sub.label == "Deform") {
                     setPadding(dp(1), dp(1), dp(1), dp(1))
                 }
             }
             addView(icon)
-            // Selection accent bar, mirroring the active Animate/Keyframe leaf treatment:
-            // transparent (no shift in layout) when this row isn't selected, blue "|" when it is.
+            
+            
             accentBar = View(context).apply {
                 setBackgroundColor(Color.TRANSPARENT)
                 layoutParams = LinearLayout.LayoutParams(accentBarWidth, accentBarHeight).apply {
@@ -474,8 +474,8 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         row.setOnClickListener { toggle(index) }
     }
 
-    // Default state: everything collapsed except "Animate", which starts expanded with
-    // "Keyframe" active - this is what the rail shows the moment Geometry is selected.
+    
+    
     fun applyDefaultState() {
         rows.indices.forEach { idx -> collapse(idx, animate = false) }
         expandedIndex = null
@@ -492,11 +492,11 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         applyDefaultState()
     }
 
-    // Continuous vertical guide line running the full height of the L2 list (Create through
-    // Animate, including whichever row's leaf list is currently expanded beneath it) - the
-    // same "spine" treatment used per-leaf-list in buildLeafList, but here spanning the whole
-    // second-level tree. Drawn as an overlay behind `root` (via FrameLayout) so it's purely
-    // decorative and doesn't shift the icon/label positions computed above.
+    
+    
+    
+    
+    
     val treeGuideLine = View(context).apply {
         setBackgroundColor(guideLineColor)
         layoutParams = FrameLayout.LayoutParams(dp(1), ViewGroup.LayoutParams.MATCH_PARENT).apply {
@@ -519,9 +519,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     val root = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        // Left un-clipped so the selected level-1 row's background (frameBg, see buildRailRow)
-        // can bleed all the way out to the panel's true edge instead of stopping at this
-        // container's own bounds.
+        
+        
+        
         clipChildren = false
         clipToPadding = false
     }
@@ -587,10 +587,10 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     })
 
     
-    // Live view refs for each level-1 row (All, Structure, Layout, Typography, Geometry, ...).
-    // Split out from the row's own layout since a plain LinearLayout can't give us a background
-    // that bleeds past its own bounds (frameBg) while the icon/label/chevron on top stay put -
-    // see buildRailRow below.
+    
+    
+    
+    
     data class RailRowViews(
         val wrapper: FrameLayout,
         val frameBg: View,
@@ -601,29 +601,29 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     val railIcons = mutableMapOf<String, RailRowViews>()
     val sectionViews = mutableMapOf<String, View>()
 
-    // Icon/label sizing for level-1 rows, in their default and selected states. The selected
-    // values only apply to whichever row currently owns the frame (see setActiveCategory) -
-    // every other row (and every row when nothing is selected) uses the default size.
+    
+    
+    
     val railIconSizeDefault = dp(18)
     val railIconSizeSelected = dp(20)
     val railLabelTextSizeDefault = 12.5f
     val railLabelTextSizeSelected = 10f
 
-    // Highlights the active level-1 row, or none at all when `id` is null. "All" is never
-    // treated as a real selection here - its click handler always passes null, since it's the
-    // default/no-filter view rather than one of the level-1 components (Structure, Layout,
-    // Typography, Geometry, ...). So with nothing selected (including the initial state, and
-    // whenever "All" is showing) no row shows the frame or the chevron.
+    
+    
+    
+    
+    
     fun setActiveCategory(id: String?) {
         for ((catId, entry) in railIcons) {
             val active = id != null && catId == id
-            // Flat, edge-to-edge highlight (see bg_rail_row_selected) instead of a floating
-            // rounded pill - keeps the selected row structurally connected to the sidebar.
+            
+            
             entry.frameBg.visibility = if (active) View.VISIBLE else View.GONE
             val color = Color.parseColor(if (active) "#FFFFFF" else "#9A9AA5")
             entry.icon.setColorFilter(color)
-            // Icon grows slightly and the label shrinks + goes bold once this row is selected,
-            // so the pairing reads as "promoted" without changing its position on screen.
+            
+            
             val iconSize = if (active) railIconSizeSelected else railIconSizeDefault
             entry.icon.layoutParams = entry.icon.layoutParams.apply {
                 width = iconSize
@@ -632,7 +632,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             entry.label.setTextColor(color)
             entry.label.textSize = if (active) railLabelTextSizeSelected else railLabelTextSizeDefault
             entry.label.setTypeface(null, if (active) Typeface.BOLD else Typeface.NORMAL)
-            // The chevron - like the frame - only appears on the currently selected level-1 row.
+            
             entry.chevron.visibility = if (active) View.VISIBLE else View.GONE
         }
     }
@@ -650,10 +650,10 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         clipToPadding = false
         addView(sectionsContainer)
     }
-    // Shown instead of contentScroll whenever a specific category (not "All") is selected in
-    // the rail. Categories don't have their own dedicated views yet, so this is just blank for
-    // now - each category will get its own use-case-specific content here later. "Geometry"'s
-    // own navigation lives in the sidebar rail itself (see geometryAccordion below), not here.
+    
+    
+    
+    
     val emptyCategoryView = FrameLayout(context).apply {
         layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         visibility = View.GONE
@@ -710,8 +710,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             clipToPadding = false
             val itemNames = COMPONENT_ITEMS[cat.id].orEmpty()
 
-            // Tracks which tile (if any) is currently "selected" within this row. Each
-            // category row has its own independent selection state.
+            
+            
             var selectedIndex: Int? = null
             val itemContainers = mutableListOf<LinearLayout>()
             val labelViews = mutableListOf<TextView>()
@@ -719,7 +719,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
             val staggerStepMs = 50L
             val animDurationMs = 220L
-            val liftDistancePx = dp(56).toFloat() // how far tiles travel up "into" the section header line
+            val liftDistancePx = dp(56).toFloat() 
 
             fun resetAllImmediate() {
                 itemContainers.forEach { c ->
@@ -736,15 +736,15 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 iconBoxViews.forEach { it.setBackgroundResource(R.drawable.bg_component_placeholder) }
             }
 
-            // Cascades the non-selected tiles upward and out (staggered by distance from the
-            // selected tile), and collapses the selected tile's label so only its icon remains.
+            
+            
             fun animateSelect(index: Int) {
                 itemContainers.forEachIndexed { idx, container ->
                     if (idx == index) return@forEachIndexed
                     val delay = kotlin.math.abs(idx - index) * staggerStepMs
-                    // Cancel any animation left over from a previous select/restore on this
-                    // tile first - cancel() runs synchronously, so the explicit VISIBLE below
-                    // always wins over whatever end-action that old animation had queued.
+                    
+                    
+                    
                     container.animate().cancel()
                     container.visibility = View.VISIBLE
                     container.animate()
@@ -753,9 +753,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                         .setStartDelay(delay)
                         .setDuration(animDurationMs)
                         .setInterpolator(AccelerateInterpolator())
-                        // Guarded: if a restore re-targets this same in-flight animator back to
-                        // alpha 1 before this end action fires, don't hide a tile that's meant
-                        // to be visible again.
+                        
+                        
+                        
                         .withEndAction { if (container.alpha == 0f) container.visibility = View.GONE }
                         .start()
                 }
@@ -767,19 +767,19 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     .setDuration(animDurationMs)
                     .withEndAction { if (selectedLabel.alpha == 0f) selectedLabel.visibility = View.GONE }
                     .start()
-                // Only one tile left visible now - drop its box/border so it reads as a bare icon.
+                
                 iconBoxViews[index].background = null
             }
 
-            // Reverses animateSelect: brings the other tiles back down into place (staggered)
-            // and fades the selected tile's label back in.
+            
+            
             fun animateRestore(index: Int) {
                 itemContainers.forEachIndexed { idx, container ->
                     if (idx == index) return@forEachIndexed
                     val delay = kotlin.math.abs(idx - index) * staggerStepMs
-                    // Cancel first (may synchronously fire a stale GONE from an in-flight
-                    // animateSelect), then force VISIBLE - the explicit set below always runs
-                    // after cancel()'s side effect, so it wins.
+                    
+                    
+                    
                     container.animate().cancel()
                     container.visibility = View.VISIBLE
                     container.animate()
@@ -788,7 +788,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                         .setStartDelay(delay)
                         .setDuration(animDurationMs)
                         .setInterpolator(DecelerateInterpolator())
-                        .withEndAction(null) // clear any leftover GONE action from animateSelect
+                        .withEndAction(null) 
                         .start()
                 }
                 val selectedLabel = labelViews[index]
@@ -800,7 +800,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     .setDuration(animDurationMs)
                     .withEndAction(null)
                     .start()
-                // Other tiles are coming back, so this one goes back to looking like a tile too.
+                
                 iconBoxViews[index].setBackgroundResource(R.drawable.bg_component_placeholder)
             }
 
@@ -815,17 +815,17 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                         if (i != 0) marginStart = dp(8)
                     }
-                    // Icon tile (placeholder box today) - stays visible when selected, but loses
-                    // its box/border once it's the only tile left in the row (see animateSelect).
-                    // Fixed square size + centered container keeps the icon anchored in the middle
-                    // of the frame instead of stretching full-width once its sibling tiles
-                    // collapse away and this container expands to fill the row.
+                    
+                    
+                    
+                    
+                    
                     iconBox = View(context).apply {
                         setBackgroundResource(R.drawable.bg_component_placeholder)
                         layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
                     }
                     addView(iconBox)
-                    // Name label underneath each tile - hidden when its tile is selected.
+                    
                     label = TextView(context).apply {
                         text = itemNames.getOrElse(i) { "Component ${i + 1}" }
                         setTextColor(Color.parseColor("#9A9AA5"))
@@ -849,7 +849,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 container.setOnClickListener {
                     when (selectedIndex) {
                         index -> {
-                            // Tapping the already-selected tile restores the row.
+                            
                             animateRestore(index)
                             selectedIndex = null
                         }
@@ -858,8 +858,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                             selectedIndex = index
                         }
                         else -> {
-                            // Switching selection within the row: snap back instantly, then
-                            // cascade out around the newly selected tile.
+                            
+                            
                             resetAllImmediate()
                             animateSelect(index)
                             selectedIndex = index
@@ -872,9 +872,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         sectionViews[cat.id] = section
     }
 
-    // Fixed-width vertical sidebar frame (~168px), spanning the full available content height,
-    // with a subtle 1px divider on its right edge (added where this rail is placed alongside
-    // the content pane, below) and the same dark background as the rest of the interface.
+    
+    
+    
     val rail = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         layoutParams = LinearLayout.LayoutParams(dp(168), ViewGroup.LayoutParams.MATCH_PARENT).apply {
@@ -884,40 +884,40 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         clipToPadding = false
     }
 
-    // "Geometry"'s Create/Edit/Transform/Deform/Animate navigation lives directly in the
-    // sidebar, inserted right under its own row (see the COMPONENT_CATEGORIES loop below).
-    // Hidden until the Geometry row is selected.
+    
+    
+    
     val (geometryAccordion, geometryAccordionReset) = buildGeometrySidebarTree(context)
     geometryAccordion.visibility = View.GONE
 
-    // How far the selected row's background (frameBg, below) bleeds past its own row bounds:
-    // left all the way to the true edge of the screen, undoing the bottom panel's own
-    // android:paddingHorizontal (see activity_sketch.xml); right up to the vertical divider
-    // that separates this sidebar from the content pane, undoing the rail's own marginEnd
-    // (see `rail` above). Kept as named constants here since both bleed amounts have to match
-    // paddings/margins declared elsewhere for the frame to land exactly on those edges.
+    
+    
+    
+    
+    
+    
     val frameBleedToScreenEdge = dp(16)
     val frameBleedToDivider = dp(4)
 
-    // Icon's distance from the true screen edge: the row's own left edge already sits
-    // frameBleedToScreenEdge (16dp) in from that edge (the bottom panel's own horizontal
-    // padding - see activity_sketch.xml), so the row's left padding is the remainder needed
-    // to land the icon exactly 14dp from the edge. Works out negative (icon sits slightly
-    // inside the panel's own padding), which setPadding allows.
+    
+    
+    
+    
+    
     val targetIconFromScreenEdge = dp(14)
     val contentPaddingStart = targetIconFromScreenEdge - frameBleedToScreenEdge
 
-    // Shared row for every level-1 entry (All, Structure, Layout, Typography, Geometry, ...) -
-    // Geometry intentionally uses the exact same metrics as its siblings rather than its own
-    // treatment, so it reads as one of the same list rather than a distinct header. Built as a
-    // FrameLayout of two layers rather than one plain row:
-    //  - frameBg: the selected-state background. Hidden until this row is the active selection
-    //    (see setActiveCategory) - a level-1 row with nothing selected shows no frame at all.
-    //    Sized past the row's own bounds (negative margins) so once visible it reaches the true
-    //    screen edge on the left and the sidebar/content divider on the right, rather than
-    //    stopping at the row's own padding.
-    //  - content: the icon/label/chevron, unaffected by the background's bleed and kept at the
-    //    row's normal padded position. The chevron is likewise hidden until this row is selected.
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     fun buildRailRow(iconRes: Int, label: String, onClick: () -> Unit): RailRowViews {
         lateinit var iconView: ImageView
         lateinit var labelView: TextView
@@ -940,8 +940,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             isClickable = true
             isFocusable = true
-            // No elevation/shadow on this row - the selected state is communicated purely
-            // through the flat background fill and text/icon color, not a raised surface.
+            
+            
             elevation = 0f
             setPadding(contentPaddingStart, 0, dp(10), 0)
             iconView = ImageView(context).apply {
@@ -958,8 +958,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 }
             }
             addView(labelView)
-            // Selection indicator - hidden by default, shown only for the active row (see
-            // setActiveCategory).
+            
+            
             chevronView = ImageView(context).apply {
                 setImageResource(R.drawable.ic_chevron_left)
                 setColorFilter(Color.WHITE)
@@ -984,9 +984,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         return RailRowViews(wrapper, frameBg, iconView, labelView, chevronView)
     }
 
-    // Ordered list of every row in the rail (the "All" row, the divider, then each category
-    // row) in visual top-to-bottom order. Drives the cascade: index distance from whichever
-    // entry is selected determines each entry's stagger delay.
+    
+    
+    
     data class RailEntry(val view: View, val label: TextView?)
     val railEntries = mutableListOf<RailEntry>()
     var activeRailIndex: Int? = null
@@ -1010,12 +1010,12 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         }
     }
 
-    // Cascades every other rail row - including "All" (row 0) and its divider - upward and out
-    // (staggered by distance), leaving only the selected row in place. Since the others
-    // collapse to GONE rather than just hiding, the selected row ends up sitting where "All"
-    // used to be: "All" and every other level-1 component vanish together, and the selected
-    // one takes its spot at the top of the rail. The selected row's own label is left alone
-    // (see buildRailRow/content) so its name stays visible next to its icon.
+    
+    
+    
+    
+    
+    
     fun railAnimateSelect(index: Int) {
         railEntries.forEachIndexed { idx, entry ->
             if (idx == index) return@forEachIndexed
@@ -1033,8 +1033,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         }
     }
 
-    // Reverses railAnimateSelect: brings "All", its divider, and every other row back into
-    // place (staggered).
+    
+    
     fun railAnimateRestore(index: Int) {
         railEntries.forEachIndexed { idx, entry ->
             if (idx == index) return@forEachIndexed
@@ -1052,12 +1052,12 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         }
     }
 
-    // "All" sits on top of the rail and is the default state: every section is visible and
-    // nothing is filtered out. Selecting it restores the rail if something else is collapsed,
-    // then scrolls back to the top.
+    
+    
+    
     val allItem = buildRailRow(ALL_CATEGORY.iconRes, ALL_CATEGORY.label) {
-        // "All" is never a real selection (see setActiveCategory) - passing null both clears
-        // the frame/chevron from wherever they were showing and marks nothing as selected.
+        
+        
         setActiveCategory(null)
         showAllContent()
         activeRailIndex?.let { railAnimateRestore(it) }
@@ -1084,14 +1084,14 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     railEntries.add(RailEntry(railDivider, null))
 
     for (cat in COMPONENT_CATEGORIES) {
-        val index = railEntries.size // this row's fixed position, captured before it's appended
+        val index = railEntries.size 
         val item: RailRowViews
 
         item = buildRailRow(cat.iconRes, cat.label) {
             when (activeRailIndex) {
                 index -> {
-                    // Deselecting this category (tapped again) - back to the default "All"
-                    // state, so no level-1 row shows the frame or chevron.
+                    
+                    
                     setActiveCategory(null)
                     railAnimateRestore(index)
                     activeRailIndex = null
@@ -1103,9 +1103,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     }
                 }
                 null -> {
-                    // Nothing was selected - selecting this category fresh. It takes over
-                    // "All"'s spot at the top of the rail as everything else (All included)
-                    // collapses away - see railAnimateSelect.
+                    
+                    
+                    
                     setActiveCategory(cat.id)
                     railAnimateSelect(index)
                     activeRailIndex = index
@@ -1114,8 +1114,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     if (cat.id == "shapes") geometryAccordion.visibility = View.VISIBLE
                 }
                 else -> {
-                    // A different category was active - switch straight to this one. If the
-                    // previous one was Geometry, fold its sidebar tree back away first.
+                    
+                    
                     setActiveCategory(cat.id)
                     if (activeCategoryId == "shapes") {
                         geometryAccordionReset()
@@ -1135,14 +1135,14 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         railIcons[cat.id] = item
         railEntries.add(RailEntry(item.wrapper, item.label))
 
-        // Geometry's Create/Edit/Transform/Deform/Animate tree sits directly beneath its own
-        // row in the sidebar (not in the content pane) - hidden until Geometry is selected.
+        
+        
         if (cat.id == "shapes") {
             rail.addView(geometryAccordion)
         }
     }
-    // Initial state: nothing selected, so no level-1 row shows the frame or chevron ("All" is
-    // just the default view, not a selection).
+    
+    
     setActiveCategory(null)
 
     searchInput.addTextChangedListener(object : TextWatcher {
@@ -1163,8 +1163,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     root.addView(LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
-        // Un-clipped for the same reason as `root` above - lets the selected level-1 row's
-        // background bleed out past the rail into the screen edge on its left.
+        
+        
         clipChildren = false
         clipToPadding = false
         addView(rail)
