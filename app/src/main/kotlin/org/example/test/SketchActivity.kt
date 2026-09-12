@@ -136,6 +136,8 @@ class SketchActivity : AppCompatActivity() {
 
             override fun onDoubleTapEmptySpace() = openSketchPanel()
 
+            override fun onTapEmptySpace() = closeSketchPanel()
+
             override fun onPartLongPressed(part: SketchPart) {
                 showPartOptionsDialog(
                     context = this@SketchActivity,
@@ -493,7 +495,7 @@ class SketchActivity : AppCompatActivity() {
         actionGroupToggleLabel.text = if (canvas.isSelectionGrouped()) "Ungroup" else "Group"
     }
 
-    // Slides the sidebar in from the right edge of the screen.
+    // Slides the sidebar in from the left edge of the screen.
     private fun showSelectionActionsPanel() {
         updateSelectionActionLabels()
         panelBackPressedCallback.isEnabled = true
@@ -503,7 +505,7 @@ class SketchActivity : AppCompatActivity() {
         selectionActionsPanel.translationX = 0f
         selectionActionsPanel.post {
             val dp24 = 24f * resources.displayMetrics.density
-            selectionActionsPanel.translationX = selectionActionsPanel.width.toFloat() + dp24
+            selectionActionsPanel.translationX = -(selectionActionsPanel.width.toFloat() + dp24)
             selectionActionsPanel.animate().translationX(0f).setDuration(200).start()
         }
     }
@@ -515,7 +517,7 @@ class SketchActivity : AppCompatActivity() {
         if (clearSelection) canvas.clearMultiSelection()
     }
 
-    // Purely visual: slides the panel back off-screen to the right and hides it, without
+    // Purely visual: slides the panel back off-screen to the left and hides it, without
     // touching the canvas selection. Used both by dismissSelectionActionsPanel() above and
     // directly as the onMultiSelectionCleared callback, since in that case the canvas has
     // already cleared its own selection and is just notifying us to close the panel.
@@ -524,7 +526,7 @@ class SketchActivity : AppCompatActivity() {
         val dp24 = 24f * resources.displayMetrics.density
         selectionActionsPanel.animate().cancel()
         selectionActionsPanel.animate()
-            .translationX(selectionActionsPanel.width.toFloat() + dp24)
+            .translationX(-(selectionActionsPanel.width.toFloat() + dp24))
             .setDuration(160)
             .withEndAction {
                 selectionActionsPanel.visibility = View.INVISIBLE

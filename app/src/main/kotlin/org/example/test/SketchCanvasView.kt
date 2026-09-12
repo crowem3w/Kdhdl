@@ -47,6 +47,9 @@ class SketchCanvasView @JvmOverloads constructor(
         // still resets zoom (see onDoubleTap below) - this is the other gesture entry point for
         // the panel.
         fun onDoubleTapEmptySpace()
+        // Fired by a plain single tap that lands on empty canvas space (not a part, not a member
+        // of the active multi-selection). Used to dismiss the bottom sketch panel if it's open.
+        fun onTapEmptySpace()
     }
 
     var listener: Listener? = null
@@ -317,6 +320,10 @@ class SketchCanvasView @JvmOverloads constructor(
                 selected = hit
                 invalidate()
                 listener?.onSelectionChanged(hit)
+            }
+            if (hit == null) {
+                // Plain tap on empty canvas: dismiss the bottom sketch panel if it's open.
+                listener?.onTapEmptySpace()
             }
             return true
         }

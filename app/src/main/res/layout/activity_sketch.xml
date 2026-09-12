@@ -104,16 +104,16 @@
     <!-- Temporary multi-selection actions panel: appears after a long-press + drag marquee
          selection is released over one or more parts (see SketchCanvasView -
          onMultiSelectionFinalized / SketchActivity#showSelectionActionsPanel). It's a small
-         floating sidebar docked to the right edge of the canvas - a vertical column of icon
-         buttons - not a BottomSheetBehavior sheet, since it's meant to slide in/out over the
-         canvas rather than be dragged. Hidden by default; slid in/out from off-screen (right
-         edge) entirely in code. -->
+         floating sidebar docked to the left edge of the canvas - a vertical column of icon
+         buttons, each with its label stacked directly beneath it - not a BottomSheetBehavior
+         sheet, since it's meant to slide in/out over the canvas rather than be dragged. Hidden
+         by default; slid in/out from off-screen (left edge) entirely in code. -->
     <LinearLayout
         android:id="@+id/selectionActionsPanel"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="end|center_vertical"
-        android:layout_marginEnd="16dp"
+        android:layout_gravity="start|center_vertical"
+        android:layout_marginStart="16dp"
         android:minWidth="64dp"
         android:orientation="vertical"
         android:background="@drawable/bg_selection_actions_panel"
