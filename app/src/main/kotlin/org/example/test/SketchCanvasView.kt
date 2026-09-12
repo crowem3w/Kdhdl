@@ -56,7 +56,11 @@ class SketchCanvasView @JvmOverloads constructor(
     // Exposed so callers outside the view (e.g. the activity's own gesture handling) can avoid
     // starting a competing gesture while the user is actively resizing the page.
     val isDraggingPageHandle: Boolean get() = draggingPageHandle
-    private val minPageHeight = 160f * density
+    // The drag handle can only resize the page between one full screen (the view's own height)
+    // and ten screens' worth of content, so these track `height` live rather than using a fixed
+    // constant.
+    private val minPageHeight: Float get() = height.toFloat()
+    private val maxPageHeight: Float get() = height.toFloat() * 10f
     private val pagePaint = Paint().apply { color = Color.WHITE }
     private val pagePath = Path()
     private val pageCornerRadius = 12f * density
@@ -365,7 +369,7 @@ class SketchCanvasView @JvmOverloads constructor(
                 if (!draggingPageHandle) return false
                 val deltaScreen = event.y - pageDragStartScreenY
                 val deltaContent = deltaScreen / scaleFactor
-                pageHeight = (pageDragStartHeight + deltaContent).coerceAtLeast(minPageHeight)
+                pageHeight = (pageDragStartHeight + deltaContent).coerceIn(minPageHeight, maxPageHeight)
                 clampPan()
                 invalidate()
                 return true
