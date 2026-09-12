@@ -1,6 +1,5 @@
 package org.example.test
 
-
 data class SketchPart(
     val id: Long,
     val kind: PartKind,

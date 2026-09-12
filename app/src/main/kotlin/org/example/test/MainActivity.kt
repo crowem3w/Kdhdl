@@ -11,11 +11,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
 
-
-
-
-
-
 class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,7 +32,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(20), dp(20), dp(12), dp(20))
         }
 
-        
+
         val leftColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.TOP
@@ -82,7 +77,7 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        
+
         val heroImage = ImageView(this).apply {
             setImageDrawable(ContextCompat.getDrawable(this@MainActivity, R.drawable.home_hero))
             adjustViewBounds = true

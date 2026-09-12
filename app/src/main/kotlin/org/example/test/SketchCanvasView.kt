@@ -18,9 +18,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-
-
-
 class SketchCanvasView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -42,7 +39,7 @@ class SketchCanvasView @JvmOverloads constructor(
     var listener: Listener? = null
     val parts = mutableListOf<SketchPart>()
 
-    
+
     val selectedPart: SketchPart? get() = selected
 
     private val density = context.resources.displayMetrics.density
@@ -84,6 +81,40 @@ class SketchCanvasView @JvmOverloads constructor(
         setShadowLayer(6f * density, 0f, 2f * density, Color.parseColor("#40000000"))
     }
     private val pageHandleRect = RectF()
+    // -------------------------------------------------------------------------------------------
+
+    // --- Canvas panning (vertical only) -------------------------------------------------------
+    // Lets the user drag on empty canvas space to shift the visible window up/down when the page
+    // (plus a little breathing room past its bottom handle) is taller than the view. Bounded: 0
+    // means the page's top edge sits at its natural position (can't pan "past" the top and reveal
+    // nothing above it); maxPanOffsetY() means the handle (plus margin) sits right at the bottom
+    // of the viewport (can't pan further and reveal nothing below it either). A one-finger drag
+    // that starts on empty space is a *candidate* for panning but only actually engages once it
+    // clears panTouchSlop AND there's real pannable range - if the page already fits on screen,
+    // the drag does nothing here and falls through to the activity's own swipe-up-reveals-panel
+    // gesture untouched (see isPanningCanvas / SketchActivity.dispatchTouchEvent).
+    var panOffsetY: Float = 0f
+        private set
+    val isPanningCanvas: Boolean get() = canvasPanning
+    private var panCandidate = false
+    private var canvasPanning = false
+    private var panDragStartScreenY = 0f
+    private var panDragStartOffset = 0f
+    private val panTouchSlop = 8f * density
+    // Extra room kept below the handle when fully panned down, so it doesn't sit flush against
+    // the very bottom edge of the viewport.
+    private val panHandleBottomMargin = 32f * density
+
+    private fun maxPanOffsetY(): Float {
+        val handleBottomContentY = pageHeight + panHandleBottomMargin
+        val naturalScreenY = zoomPivotY + (handleBottomContentY - zoomPivotY) * scaleFactor
+        return (naturalScreenY - height).coerceAtLeast(0f)
+    }
+
+    private fun clampPan() {
+        val newPan = panOffsetY.coerceIn(0f, maxPanOffsetY())
+        if (newPan != panOffsetY) panOffsetY = newPan
+    }
     // -------------------------------------------------------------------------------------------
 
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
@@ -157,9 +188,9 @@ class SketchCanvasView @JvmOverloads constructor(
     private var resizeStartH = 0f
     private var resizeStartFontSize = 0f
 
-    
-    
-    
+
+
+
     private var scaleFactor = 1f
     private val minScale = 0.5f
     private val maxScale = 4f
@@ -167,12 +198,13 @@ class SketchCanvasView @JvmOverloads constructor(
     private val zoomPivotY: Float get() = height / 2f
 
     private fun toContentX(screenX: Float) = zoomPivotX + (screenX - zoomPivotX) / scaleFactor
-    private fun toContentY(screenY: Float) = zoomPivotY + (screenY - zoomPivotY) / scaleFactor
-    private fun toScreenY(contentY: Float) = zoomPivotY + (contentY - zoomPivotY) * scaleFactor
+    private fun toContentY(screenY: Float) = zoomPivotY + (screenY + panOffsetY - zoomPivotY) / scaleFactor
+    private fun toScreenY(contentY: Float) = zoomPivotY + (contentY - zoomPivotY) * scaleFactor - panOffsetY
 
     private val scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
             scaleFactor = (scaleFactor * detector.scaleFactor).coerceIn(minScale, maxScale)
+            clampPan()
             invalidate()
             return true
         }
@@ -180,8 +212,9 @@ class SketchCanvasView @JvmOverloads constructor(
 
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onLongPress(e: MotionEvent) {
-            // Don't treat a long-press that starts on a resize handle as a long-press-to-open-menu.
-            if (resizingPart != null) return
+            // Don't treat a long-press that starts on a resize handle - or that's actually turned
+            // into a canvas pan - as a long-press-to-open-menu.
+            if (resizingPart != null || canvasPanning) return
             val cx = toContentX(e.x)
             val cy = toContentY(e.y)
             val hit = hitTest(cx, cy)
@@ -204,6 +237,7 @@ class SketchCanvasView @JvmOverloads constructor(
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
             scaleFactor = 1f
+            clampPan()
             invalidate()
             return true
         }
@@ -214,6 +248,7 @@ class SketchCanvasView @JvmOverloads constructor(
         // Defaults the page to fill the whole view the first time it's laid out, so nothing
         // appears cut off until the user deliberately drags the handle to shorten it.
         if (pageHeight <= 0f) pageHeight = h.toFloat()
+        clampPan()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -248,6 +283,15 @@ class SketchCanvasView @JvmOverloads constructor(
                     if (hit != null) {
                         dragOffsetX = cx - hit.x
                         dragOffsetY = cy - hit.y
+                        panCandidate = false
+                    } else {
+                        // Empty space: only a *candidate* for panning. It only actually engages
+                        // once the drag clears panTouchSlop, so a quick tap or a long-press to
+                        // open the add-part menu (handled by gestureDetector below) still works.
+                        panCandidate = true
+                        canvasPanning = false
+                        panDragStartScreenY = event.y
+                        panDragStartOffset = panOffsetY
                     }
                 }
             }
@@ -267,7 +311,7 @@ class SketchCanvasView @JvmOverloads constructor(
                         dragMoved = true
                         invalidate()
                         listener?.onSelectionChanged(resizing)
-                    } else {
+                    } else if (draggingPart != null) {
                         draggingPart?.let { p ->
                             val cx = toContentX(event.x)
                             val cy = toContentY(event.y)
@@ -277,6 +321,15 @@ class SketchCanvasView @JvmOverloads constructor(
                             invalidate()
                             listener?.onSelectionChanged(p)
                         }
+                    } else if (panCandidate) {
+                        val deltaScreen = panDragStartScreenY - event.y
+                        if (!canvasPanning && abs(deltaScreen) > panTouchSlop && maxPanOffsetY() > 0f) {
+                            canvasPanning = true
+                        }
+                        if (canvasPanning) {
+                            panOffsetY = (panDragStartOffset + deltaScreen).coerceIn(0f, maxPanOffsetY())
+                            invalidate()
+                        }
                     }
                 }
             }
@@ -285,6 +338,8 @@ class SketchCanvasView @JvmOverloads constructor(
                 draggingPart = null
                 resizingPart = null
                 activeHandle = null
+                panCandidate = false
+                canvasPanning = false
             }
         }
         return true
@@ -311,6 +366,7 @@ class SketchCanvasView @JvmOverloads constructor(
                 val deltaScreen = event.y - pageDragStartScreenY
                 val deltaContent = deltaScreen / scaleFactor
                 pageHeight = (pageDragStartHeight + deltaContent).coerceAtLeast(minPageHeight)
+                clampPan()
                 invalidate()
                 return true
             }
@@ -512,6 +568,10 @@ class SketchCanvasView @JvmOverloads constructor(
         // - never part of the app page - and is what makes the page's true bottom edge legible.
         canvas.drawColor(Color.BLACK)
         val saveCount = canvas.save()
+        // Pan first, then scale: this makes the pan a pure post-scale screen-space shift (matching
+        // toScreenY/toContentY below) while the scale pivot itself stays anchored to the view's
+        // center regardless of how far the user has panned.
+        canvas.translate(0f, -panOffsetY)
         canvas.scale(scaleFactor, scaleFactor, zoomPivotX, zoomPivotY)
         drawPage(canvas)
         for (part in parts) {
@@ -524,8 +584,9 @@ class SketchCanvasView @JvmOverloads constructor(
         canvas.restoreToCount(saveCount)
 
         // Drawn after the pan/zoom transform is restored so the handle keeps a constant on-screen
-        // size (only its Y position tracks the zoomed page bottom edge), matching how a resize
-        // affordance should feel regardless of zoom level.
+        // size (only its Y position tracks the panned/zoomed page bottom edge, via toScreenY -
+        // which already factors in panOffsetY), matching how a resize affordance should feel
+        // regardless of zoom or scroll position.
         drawPageHandle(canvas)
     }
 

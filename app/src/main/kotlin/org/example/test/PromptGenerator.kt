@@ -2,7 +2,6 @@ package org.example.test
 
 import kotlin.math.roundToInt
 
-
 object PromptGenerator {
 
     fun build(parts: List<SketchPart>, canvasWidthPx: Int, canvasHeightPx: Int, density: Float): String {

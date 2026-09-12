@@ -2,14 +2,6 @@ package org.example.test
 
 import android.graphics.Color
 
-
-
-
-
-
-
-
-
 enum class PartKind(
     val displayLabel: String,
     val defaultW: Float,

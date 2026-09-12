@@ -25,12 +25,6 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 
-
-
-
-
-
-
 fun showPartPickerSheet(
     context: Context,
     title: String,
@@ -77,8 +71,6 @@ fun showPartPickerSheet(
     dialog.setContentView(ScrollView(context).apply { addView(root) })
     dialog.show()
 }
-
-
 
 /**
  * Modal shown when the "Text" tab is selected: a floating, rounded white card (matching the
@@ -237,7 +229,6 @@ fun showTextInputDialog(
     return dialog
 }
 
-
 fun showMoreMenu(
     context: Context,
     hasParts: Boolean,
@@ -308,7 +299,6 @@ fun showMoreMenu(
     dialog.show()
 }
 
-
 fun showPartOptionsDialog(
     context: Context,
     part: SketchPart,
@@ -331,7 +321,6 @@ fun showPartOptionsDialog(
         .setNeutralButton("Cancel", null)
         .show()
 }
-
 
 fun showPromptDialog(context: Context, prompt: String) {
     val d = context.resources.displayMetrics.density

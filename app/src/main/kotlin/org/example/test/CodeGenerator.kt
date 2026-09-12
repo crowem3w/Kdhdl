@@ -6,19 +6,9 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.math.roundToInt
 
-
-
-
-
-
-
-
-
-
-
 object CodeGenerator {
 
-    
+
     fun generateProjectZip(
         context: Context,
         parts: List<SketchPart>,
@@ -31,10 +21,10 @@ object CodeGenerator {
             mkdirs()
         }
 
-        
+
         copyAssetDir(context, "boilerplate", workDir)
 
-        
+
         val wDp = (canvasWidthPx / density).roundToInt()
         val hDp = (canvasHeightPx / density).roundToInt()
 
@@ -50,7 +40,7 @@ object CodeGenerator {
         File(workDir, "app/src/main/res/values/themes.xml")
             .writeText(buildThemesXml())
 
-        
+
         File(workDir, "app/src/main/kotlin/org/example/test/MainActivity.kt").let { f ->
             val original = f.readText()
             f.writeText(
@@ -61,13 +51,13 @@ object CodeGenerator {
             )
         }
 
-        
+
         val zipFile = File(context.cacheDir, "generated_app.zip")
         zipDirectory(workDir, zipFile)
         return zipFile
     }
 
-    
+
 
     private fun buildLayoutXml(parts: List<SketchPart>, density: Float): String {
         val sb = StringBuilder()
@@ -231,7 +221,7 @@ object CodeGenerator {
         }
     }
 
-    
+
 
     private fun buildStringsXml(parts: List<SketchPart>): String {
         val sb = StringBuilder()
@@ -250,7 +240,7 @@ object CodeGenerator {
     private fun String.xmlEscape() = replace("&", "&amp;").replace("\"", "&quot;")
         .replace("'", "\\'").replace("<", "&lt;").replace(">", "&gt;")
 
-    
+
 
     private fun buildGradleKts(): String = """
         import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -297,12 +287,12 @@ object CodeGenerator {
         </resources>
     """.trimIndent()
 
-    
+
 
     private fun copyAssetDir(context: Context, assetPath: String, destDir: File) {
         val children = context.assets.list(assetPath) ?: emptyArray()
         if (children.isEmpty()) {
-            
+
             destDir.parentFile?.mkdirs()
             context.assets.open(assetPath).use { input ->
                 destDir.outputStream().use { output -> input.copyTo(output) }

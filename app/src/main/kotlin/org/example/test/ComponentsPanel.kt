@@ -19,12 +19,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 
-
 private data class ComponentCategory(val id: String, val label: String, val iconRes: Int)
-
-
-
-
 
 private data class GeometrySubCategory(val label: String, val iconRes: Int, val children: List<String>)
 
@@ -35,8 +30,6 @@ private val GEOMETRY_SUBCATEGORIES = listOf(
     GeometrySubCategory("Deform", R.drawable.ic_geo_deform, listOf("Bend", "Twist", "Taper", "Warp", "Freeform")),
     GeometrySubCategory("Animate", R.drawable.ic_geo_animate, listOf("Keyframe", "Motion Path", "Constraint", "Timeline", "Graph Editor")),
 )
-
-
 
 private val ALL_CATEGORY = ComponentCategory("all", "All", R.drawable.ic_components)
 
@@ -55,8 +48,6 @@ private val COMPONENT_CATEGORIES = listOf(
     ComponentCategory("prototype", "Prototype", R.drawable.ic_cat_prototype),
 )
 
-
-
 private val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
     "structure" to listOf("Frame", "Section", "Container", "Group"),
     "layout" to listOf("Row", "Column", "Grid", "Stack"),
@@ -72,44 +63,12 @@ private val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
     "prototype" to listOf("Hotspot", "Overlay", "Transition", "Scroll Group"),
 )
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
 
-    
-    
+
+
     val primaryText = Color.WHITE
     val secondaryText = Color.parseColor("#C7C7CF")
     val neutralText = Color.parseColor("#9A9AA5")
@@ -119,16 +78,16 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
     val rowHeightL2 = dp(48)
     val rowHeightL3 = dp(42)
     val outerPadding = dp(16)
-    
-    
+
+
     val iconSize = dp(18)
     val iconLabelGap = dp(14)
     val chevronSize = dp(16)
     val rowPaddingStartL2 = outerPadding - dp(2)
     val accentBarWidth = dp(3)
     val accentBarHeight = dp(18)
-    
-    
+
+
     val l3Offset = rowPaddingStartL2 + iconSize + iconLabelGap + dp(24)
 
     val root = LinearLayout(context).apply {
@@ -154,33 +113,33 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         chevron.animate().rotation(if (expanded) 270f else 180f).setDuration(150L).start()
     }
 
-    
-    
-    
+
+
+
     val accentSlideStartOffset = dp(2)
 
-    
-    
-    
-    
-    
+
+
+
+
+
     val activeLeafIndex = mutableMapOf<Int, Int>()
     GEOMETRY_SUBCATEGORIES.indexOfFirst { it.label == "Animate" }.takeIf { it >= 0 }?.let { animateIdx ->
         val keyframeChildIdx = GEOMETRY_SUBCATEGORIES[animateIdx].children.indexOf("Keyframe")
         if (keyframeChildIdx >= 0) activeLeafIndex[animateIdx] = keyframeChildIdx
     }
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
+
+
+
+
     fun setAccentSelected(
         accentBar: View,
         label: TextView,
@@ -247,11 +206,11 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         }
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
     fun buildLeafList(subIndex: Int): LinearLayout {
         val sub = GEOMETRY_SUBCATEGORIES[subIndex]
         data class LeafRow(val accentBar: View, val label: TextView)
@@ -270,8 +229,8 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
                     isFocusable = true
                     setPadding(dp(12), 0, outerPadding, 0)
                     layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowHeightL3)
-                    
-                    
+
+
                     accentBar = View(context).apply {
                         layoutParams = LinearLayout.LayoutParams(dp(3), dp(18)).apply { marginEnd = dp(10) }
                     }
@@ -289,17 +248,17 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
                     setOnClickListener {
                         val current = activeLeafIndex[subIndex]
                         if (current == childIndex) {
-                            
-                            
+
+
                             setAccentSelected(
                                 accentBar, label, selected = false, animate = true, slide = true,
                                 activeTextColor = primaryText, inactiveTextColor = neutralText
                             )
                             activeLeafIndex.remove(subIndex)
                         } else {
-                            
-                            
-                            
+
+
+
                             current?.let { prevChildIndex ->
                                 leafRows.getOrNull(prevChildIndex)?.let { prevRow ->
                                     setAccentSelected(
@@ -353,9 +312,9 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
             entry.childrenContainer.alpha = 0f
             entry.childrenContainer.removeAllViews()
         }
-        
-        
-        
+
+
+
         setAccentSelected(
             accentBar = entry.accentBar,
             label = entry.labelView,
@@ -379,8 +338,8 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         entry.childrenContainer.visibility = View.VISIBLE
         entry.childrenContainer.alpha = 0f
         entry.childrenContainer.animate().alpha(1f).setDuration(150L).start()
-        
-        
+
+
         setAccentSelected(
             accentBar = entry.accentBar,
             label = entry.labelView,
@@ -398,14 +357,14 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
     fun toggle(index: Int) {
         val current = expandedIndex
         if (current == index) {
-            
-            
+
+
             collapse(index, animate = true, slide = true)
             expandedIndex = null
         } else {
-            
-            
-            
+
+
+
             current?.let { collapse(it, animate = true, slide = false) }
             expand(index)
             expandedIndex = index
@@ -428,16 +387,16 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
                 setImageResource(sub.iconRes)
                 setColorFilter(secondaryText)
                 layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
-                
-                
-                
+
+
+
                 if (sub.label == "Deform") {
                     setPadding(dp(1), dp(1), dp(1), dp(1))
                 }
             }
             addView(icon)
-            
-            
+
+
             accentBar = View(context).apply {
                 setBackgroundColor(Color.TRANSPARENT)
                 layoutParams = LinearLayout.LayoutParams(accentBarWidth, accentBarHeight).apply {
@@ -474,8 +433,8 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         row.setOnClickListener { toggle(index) }
     }
 
-    
-    
+
+
     fun applyDefaultState() {
         rows.indices.forEach { idx -> collapse(idx, animate = false) }
         expandedIndex = null
@@ -492,11 +451,11 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
         applyDefaultState()
     }
 
-    
-    
-    
-    
-    
+
+
+
+
+
     val treeGuideLine = View(context).apply {
         setBackgroundColor(guideLineColor)
         layoutParams = FrameLayout.LayoutParams(dp(1), ViewGroup.LayoutParams.MATCH_PARENT).apply {
@@ -519,15 +478,15 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     val root = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        
-        
-        
+
+
+
         clipChildren = false
         clipToPadding = false
     }
 
-    
-    
+
+
     val closeButton = FrameLayout(context).apply {
         layoutParams = LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginEnd = dp(8) }
         isClickable = true
@@ -541,7 +500,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         setOnClickListener { onClose() }
     }
 
-    
+
     val searchInput = EditText(context).apply {
         hint = "Search components"
         setHintTextColor(Color.parseColor("#6F707A"))
@@ -586,11 +545,11 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         addView(filterButton)
     })
 
-    
-    
-    
-    
-    
+
+
+
+
+
     data class RailRowViews(
         val wrapper: FrameLayout,
         val frameBg: View,
@@ -601,29 +560,29 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     val railIcons = mutableMapOf<String, RailRowViews>()
     val sectionViews = mutableMapOf<String, View>()
 
-    
-    
-    
+
+
+
     val railIconSizeDefault = dp(18)
     val railIconSizeSelected = dp(20)
     val railLabelTextSizeDefault = 12.5f
     val railLabelTextSizeSelected = 10f
 
-    
-    
-    
-    
-    
+
+
+
+
+
     fun setActiveCategory(id: String?) {
         for ((catId, entry) in railIcons) {
             val active = id != null && catId == id
-            
-            
+
+
             entry.frameBg.visibility = if (active) View.VISIBLE else View.GONE
             val color = Color.parseColor(if (active) "#FFFFFF" else "#9A9AA5")
             entry.icon.setColorFilter(color)
-            
-            
+
+
             val iconSize = if (active) railIconSizeSelected else railIconSizeDefault
             entry.icon.layoutParams = entry.icon.layoutParams.apply {
                 width = iconSize
@@ -632,7 +591,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             entry.label.setTextColor(color)
             entry.label.textSize = if (active) railLabelTextSizeSelected else railLabelTextSizeDefault
             entry.label.setTypeface(null, if (active) Typeface.BOLD else Typeface.NORMAL)
-            
+
             entry.chevron.visibility = if (active) View.VISIBLE else View.GONE
         }
     }
@@ -650,10 +609,10 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         clipToPadding = false
         addView(sectionsContainer)
     }
-    
-    
-    
-    
+
+
+
+
     val emptyCategoryView = FrameLayout(context).apply {
         layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         visibility = View.GONE
@@ -710,8 +669,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             clipToPadding = false
             val itemNames = COMPONENT_ITEMS[cat.id].orEmpty()
 
-            
-            
+
+
             var selectedIndex: Int? = null
             val itemContainers = mutableListOf<LinearLayout>()
             val labelViews = mutableListOf<TextView>()
@@ -719,7 +678,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
             val staggerStepMs = 50L
             val animDurationMs = 220L
-            val liftDistancePx = dp(56).toFloat() 
+            val liftDistancePx = dp(56).toFloat()
 
             fun resetAllImmediate() {
                 itemContainers.forEach { c ->
@@ -736,15 +695,15 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 iconBoxViews.forEach { it.setBackgroundResource(R.drawable.bg_component_placeholder) }
             }
 
-            
-            
+
+
             fun animateSelect(index: Int) {
                 itemContainers.forEachIndexed { idx, container ->
                     if (idx == index) return@forEachIndexed
                     val delay = kotlin.math.abs(idx - index) * staggerStepMs
-                    
-                    
-                    
+
+
+
                     container.animate().cancel()
                     container.visibility = View.VISIBLE
                     container.animate()
@@ -753,9 +712,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                         .setStartDelay(delay)
                         .setDuration(animDurationMs)
                         .setInterpolator(AccelerateInterpolator())
-                        
-                        
-                        
+
+
+
                         .withEndAction { if (container.alpha == 0f) container.visibility = View.GONE }
                         .start()
                 }
@@ -767,19 +726,19 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     .setDuration(animDurationMs)
                     .withEndAction { if (selectedLabel.alpha == 0f) selectedLabel.visibility = View.GONE }
                     .start()
-                
+
                 iconBoxViews[index].background = null
             }
 
-            
-            
+
+
             fun animateRestore(index: Int) {
                 itemContainers.forEachIndexed { idx, container ->
                     if (idx == index) return@forEachIndexed
                     val delay = kotlin.math.abs(idx - index) * staggerStepMs
-                    
-                    
-                    
+
+
+
                     container.animate().cancel()
                     container.visibility = View.VISIBLE
                     container.animate()
@@ -788,7 +747,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                         .setStartDelay(delay)
                         .setDuration(animDurationMs)
                         .setInterpolator(DecelerateInterpolator())
-                        .withEndAction(null) 
+                        .withEndAction(null)
                         .start()
                 }
                 val selectedLabel = labelViews[index]
@@ -800,7 +759,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     .setDuration(animDurationMs)
                     .withEndAction(null)
                     .start()
-                
+
                 iconBoxViews[index].setBackgroundResource(R.drawable.bg_component_placeholder)
             }
 
@@ -815,17 +774,17 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                         if (i != 0) marginStart = dp(8)
                     }
-                    
-                    
-                    
-                    
-                    
+
+
+
+
+
                     iconBox = View(context).apply {
                         setBackgroundResource(R.drawable.bg_component_placeholder)
                         layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
                     }
                     addView(iconBox)
-                    
+
                     label = TextView(context).apply {
                         text = itemNames.getOrElse(i) { "Component ${i + 1}" }
                         setTextColor(Color.parseColor("#9A9AA5"))
@@ -849,7 +808,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 container.setOnClickListener {
                     when (selectedIndex) {
                         index -> {
-                            
+
                             animateRestore(index)
                             selectedIndex = null
                         }
@@ -858,8 +817,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                             selectedIndex = index
                         }
                         else -> {
-                            
-                            
+
+
                             resetAllImmediate()
                             animateSelect(index)
                             selectedIndex = index
@@ -872,9 +831,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         sectionViews[cat.id] = section
     }
 
-    
-    
-    
+
+
+
     val rail = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         layoutParams = LinearLayout.LayoutParams(dp(168), ViewGroup.LayoutParams.MATCH_PARENT).apply {
@@ -884,40 +843,40 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         clipToPadding = false
     }
 
-    
-    
-    
+
+
+
     val (geometryAccordion, geometryAccordionReset) = buildGeometrySidebarTree(context)
     geometryAccordion.visibility = View.GONE
 
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     val frameBleedToScreenEdge = dp(16)
     val frameBleedToDivider = dp(4)
 
-    
-    
-    
-    
-    
+
+
+
+
+
     val targetIconFromScreenEdge = dp(14)
     val contentPaddingStart = targetIconFromScreenEdge - frameBleedToScreenEdge
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
+
+
+
+
     fun buildRailRow(iconRes: Int, label: String, onClick: () -> Unit): RailRowViews {
         lateinit var iconView: ImageView
         lateinit var labelView: TextView
@@ -940,8 +899,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             isClickable = true
             isFocusable = true
-            
-            
+
+
             elevation = 0f
             setPadding(contentPaddingStart, 0, dp(10), 0)
             iconView = ImageView(context).apply {
@@ -958,8 +917,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 }
             }
             addView(labelView)
-            
-            
+
+
             chevronView = ImageView(context).apply {
                 setImageResource(R.drawable.ic_chevron_left)
                 setColorFilter(Color.WHITE)
@@ -984,9 +943,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         return RailRowViews(wrapper, frameBg, iconView, labelView, chevronView)
     }
 
-    
-    
-    
+
+
+
     data class RailEntry(val view: View, val label: TextView?)
     val railEntries = mutableListOf<RailEntry>()
     var activeRailIndex: Int? = null
@@ -1010,12 +969,12 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         }
     }
 
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     fun railAnimateSelect(index: Int) {
         railEntries.forEachIndexed { idx, entry ->
             if (idx == index) return@forEachIndexed
@@ -1033,8 +992,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         }
     }
 
-    
-    
+
+
     fun railAnimateRestore(index: Int) {
         railEntries.forEachIndexed { idx, entry ->
             if (idx == index) return@forEachIndexed
@@ -1052,12 +1011,12 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         }
     }
 
-    
-    
-    
+
+
+
     val allItem = buildRailRow(ALL_CATEGORY.iconRes, ALL_CATEGORY.label) {
-        
-        
+
+
         setActiveCategory(null)
         showAllContent()
         activeRailIndex?.let { railAnimateRestore(it) }
@@ -1084,14 +1043,14 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     railEntries.add(RailEntry(railDivider, null))
 
     for (cat in COMPONENT_CATEGORIES) {
-        val index = railEntries.size 
+        val index = railEntries.size
         val item: RailRowViews
 
         item = buildRailRow(cat.iconRes, cat.label) {
             when (activeRailIndex) {
                 index -> {
-                    
-                    
+
+
                     setActiveCategory(null)
                     railAnimateRestore(index)
                     activeRailIndex = null
@@ -1103,9 +1062,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     }
                 }
                 null -> {
-                    
-                    
-                    
+
+
+
                     setActiveCategory(cat.id)
                     railAnimateSelect(index)
                     activeRailIndex = index
@@ -1114,8 +1073,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     if (cat.id == "shapes") geometryAccordion.visibility = View.VISIBLE
                 }
                 else -> {
-                    
-                    
+
+
                     setActiveCategory(cat.id)
                     if (activeCategoryId == "shapes") {
                         geometryAccordionReset()
@@ -1135,14 +1094,14 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         railIcons[cat.id] = item
         railEntries.add(RailEntry(item.wrapper, item.label))
 
-        
-        
+
+
         if (cat.id == "shapes") {
             rail.addView(geometryAccordion)
         }
     }
-    
-    
+
+
     setActiveCategory(null)
 
     searchInput.addTextChangedListener(object : TextWatcher {
@@ -1163,8 +1122,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     root.addView(LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
-        
-        
+
+
         clipChildren = false
         clipToPadding = false
         addView(rail)

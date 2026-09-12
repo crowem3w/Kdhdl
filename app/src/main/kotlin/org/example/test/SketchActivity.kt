@@ -20,32 +20,14 @@ import androidx.core.widget.NestedScrollView
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import kotlin.math.roundToInt
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 class SketchActivity : AppCompatActivity() {
 
     private lateinit var canvas: SketchCanvasView
 
-    
-    
-    
-    
+
+
+
+
     private lateinit var topBar: LinearLayout
     private val topBarHideHandler = Handler(Looper.getMainLooper())
     private val hideTopBarRunnable = Runnable { hideTopBar() }
@@ -73,15 +55,15 @@ class SketchActivity : AppCompatActivity() {
     private var componentsContentBuilt = false
     private var showingComponents = false
 
-    
-    
-    
-    
+
+
+
+
     private var defaultPanelHeight = 0
 
-    
-    
-    
+
+
+
     private val panelBackPressedCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
             closeSketchPanel()
@@ -154,28 +136,28 @@ class SketchActivity : AppCompatActivity() {
 
         updateProperties(null)
 
-        
-        
+
+
         showTopBar()
     }
 
     override fun onResume() {
         super.onResume()
-        
-        
+
+
         showTopBar()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
-            
-            
+
+
             showTopBar()
         } else {
-            
-            
-            
+
+
+
             showTopBar(autoHideAfterDelay = false)
         }
     }
@@ -185,7 +167,7 @@ class SketchActivity : AppCompatActivity() {
         topBarHideHandler.removeCallbacksAndMessages(null)
     }
 
-    
+
 
     private fun showTopBar(autoHideAfterDelay: Boolean = true) {
         topBarHideHandler.removeCallbacks(hideTopBarRunnable)
@@ -226,11 +208,6 @@ class SketchActivity : AppCompatActivity() {
         }
     }
 
-    
-
-    
-
-    
 
 
 
@@ -285,13 +262,16 @@ class SketchActivity : AppCompatActivity() {
         showComponentsContent()
     }
 
-    // Lets the user scroll down (swipe up) anywhere on the main screen to reveal the dark bottom
+    // Lets the user scroll down (swipe up) anywhere on the sketch screen to reveal the dark bottom
     // panel (peek height, default tools tab). Implemented at the screen/dispatch level (rather
-    // than on a single view) so it works as a general "scroll down" gesture on the main screen; it
+    // than on a single view) so it works as a general "scroll down" gesture on the sketch screen; it
     // only observes touches and never consumes them, so normal canvas interactions (drawing,
     // dragging parts, long-press, and now dragging the page-height handle) are unaffected - the
     // isDraggingPageHandle check below additionally keeps it from firing while the user is
-    // resizing the page, since that's also an upward drag.
+    // resizing the page, since that's also an upward drag. isPanningCanvas does the same job for
+    // the canvas's own one-finger pan: that gesture only ever engages when the page is taller than
+    // the viewport (see SketchCanvasView.maxPanOffsetY), so on a page that already fits on screen
+    // this reveal gesture is untouched and still wins a swipe-up exactly as before.
     private var scrollGestureStartX = 0f
     private var scrollGestureStartY = 0f
     private var scrollGestureTriggered = false
@@ -310,6 +290,7 @@ class SketchActivity : AppCompatActivity() {
             MotionEvent.ACTION_MOVE -> {
                 if (!scrollGestureTriggered &&
                     !canvas.isDraggingPageHandle &&
+                    !canvas.isPanningCanvas &&
                     bottomSheetBehavior.state == BottomSheetBehavior.STATE_HIDDEN
                 ) {
                     val movedUp = scrollGestureStartY - ev.rawY
@@ -353,7 +334,7 @@ class SketchActivity : AppCompatActivity() {
         setTabActive(tabSelect)
     }
 
-    
+
 
     private fun showComponentsContent() {
         if (!componentsContentBuilt) {
@@ -368,7 +349,7 @@ class SketchActivity : AppCompatActivity() {
         bottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
     }
 
-    
+
 
     private fun closeComponentsContent() {
         showingComponents = false
@@ -379,7 +360,7 @@ class SketchActivity : AppCompatActivity() {
         bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
 
-    
+
 
     private fun setupTabs() {
         setTabActive(tabSelect)
@@ -402,13 +383,13 @@ class SketchActivity : AppCompatActivity() {
         }
     }
 
-    
-    
+
+
     private fun openTextInputModal() {
         if (showingComponents) closeComponentsContent()
         setTabActive(tabText)
 
-        
+
         bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
 
         showTextInputDialog(
@@ -441,7 +422,7 @@ class SketchActivity : AppCompatActivity() {
         )
     }
 
-    
+
     private fun setTabActive(active: LinearLayout) {
         for (tab in allTabs) setTabVisualState(tab, tab === active)
     }
@@ -457,7 +438,7 @@ class SketchActivity : AppCompatActivity() {
         (pill.getChildAt(1) as TextView).setTextColor(color)
     }
 
-    
+
 
     private fun setupQuickActions() {
         val actions = listOf(
@@ -473,7 +454,7 @@ class SketchActivity : AppCompatActivity() {
         findViewById<View>(R.id.btnPropertiesMore).setOnClickListener { notAvailableYet("More properties") }
     }
 
-    
+
 
     private fun setupAnimationRow() {
         val actions = listOf(
@@ -492,9 +473,9 @@ class SketchActivity : AppCompatActivity() {
         Toast.makeText(this, "$feature isn't available yet", Toast.LENGTH_SHORT).show()
     }
 
-    
 
-    
+
+
 
     private fun updateProperties(part: SketchPart?) {
         if (part == null) {
@@ -513,7 +494,7 @@ class SketchActivity : AppCompatActivity() {
         tvRotation.text = "0\u00B0"
     }
 
-    
+
 
     private fun openPartPicker(
         title: String,
@@ -547,7 +528,7 @@ class SketchActivity : AppCompatActivity() {
         return part
     }
 
-    
+
 
     private fun generatePrompt() {
         val density = resources.displayMetrics.density
@@ -555,7 +536,7 @@ class SketchActivity : AppCompatActivity() {
         showPromptDialog(this, prompt)
     }
 
-    
+
     private fun exportProject() {
         val density = resources.displayMetrics.density
         val zip = CodeGenerator.generateProjectZip(
