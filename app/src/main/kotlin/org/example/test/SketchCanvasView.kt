@@ -31,7 +31,6 @@ class SketchCanvasView @JvmOverloads constructor(
     }
 
     interface Listener {
-        fun onLongPressEmptySpace(x: Float, y: Float)
         fun onPartLongPressed(part: SketchPart)
         fun onSelectionChanged(part: SketchPart?)
         fun onPartsChanged()
@@ -41,6 +40,13 @@ class SketchCanvasView @JvmOverloads constructor(
         // Fired whenever the multi-selection is dropped for any reason (tapping elsewhere,
         // deleting the selection, etc) so the host can dismiss that panel.
         fun onMultiSelectionCleared()
+        // Fired by a quick, short swipe (fling) that starts on empty canvas space. One of the two
+        // gesture entry points for the "Add to sketch" panel - see onDoubleTapEmptySpace below.
+        fun onFlickEmptySpace()
+        // Fired by a double-tap that lands on empty canvas space. Double-tapping an existing part
+        // still resets zoom (see onDoubleTap below) - this is the other gesture entry point for
+        // the panel.
+        fun onDoubleTapEmptySpace()
     }
 
     var listener: Listener? = null
@@ -142,8 +148,7 @@ class SketchCanvasView @JvmOverloads constructor(
     // of the viewport (can't pan further and reveal nothing below it either). A one-finger drag
     // that starts on empty space is a *candidate* for panning but only actually engages once it
     // clears panTouchSlop AND there's real pannable range - if the page already fits on screen,
-    // the drag does nothing here and falls through to the activity's own swipe-up-reveals-panel
-    // gesture untouched (see isPanningCanvas / SketchActivity.dispatchTouchEvent).
+    // the drag simply does nothing here.
     var panOffsetY: Float = 0f
         private set
     val isPanningCanvas: Boolean get() = canvasPanning
@@ -155,6 +160,13 @@ class SketchCanvasView @JvmOverloads constructor(
     // Extra room kept below the handle when fully panned down, so it doesn't sit flush against
     // the very bottom edge of the viewport.
     private val panHandleBottomMargin = 32f * density
+    // Bounds for the "flick on empty space opens the panel" gesture (see gestureDetector's
+    // onFling below): a real fling already implies "quick" (GestureDetector requires a minimum
+    // velocity before it fires at all), so these just constrain it to a *short* swipe - long
+    // enough to be deliberate, short enough not to be mistaken for a deliberate long
+    // scroll/pan gesture.
+    private val flickMinDistance = 24f * density
+    private val flickMaxDistance = 160f * density
 
     private fun maxPanOffsetY(): Float {
         val handleBottomContentY = pageHeight + panHandleBottomMargin
@@ -310,9 +322,32 @@ class SketchCanvasView @JvmOverloads constructor(
         }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
-            scaleFactor = 1f
-            clampPan()
-            invalidate()
+            val hit = hitTest(toContentX(e.x), toContentY(e.y))
+            if (hit == null) {
+                // Empty space: this is a panel-opening gesture, not a zoom-reset.
+                listener?.onDoubleTapEmptySpace()
+            } else {
+                scaleFactor = 1f
+                clampPan()
+                invalidate()
+            }
+            return true
+        }
+
+        override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+            val start = e1 ?: return false
+            // Only a plain, single-finger swipe on empty space with nothing else going on counts -
+            // not a pinch, not a drag/resize of a part, not an in-progress pan, and not a marquee
+            // selection (those all already have their own meaning for the same touch stream).
+            if (scaleGestureDetector.isInProgress || e2.pointerCount > 1) return false
+            if (resizingPart != null || draggingPart != null || draggingGroup) return false
+            if (canvasPanning || marqueeArmed || marqueeActive) return false
+            if (hitTest(toContentX(start.x), toContentY(start.y)) != null) return false
+
+            val distance = kotlin.math.hypot((e2.x - start.x).toDouble(), (e2.y - start.y).toDouble()).toFloat()
+            if (distance < flickMinDistance || distance > flickMaxDistance) return false
+
+            listener?.onFlickEmptySpace()
             return true
         }
     })
@@ -466,11 +501,10 @@ class SketchCanvasView @JvmOverloads constructor(
                 }
                 if (marqueeActive) {
                     finalizeMarqueeSelection()
-                } else if (marqueeArmed && event.actionMasked == MotionEvent.ACTION_UP) {
-                    // Held and released without ever dragging: fall back to the original
-                    // long-press-on-empty-space behavior (open the "Add to sketch" panel).
-                    listener?.onLongPressEmptySpace(marqueeAnchorX, marqueeAnchorY)
                 }
+                // Note: a long-press on empty space that's released without ever dragging used to
+                // fall back to opening the "Add to sketch" panel. That gesture-triggered entry
+                // point has been removed - holding and releasing without dragging now does nothing.
                 draggingPart = null
                 draggingGroup = false
                 resizingPart = null

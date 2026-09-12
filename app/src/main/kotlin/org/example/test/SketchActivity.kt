@@ -5,7 +5,6 @@ import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
@@ -103,7 +102,6 @@ class SketchActivity : AppCompatActivity() {
     companion object {
         private const val TOP_BAR_AUTO_HIDE_DELAY_MS = 5_000L
         private const val TOP_BAR_FADE_MS = 150L
-        private const val SCROLL_REVEAL_THRESHOLD_DP = 64f
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -144,7 +142,9 @@ class SketchActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, panelBackPressedCallback)
 
         canvas.listener = object : SketchCanvasView.Listener {
-            override fun onLongPressEmptySpace(x: Float, y: Float) = openSketchPanel()
+            override fun onFlickEmptySpace() = openSketchPanel()
+
+            override fun onDoubleTapEmptySpace() = openSketchPanel()
 
             override fun onPartLongPressed(part: SketchPart) {
                 showPartOptionsDialog(
@@ -256,9 +256,9 @@ class SketchActivity : AppCompatActivity() {
 
 
     private fun setupBottomPanel() {
-        // The panel now only ever opens via openSketchPanel() and closes via closeSketchPanel()
-        // (back button/gesture) or by being swiped down, so we let the framework's own
-        // swipe-to-dismiss gesture drive it instead of a manual drag handle.
+        // The panel opens via openSketchPanel() (flick or double-tap on empty canvas) and closes
+        // via closeSketchPanel() (back button/gesture) or by being swiped down, so we let the
+        // framework's own swipe-to-dismiss gesture drive it instead of a manual drag handle.
         bottomSheetBehavior.isDraggable = true
 
         bottomPanelBasePaddingTop = bottomPanel.paddingTop
@@ -336,67 +336,13 @@ class SketchActivity : AppCompatActivity() {
         )
     }
 
-    // Opens the shared panel - the only entry point is the "Add to sketch" action (long-press on
-    // empty canvas). Goes straight to the Components browser, matching what "Add to sketch" used
-    // to show as a standalone picker.
+    // Opens the shared panel. Entry points are a flick (quick, short swipe) or a double-tap, both
+    // on empty canvas space (see SketchCanvasView.Listener#onFlickEmptySpace /
+    // #onDoubleTapEmptySpace above). Goes straight to the Components browser, matching what
+    // "Add to sketch" used to show as a standalone picker.
     private fun openSketchPanel() {
         setTabActive(tabComponents)
         showComponentsContent()
-    }
-
-    // Lets the user scroll down (swipe up) anywhere on the sketch screen to reveal the dark bottom
-    // panel (peek height, default tools tab). Implemented at the screen/dispatch level (rather
-    // than on a single view) so it works as a general "scroll down" gesture on the sketch screen; it
-    // only observes touches and never consumes them, so normal canvas interactions (drawing,
-    // dragging parts, long-press, and now dragging the page-height handle) are unaffected - the
-    // isDraggingPageHandle check below additionally keeps it from firing while the user is
-    // resizing the page, since that's also an upward drag. isPanningCanvas does the same job for
-    // the canvas's own one-finger pan: that gesture only ever engages when the page is taller than
-    // the viewport (see SketchCanvasView.maxPanOffsetY), so on a page that already fits on screen
-    // this reveal gesture is untouched and still wins a swipe-up exactly as before.
-    private var scrollGestureStartX = 0f
-    private var scrollGestureStartY = 0f
-    private var scrollGestureTriggered = false
-
-    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        // Let the canvas process the event first so we can tell whether it just grabbed the page
-        // resize handle - if so, this stream is its drag, not a "scroll down to reveal panel"
-        // gesture, so we skip our own tracking below entirely.
-        val handled = super.dispatchTouchEvent(ev)
-        when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                scrollGestureStartX = ev.rawX
-                scrollGestureStartY = ev.rawY
-                scrollGestureTriggered = false
-            }
-            MotionEvent.ACTION_MOVE -> {
-                if (!scrollGestureTriggered &&
-                    !canvas.isDraggingPageHandle &&
-                    !canvas.isPanningCanvas &&
-                    !canvas.isMarqueeActive &&
-                    bottomSheetBehavior.state == BottomSheetBehavior.STATE_HIDDEN
-                ) {
-                    val movedUp = scrollGestureStartY - ev.rawY
-                    val movedSideways = kotlin.math.abs(ev.rawX - scrollGestureStartX)
-                    val thresholdPx = SCROLL_REVEAL_THRESHOLD_DP * resources.displayMetrics.density
-                    if (movedUp > thresholdPx && movedUp > movedSideways) {
-                        scrollGestureTriggered = true
-                        revealBottomPanel()
-                    }
-                }
-            }
-            else -> Unit
-        }
-        return handled
-    }
-
-    // Brings the dark bottom panel up from fully hidden to its peek height, showing the default
-    // tools tab (Select) rather than jumping straight to Components like the long-press entry
-    // point does.
-    private fun revealBottomPanel() {
-        resetPanelContent()
-        if (defaultPanelHeight > 0) bottomSheetBehavior.setPeekHeight(defaultPanelHeight, false)
-        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
 
     // Closes the whole panel (as opposed to closeComponentsContent(), which just switches back to

@@ -165,10 +165,11 @@
     <!-- Shared bottom panel: Main tools tab bar stays pinned at the top of the panel; the
          content area beneath it swaps between the default tools content (Quick Actions,
          Properties, Animation & Interaction) and the Components browser. The panel has no drag
-         handle of its own: it only ever opens via the "Add to sketch" action (see
-         onLongPressEmptySpace -> openSketchPanel in SketchActivity) and closes via the back
-         button or by swiping it down (app:behavior_draggable="true" lets the framework's native
-         swipe-to-dismiss gesture animate it closed - see setupBottomPanel in SketchActivity). -->
+         handle of its own: it opens via a flick or a double-tap on empty canvas (see
+         onFlickEmptySpace / onDoubleTapEmptySpace -> openSketchPanel in SketchActivity) and
+         closes via the back button or by swiping it down (app:behavior_draggable="true" lets the
+         framework's native swipe-to-dismiss gesture animate it closed - see setupBottomPanel in
+         SketchActivity). -->
     <LinearLayout
         android:id="@+id/bottomPanel"
         android:layout_width="match_parent"
