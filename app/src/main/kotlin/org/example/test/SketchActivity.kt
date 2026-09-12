@@ -16,6 +16,8 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.NestedScrollView
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import kotlin.math.roundToInt
@@ -60,6 +62,15 @@ class SketchActivity : AppCompatActivity() {
 
 
     private var defaultPanelHeight = 0
+
+    // bottomPanel's own XML paddingTop (18dp), captured once, plus whatever the status bar
+    // inset turns out to be. When the panel is STATE_EXPANDED it grows to match_parent height,
+    // which puts its top edge (the Select/Shapes/Text/Upload/Elements row) right at the physical
+    // top of the screen, behind the status bar - so on top of the normal 18dp we add the status
+    // bar's own height while expanded, and animate that extra amount in/out as the sheet slides
+    // so the row is never drawn underneath the status bar.
+    private var bottomPanelBasePaddingTop = 0
+    private var statusBarInsetTop = 0
 
 
 
@@ -219,6 +230,16 @@ class SketchActivity : AppCompatActivity() {
         // (back button/gesture) or by being swiped down, so we let the framework's own
         // swipe-to-dismiss gesture drive it instead of a manual drag handle.
         bottomSheetBehavior.isDraggable = true
+
+        bottomPanelBasePaddingTop = bottomPanel.paddingTop
+        ViewCompat.setOnApplyWindowInsetsListener(bottomPanel) { _, insets ->
+            statusBarInsetTop = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
+            // Insets can arrive after the panel is already expanded (e.g. first layout pass),
+            // so make sure the padding reflects the current state right away.
+            applyBottomPanelTopPadding(bottomSheetBehavior.state == BottomSheetBehavior.STATE_EXPANDED)
+            insets
+        }
+
         bottomPanel.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
                 val rootHeight = (bottomPanel.parent as? View)?.height ?: 0
@@ -242,16 +263,47 @@ class SketchActivity : AppCompatActivity() {
                         panelBackPressedCallback.isEnabled = false
                         resetPanelContent()
                     }
+                    BottomSheetBehavior.STATE_EXPANDED -> {
+                        panelBackPressedCallback.isEnabled = true
+                        applyBottomPanelTopPadding(expanded = true)
+                    }
                     BottomSheetBehavior.STATE_DRAGGING, BottomSheetBehavior.STATE_SETTLING -> Unit
-                    else -> panelBackPressedCallback.isEnabled = true
+                    else -> {
+                        panelBackPressedCallback.isEnabled = true
+                        applyBottomPanelTopPadding(expanded = false)
+                    }
                 }
             }
 
-            override fun onSlide(sheetView: View, slideOffset: Float) = Unit
+            // Keeps the extra top padding in sync while the sheet is being dragged/settled
+            // between collapsed and expanded, so the tab row eases out from under the status
+            // bar instead of snapping.
+            override fun onSlide(sheetView: View, slideOffset: Float) {
+                val progress = slideOffset.coerceIn(0f, 1f)
+                applyBottomPanelTopPadding(progressToStatusBarInset = progress)
+            }
         })
 
         // Hidden by default: the panel only appears once the user triggers "Add to sketch".
         bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+    }
+
+    // Adjusts bottomPanel's top padding so the main tools row (Select/Shapes/Text/Upload/
+    // Elements) clears the status bar once the panel is tall enough to reach it. `expanded`
+    // snaps straight to the fully-open or fully-closed amount; `progressToStatusBarInset` (0..1)
+    // interpolates between them while the sheet is sliding. Only one of the two is used per call.
+    private fun applyBottomPanelTopPadding(expanded: Boolean? = null, progressToStatusBarInset: Float? = null) {
+        val extra = when {
+            progressToStatusBarInset != null -> (statusBarInsetTop * progressToStatusBarInset).roundToInt()
+            expanded == true -> statusBarInsetTop
+            else -> 0
+        }
+        bottomPanel.setPadding(
+            bottomPanel.paddingLeft,
+            bottomPanelBasePaddingTop + extra,
+            bottomPanel.paddingRight,
+            bottomPanel.paddingBottom,
+        )
     }
 
     // Opens the shared panel - the only entry point is the "Add to sketch" action (long-press on
@@ -366,7 +418,7 @@ class SketchActivity : AppCompatActivity() {
         setTabActive(tabSelect)
 
         tabShapes.setOnClickListener {
-            openPartPickerFromTab(tabShapes, "Pages", listOf(PartKind.CARD, PartKind.IMAGE, PartKind.CHIP))
+            openPartPickerFromTab(tabShapes, "Shapes", listOf(PartKind.CARD, PartKind.IMAGE, PartKind.CHIP))
         }
         tabText.setOnClickListener {
             openTextInputModal()
