@@ -119,11 +119,13 @@
         android:paddingBottom="18dp"
         android:clipChildren="false"
         android:clipToPadding="false"
+        android:fitsSystemWindows="true"
         app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
         app:behavior_hideable="true"
         app:behavior_draggable="true"
         app:behavior_skipCollapsed="false"
-        app:behavior_peekHeight="220dp">
+        app:behavior_peekHeight="220dp"
+        app:behavior_paddingTopSystemWindowInsets="true">
 
         <!-- Main tools tab navigation (always visible, above both the default tools content and
              the Components browser). -->
