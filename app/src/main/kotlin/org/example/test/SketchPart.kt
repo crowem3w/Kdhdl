@@ -9,4 +9,5 @@ data class SketchPart(
     var w: Float,
     var h: Float,
     var label: String = "",
+    var fontSize: Float = 0f,
 )

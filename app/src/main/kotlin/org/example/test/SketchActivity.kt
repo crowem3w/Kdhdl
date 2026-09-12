@@ -137,6 +137,7 @@ class SketchActivity : AppCompatActivity() {
                     part = part,
                     onRename = { newLabel ->
                         part.label = newLabel
+                        canvas.relayoutTextIfNeeded(part)
                         canvas.invalidate()
                     },
                     onDelete = { canvas.removePart(part) },
@@ -550,7 +551,7 @@ class SketchActivity : AppCompatActivity() {
             PartKind.NAV_BAR -> (canvas.height - h).coerceAtLeast(0f)
             else -> (y - h / 2f).coerceIn(0f, (canvas.height - h).coerceAtLeast(0f))
         }
-        val part = SketchPart(nextId++, kind, px, py, w, h, label)
+        val part = SketchPart(nextId++, kind, px, py, w, h, label, fontSize = 13f * density)
         canvas.addPart(part)
         return part
     }

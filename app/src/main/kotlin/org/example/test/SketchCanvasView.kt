@@ -5,18 +5,17 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import kotlin.math.abs
 import kotlin.math.max
-
-
-
-
-
-
+import kotlin.math.roundToInt
 
 
 
@@ -54,11 +53,23 @@ class SketchCanvasView @JvmOverloads constructor(
         strokeWidth = 2f * density
         color = Color.parseColor("#6750A4")
     }
+    // Used for single-line, centered labels on non-text parts (buttons, cards, chips, etc).
+    // textSize is set per-part (part.fontSize) right before each draw call.
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#1D1B20")
         textSize = 13f * density
         textAlign = Paint.Align.CENTER
     }
+    // Used for wrapped, left-aligned TEXT parts via StaticLayout. textSize is set per-part
+    // (part.fontSize) right before each draw/measure call.
+    private val wrapTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#1D1B20")
+    }
+    // Inner padding kept between a TEXT part's bounding box edges and its wrapped text, both for
+    // rendering and for measuring how tall the wrapped text needs the box to be.
+    private val textWrapHorizontalPadding = 6f * density
+    private val textWrapVerticalPadding = 4f * density
+
     // Selection frame: 0px border, 12dp corner radius, rendered as a white card matching the
     // canvas background so it reads as a soft drop shadow around the selected element rather
     // than a visible box outline.
@@ -89,6 +100,24 @@ class SketchCanvasView @JvmOverloads constructor(
     private var dragOffsetY = 0f
     private var dragMoved = false
 
+    // Resize handle interaction. A handle grab is detected on ACTION_DOWN (only when the touched
+    // part is already selected) and takes priority over the plain move/drag path.
+    private enum class Handle { TOP_LEFT, TOP, TOP_RIGHT, RIGHT, BOTTOM_RIGHT, BOTTOM, BOTTOM_LEFT, LEFT }
+
+    private val handleHitSlop = 16f * density
+    // Safety floor only (not a design minimum) so dimensions/font size never hit zero or flip
+    // negative mid-drag.
+    private val minDimension = 4f * density
+    private val minFontSize = 1f * density
+
+    private var resizingPart: SketchPart? = null
+    private var activeHandle: Handle? = null
+    private var resizeAnchorX = 0f
+    private var resizeAnchorY = 0f
+    private var resizeStartW = 0f
+    private var resizeStartH = 0f
+    private var resizeStartFontSize = 0f
+
     
     
     
@@ -111,6 +140,8 @@ class SketchCanvasView @JvmOverloads constructor(
 
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onLongPress(e: MotionEvent) {
+            // Don't treat a long-press that starts on a resize handle as a long-press-to-open-menu.
+            if (resizingPart != null) return
             val cx = toContentX(e.x)
             val cy = toContentY(e.y)
             val hit = hitTest(cx, cy)
@@ -146,39 +177,190 @@ class SketchCanvasView @JvmOverloads constructor(
             MotionEvent.ACTION_DOWN -> {
                 val cx = toContentX(event.x)
                 val cy = toContentY(event.y)
-                val hit = hitTest(cx, cy)
-                draggingPart = hit
-                dragMoved = false
-                if (hit != null) {
-                    dragOffsetX = cx - hit.x
-                    dragOffsetY = cy - hit.y
+                val sel = selected
+                val handle = sel?.let { handleHitTest(it, cx, cy) }
+                if (sel != null && handle != null) {
+                    resizingPart = sel
+                    activeHandle = handle
+                    resizeStartW = sel.w
+                    resizeStartH = sel.h
+                    resizeStartFontSize = sel.fontSize
+                    val (ax, ay) = anchorPointFor(sel, handle)
+                    resizeAnchorX = ax
+                    resizeAnchorY = ay
+                    draggingPart = null
+                    dragMoved = false
+                } else {
+                    resizingPart = null
+                    activeHandle = null
+                    val hit = hitTest(cx, cy)
+                    draggingPart = hit
+                    dragMoved = false
+                    if (hit != null) {
+                        dragOffsetX = cx - hit.x
+                        dragOffsetY = cy - hit.y
+                    }
                 }
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!pinching) {
-                    draggingPart?.let { p ->
+                    val resizing = resizingPart
+                    if (resizing != null) {
                         val cx = toContentX(event.x)
                         val cy = toContentY(event.y)
-                        p.x = (cx - dragOffsetX).coerceIn(0f, max(0f, width - p.w))
-                        p.y = (cy - dragOffsetY).coerceIn(0f, max(0f, height - p.h))
+                        when (activeHandle) {
+                            Handle.TOP_LEFT, Handle.TOP_RIGHT, Handle.BOTTOM_LEFT, Handle.BOTTOM_RIGHT ->
+                                resizeCorner(resizing, cx, cy)
+                            Handle.LEFT, Handle.RIGHT -> resizeSideWidth(resizing, cx, cy)
+                            Handle.TOP, Handle.BOTTOM -> resizeSideHeight(resizing, cx, cy)
+                            null -> Unit
+                        }
                         dragMoved = true
                         invalidate()
-                        listener?.onSelectionChanged(p)
+                        listener?.onSelectionChanged(resizing)
+                    } else {
+                        draggingPart?.let { p ->
+                            val cx = toContentX(event.x)
+                            val cy = toContentY(event.y)
+                            p.x = (cx - dragOffsetX).coerceIn(0f, max(0f, width - p.w))
+                            p.y = (cy - dragOffsetY).coerceIn(0f, max(0f, height - p.h))
+                            dragMoved = true
+                            invalidate()
+                            listener?.onSelectionChanged(p)
+                        }
                     }
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (draggingPart != null && dragMoved) listener?.onPartsChanged()
+                if ((draggingPart != null || resizingPart != null) && dragMoved) listener?.onPartsChanged()
                 draggingPart = null
+                resizingPart = null
+                activeHandle = null
             }
         }
         return true
+    }
+
+    // Fixed point (in content coordinates) that stays put while a given handle is dragged, i.e.
+    // the corner/edge of the part's bounding box opposite the one being grabbed.
+    private fun anchorPointFor(part: SketchPart, handle: Handle): Pair<Float, Float> {
+        val left = part.x
+        val top = part.y
+        val right = part.x + part.w
+        val bottom = part.y + part.h
+        return when (handle) {
+            Handle.TOP_LEFT -> right to bottom
+            Handle.TOP -> left to bottom
+            Handle.TOP_RIGHT -> left to bottom
+            Handle.RIGHT -> left to top
+            Handle.BOTTOM_RIGHT -> left to top
+            Handle.BOTTOM -> left to top
+            Handle.BOTTOM_LEFT -> right to top
+            Handle.LEFT -> right to top
+        }
+    }
+
+    // Corner handles: scale font size and both box dimensions together, anchored at the opposite
+    // corner. For TEXT parts, if the wrapped label needs more vertical room than the proportional
+    // scale gives it, the box expands downward to fit (auto-wrap/overflow takes priority).
+    private fun resizeCorner(part: SketchPart, cx: Float, cy: Float) {
+        val handle = activeHandle ?: return
+        val rawW = abs(cx - resizeAnchorX).coerceAtLeast(minDimension)
+        val rawH = abs(cy - resizeAnchorY).coerceAtLeast(minDimension)
+        val scale = ((rawW / resizeStartW) + (rawH / resizeStartH)) / 2f
+        val newW = (resizeStartW * scale).coerceAtLeast(minDimension)
+        val newH = (resizeStartH * scale).coerceAtLeast(minDimension)
+        val newFontSize = (resizeStartFontSize * scale).coerceAtLeast(minFontSize)
+
+        val newX = if (handle == Handle.TOP_LEFT || handle == Handle.BOTTOM_LEFT) resizeAnchorX - newW else resizeAnchorX
+        val newY = if (handle == Handle.TOP_LEFT || handle == Handle.TOP_RIGHT) resizeAnchorY - newH else resizeAnchorY
+
+        part.x = newX
+        part.y = newY
+        part.w = newW
+        part.h = newH
+        part.fontSize = newFontSize
+
+        if (part.kind == PartKind.TEXT) applyTextAutoHeight(part)
+    }
+
+    // Left/right side handles: change only the box width (and x, if grabbed from the left), never
+    // the font size. This re-wraps (or unwraps) TEXT content within the new width.
+    private fun resizeSideWidth(part: SketchPart, cx: Float, cy: Float) {
+        val handle = activeHandle ?: return
+        val newW = abs(cx - resizeAnchorX).coerceAtLeast(minDimension)
+        val newX = if (handle == Handle.LEFT) resizeAnchorX - newW else resizeAnchorX
+        part.x = newX
+        part.w = newW
+
+        if (part.kind == PartKind.TEXT) applyTextAutoHeight(part)
+    }
+
+    // Top/bottom side handles: change only the box height (and y, if grabbed from the top). Not
+    // reachable for TEXT parts — handleHitTest excludes them there since TEXT height is driven by
+    // wrapped content, not a manual side drag.
+    private fun resizeSideHeight(part: SketchPart, cx: Float, cy: Float) {
+        val handle = activeHandle ?: return
+        val newH = abs(cy - resizeAnchorY).coerceAtLeast(minDimension)
+        val newY = if (handle == Handle.TOP) resizeAnchorY - newH else resizeAnchorY
+        part.y = newY
+        part.h = newH
+    }
+
+    // Grows (never shrinks) a TEXT part's height so its wrapped label always fits, expanding
+    // downward since y is left untouched.
+    private fun applyTextAutoHeight(part: SketchPart) {
+        val needed = measureWrappedTextHeight(part.label.ifBlank { part.kind.displayLabel }, part.fontSize, part.w)
+        if (needed > part.h) part.h = needed
+    }
+
+    private fun measureWrappedTextHeight(text: String, fontSizePx: Float, boxWidthPx: Float): Float {
+        val innerWidth = max(1, (boxWidthPx - textWrapHorizontalPadding * 2f).roundToInt())
+        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textSize = fontSizePx.coerceAtLeast(minFontSize) }
+        val layout = StaticLayout.Builder
+            .obtain(text, 0, text.length, paint, innerWidth)
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setLineSpacing(0f, 1f)
+            .setIncludePad(false)
+            .build()
+        return layout.height.toFloat() + textWrapVerticalPadding * 2f
+    }
+
+    // Recomputes a TEXT part's auto-expanded height (e.g. after its label changes externally)
+    // and redraws. No-op for non-text parts.
+    fun relayoutTextIfNeeded(part: SketchPart) {
+        if (part.kind != PartKind.TEXT) return
+        applyTextAutoHeight(part)
+        invalidate()
+    }
+
+    private fun handleHitTest(part: SketchPart, x: Float, y: Float): Handle? {
+        val rect = selectionRect(part)
+        val midX = rect.centerX()
+        val midY = rect.centerY()
+        val slop = handleHitSlop
+        fun near(px: Float, py: Float) = abs(x - px) <= slop && abs(y - py) <= slop
+
+        if (near(rect.left, rect.top)) return Handle.TOP_LEFT
+        if (near(rect.right, rect.top)) return Handle.TOP_RIGHT
+        if (near(rect.left, rect.bottom)) return Handle.BOTTOM_LEFT
+        if (near(rect.right, rect.bottom)) return Handle.BOTTOM_RIGHT
+        // Top/bottom side handles are disabled for TEXT: its height always follows wrapped
+        // content, so there's nothing meaningful for them to drag.
+        if (part.kind != PartKind.TEXT) {
+            if (near(midX, rect.top)) return Handle.TOP
+            if (near(midX, rect.bottom)) return Handle.BOTTOM
+        }
+        if (near(rect.left, midY)) return Handle.LEFT
+        if (near(rect.right, midY)) return Handle.RIGHT
+        return null
     }
 
     private fun hitTest(x: Float, y: Float): SketchPart? =
         parts.lastOrNull { p -> x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h }
 
     fun addPart(part: SketchPart) {
+        if (part.kind == PartKind.TEXT) applyTextAutoHeight(part)
         parts.add(part)
         selected = part
         invalidate()
@@ -229,7 +411,29 @@ class SketchCanvasView @JvmOverloads constructor(
             canvas.drawRoundRect(rect, radius, radius, strokePaint)
         }
         val label = part.label.ifBlank { part.kind.displayLabel }
-        canvas.drawText(label, rect.centerX(), rect.centerY() + textPaint.textSize / 3f, textPaint)
+        if (part.kind == PartKind.TEXT) {
+            drawWrappedText(canvas, part, label)
+        } else {
+            textPaint.textSize = part.fontSize.coerceAtLeast(minFontSize)
+            canvas.drawText(label, rect.centerX(), rect.centerY() + textPaint.textSize / 3f, textPaint)
+        }
+    }
+
+    // TEXT parts wrap within their bounding box width and draw top-left aligned, rather than as a
+    // single centered line.
+    private fun drawWrappedText(canvas: Canvas, part: SketchPart, label: String) {
+        wrapTextPaint.textSize = part.fontSize.coerceAtLeast(minFontSize)
+        val innerWidth = max(1, (part.w - textWrapHorizontalPadding * 2f).roundToInt())
+        val layout = StaticLayout.Builder
+            .obtain(label, 0, label.length, wrapTextPaint, innerWidth)
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setLineSpacing(0f, 1f)
+            .setIncludePad(false)
+            .build()
+        val saveCount = canvas.save()
+        canvas.translate(part.x + textWrapHorizontalPadding, part.y + textWrapVerticalPadding)
+        layout.draw(canvas)
+        canvas.restoreToCount(saveCount)
     }
 
     private fun selectionRect(part: SketchPart): RectF {
