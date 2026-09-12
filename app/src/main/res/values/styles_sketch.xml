@@ -71,25 +71,39 @@
         <item name="android:textSize">10.5sp</item>
     </style>
 
-    <!-- Temporary multi-selection actions panel (Group/Duplicate/Move/Lock/Hide/Delete) -->
-    <style name="SketchSelectionActionLabel">
-        <item name="android:layout_width">match_parent</item>
+    <!-- Sidebar variant of the multi-selection actions panel: a vertical column of icon
+         buttons docked to the screen edge instead of a horizontal list of text rows. -->
+    <style name="SketchSelectionSidebarItem">
+        <item name="android:layout_width">56dp</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:paddingHorizontal">28dp</item>
-        <item name="android:paddingVertical">14dp</item>
+        <item name="android:orientation">vertical</item>
         <item name="android:gravity">center</item>
-        <item name="android:textColor">#FFFFFF</item>
-        <item name="android:textSize">15sp</item>
+        <item name="android:paddingVertical">12dp</item>
         <item name="android:clickable">true</item>
         <item name="android:focusable">true</item>
         <item name="android:foreground">?attr/selectableItemBackground</item>
     </style>
 
-    <style name="SketchSelectionActionDivider">
-        <item name="android:layout_width">match_parent</item>
+    <style name="SketchSelectionSidebarIcon">
+        <item name="android:layout_width">22dp</item>
+        <item name="android:layout_height">22dp</item>
+    </style>
+
+    <style name="SketchSelectionSidebarLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">5dp</item>
+        <item name="android:textColor">#FFFFFF</item>
+        <item name="android:textSize">10sp</item>
+    </style>
+
+    <style name="SketchSelectionSidebarDivider">
+        <item name="android:layout_width">32dp</item>
         <item name="android:layout_height">1dp</item>
+        <item name="android:layout_gravity">center_horizontal</item>
         <item name="android:background">#2A2B38</item>
     </style>
+
 
     <!-- Properties card -->
     <style name="SketchPropertyLabel">

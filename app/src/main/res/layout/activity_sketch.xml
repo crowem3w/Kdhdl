@@ -104,68 +104,69 @@
     <!-- Temporary multi-selection actions panel: appears after a long-press + drag marquee
          selection is released over one or more parts (see SketchCanvasView -
          onMultiSelectionFinalized / SketchActivity#showSelectionActionsPanel). It's a small
-         floating strip of vertically-stacked, label-only actions - not a BottomSheetBehavior
-         sheet - since it's meant to slide in/out on top of the canvas rather than be dragged.
-         Hidden by default; slid up from off-screen and back down entirely in code. -->
+         floating sidebar docked to the right edge of the canvas - a vertical column of icon
+         buttons - not a BottomSheetBehavior sheet, since it's meant to slide in/out over the
+         canvas rather than be dragged. Hidden by default; slid in/out from off-screen (right
+         edge) entirely in code. -->
     <LinearLayout
         android:id="@+id/selectionActionsPanel"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="32dp"
-        android:minWidth="220dp"
+        android:layout_gravity="end|center_vertical"
+        android:layout_marginEnd="16dp"
+        android:minWidth="64dp"
         android:orientation="vertical"
         android:background="@drawable/bg_selection_actions_panel"
-        android:paddingVertical="4dp"
+        android:paddingVertical="6dp"
         android:visibility="invisible"
         android:elevation="12dp">
 
-        <TextView
-            android:id="@+id/actionGroupToggle"
-            style="@style/SketchSelectionActionLabel"
-            android:text="Group" />
+        <LinearLayout android:id="@+id/actionGroupToggle" style="@style/SketchSelectionSidebarItem">
+            <ImageView style="@style/SketchSelectionSidebarIcon" android:src="@drawable/ic_group" />
+            <TextView android:id="@+id/actionGroupToggleLabel" style="@style/SketchSelectionSidebarLabel" android:text="Group" />
+        </LinearLayout>
 
-        <View style="@style/SketchSelectionActionDivider" />
+        <View style="@style/SketchSelectionSidebarDivider" />
 
-        <TextView
-            android:id="@+id/actionDuplicateSel"
-            style="@style/SketchSelectionActionLabel"
-            android:text="Duplicate" />
+        <LinearLayout android:id="@+id/actionDuplicateSel" style="@style/SketchSelectionSidebarItem">
+            <ImageView style="@style/SketchSelectionSidebarIcon" android:src="@drawable/ic_duplicate" />
+            <TextView style="@style/SketchSelectionSidebarLabel" android:text="Duplicate" />
+        </LinearLayout>
 
-        <View style="@style/SketchSelectionActionDivider" />
+        <View style="@style/SketchSelectionSidebarDivider" />
 
-        <TextView
-            android:id="@+id/actionMoveSel"
-            style="@style/SketchSelectionActionLabel"
-            android:text="Move" />
+        <LinearLayout android:id="@+id/actionMoveSel" style="@style/SketchSelectionSidebarItem">
+            <ImageView style="@style/SketchSelectionSidebarIcon" android:src="@drawable/ic_move" />
+            <TextView style="@style/SketchSelectionSidebarLabel" android:text="Move" />
+        </LinearLayout>
 
-        <View style="@style/SketchSelectionActionDivider" />
+        <View style="@style/SketchSelectionSidebarDivider" />
 
-        <TextView
-            android:id="@+id/actionLockToggleSel"
-            style="@style/SketchSelectionActionLabel"
-            android:text="Lock" />
+        <LinearLayout android:id="@+id/actionLockToggleSel" style="@style/SketchSelectionSidebarItem">
+            <ImageView style="@style/SketchSelectionSidebarIcon" android:src="@drawable/ic_lock" />
+            <TextView style="@style/SketchSelectionSidebarLabel" android:text="Lock" />
+        </LinearLayout>
 
-        <View style="@style/SketchSelectionActionDivider" />
+        <View style="@style/SketchSelectionSidebarDivider" />
 
-        <TextView
-            android:id="@+id/actionHideToggleSel"
-            style="@style/SketchSelectionActionLabel"
-            android:text="Hide" />
+        <LinearLayout android:id="@+id/actionHideToggleSel" style="@style/SketchSelectionSidebarItem">
+            <ImageView style="@style/SketchSelectionSidebarIcon" android:src="@drawable/ic_hide" />
+            <TextView style="@style/SketchSelectionSidebarLabel" android:text="Hide" />
+        </LinearLayout>
 
-        <View style="@style/SketchSelectionActionDivider" />
+        <View style="@style/SketchSelectionSidebarDivider" />
 
-        <TextView
-            android:id="@+id/actionDeleteSel"
-            style="@style/SketchSelectionActionLabel"
-            android:textColor="#F2B8B5"
-            android:text="Delete" />
+        <LinearLayout android:id="@+id/actionDeleteSel" style="@style/SketchSelectionSidebarItem">
+            <ImageView style="@style/SketchSelectionSidebarIcon" android:src="@drawable/ic_delete" />
+            <TextView style="@style/SketchSelectionSidebarLabel" android:textColor="#F2B8B5" android:text="Delete" />
+        </LinearLayout>
     </LinearLayout>
 
     <!-- Shared bottom panel: Main tools tab bar stays pinned at the top of the panel; the
-         content area beneath it swaps between the default tools content (Quick Actions,
-         Properties, Animation & Interaction) and the Components browser. The panel has no drag
-         handle of its own: it opens via a flick or a double-tap on empty canvas (see
+         content area beneath it swaps between the (now-empty) default tools content and the
+         Components browser. In Select mode the panel shows only the Main tools row - it is
+         sized to that row's height (see setupBottomPanel in SketchActivity). The panel has no
+         drag handle of its own: it opens via a flick or a double-tap on empty canvas (see
          onFlickEmptySpace / onDoubleTapEmptySpace -> openSketchPanel in SketchActivity) and
          closes via the back button or by swiping it down (app:behavior_draggable="true" lets the
          framework's native swipe-to-dismiss gesture animate it closed - see setupBottomPanel in
@@ -185,7 +186,7 @@
         app:behavior_hideable="true"
         app:behavior_draggable="true"
         app:behavior_skipCollapsed="false"
-        app:behavior_peekHeight="220dp">
+        app:behavior_peekHeight="110dp">
 
         <!-- Main tools tab navigation (always visible, above both the default tools content and
              the Components browser). -->
@@ -269,181 +270,7 @@
                     android:id="@+id/defaultToolsContent"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical">
-
-                    <!-- Quick actions -->
-                    <TextView
-                        style="@style/SketchSectionLabel"
-                        android:text="Quick Actions" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="horizontal">
-
-            <LinearLayout android:id="@+id/actionFrame" style="@style/SketchQuickAction">
-                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_frame" />
-                <TextView style="@style/SketchQuickActionLabel" android:text="Frame" />
-            </LinearLayout>
-
-            <LinearLayout android:id="@+id/actionGroup" style="@style/SketchQuickAction">
-                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_group" />
-                <TextView style="@style/SketchQuickActionLabel" android:text="Group" />
-            </LinearLayout>
-
-            <LinearLayout android:id="@+id/actionAlign" style="@style/SketchQuickAction">
-                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_align" />
-                <TextView style="@style/SketchQuickActionLabel" android:text="Align" />
-            </LinearLayout>
-
-            <LinearLayout android:id="@+id/actionDistribute" style="@style/SketchQuickAction">
-                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_distribute" />
-                <TextView style="@style/SketchQuickActionLabel" android:text="Distribute" />
-            </LinearLayout>
-
-            <LinearLayout android:id="@+id/actionLock" style="@style/SketchQuickAction">
-                <ImageView style="@style/SketchQuickActionIcon" android:src="@drawable/ic_lock" />
-                <TextView style="@style/SketchQuickActionLabel" android:text="Lock" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- Properties panel -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                style="@style/SketchSectionLabel"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:textColor="#FFFFFF"
-                android:textSize="14sp"
-                android:text="Properties" />
-
-            <ImageButton
-                android:id="@+id/btnPropertiesMore"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:background="@null"
-                android:padding="4dp"
-                android:src="@drawable/ic_more_vert" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="horizontal"
-            android:background="@drawable/bg_properties_card"
-            android:padding="14dp">
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView style="@style/SketchPropertyLabel" android:text="Position" />
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:orientation="horizontal">
-
-                    <TextView style="@style/SketchPropertyKey" android:text="X" />
-                    <TextView android:id="@+id/tvPosX" style="@style/SketchPropertyValue" android:text="0" />
-
-                    <TextView style="@style/SketchPropertyKey" android:layout_marginStart="14dp" android:text="Y" />
-                    <TextView android:id="@+id/tvPosY" style="@style/SketchPropertyValue" android:text="0" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView style="@style/SketchPropertyLabel" android:text="Size" />
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:orientation="horizontal">
-
-                    <TextView style="@style/SketchPropertyKey" android:text="W" />
-                    <TextView android:id="@+id/tvSizeW" style="@style/SketchPropertyValue" android:text="100" />
-
-                    <TextView style="@style/SketchPropertyKey" android:layout_marginStart="14dp" android:text="H" />
-                    <TextView android:id="@+id/tvSizeH" style="@style/SketchPropertyValue" android:text="100" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView style="@style/SketchPropertyLabel" android:text="Rotation" />
-
-                <TextView
-                    android:id="@+id/tvRotation"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="0\u00B0"
-                    android:textColor="#FFFFFF"
-                    android:textSize="14sp" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- Animation & interaction -->
-        <TextView
-            style="@style/SketchSectionLabel"
-            android:layout_marginTop="18dp"
-            android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:text="Animation &amp; Interaction" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:orientation="horizontal">
-
-            <LinearLayout android:id="@+id/actionAnimate" style="@style/SketchAnimColumn">
-                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_animate" />
-                <TextView style="@style/SketchQuickActionLabel" android:text="Animate" />
-            </LinearLayout>
-
-            <LinearLayout android:id="@+id/actionStates" style="@style/SketchAnimColumn">
-                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_states" />
-                <TextView style="@style/SketchQuickActionLabel" android:text="States" />
-            </LinearLayout>
-
-            <LinearLayout android:id="@+id/actionInteractions" style="@style/SketchAnimColumn">
-                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_link" />
-                <TextView style="@style/SketchQuickActionLabel" android:text="Interactions" />
-            </LinearLayout>
-
-            <LinearLayout android:id="@+id/actionTimeline" style="@style/SketchAnimColumn">
-                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_timeline" />
-                <TextView style="@style/SketchQuickActionLabel" android:text="Timeline" />
-            </LinearLayout>
-
-            <LinearLayout android:id="@+id/actionMore" style="@style/SketchAnimColumn">
-                <ImageView style="@style/SketchQuickActionIconFlat" android:src="@drawable/ic_more_horiz" />
-                <TextView style="@style/SketchQuickActionLabel" android:text="More" />
-            </LinearLayout>
-        </LinearLayout>
-                </LinearLayout>
+                    android:orientation="vertical" />
             </androidx.core.widget.NestedScrollView>
 
             <!-- Components browser content, built and attached at runtime by

@@ -40,24 +40,19 @@ class SketchActivity : AppCompatActivity() {
     private lateinit var tabComponents: LinearLayout
     private lateinit var allTabs: List<LinearLayout>
 
-    private lateinit var tvPosX: TextView
-    private lateinit var tvPosY: TextView
-    private lateinit var tvSizeW: TextView
-    private lateinit var tvSizeH: TextView
-    private lateinit var tvRotation: TextView
-
     // Temporary panel shown after a long-press + drag marquee selection is released on the
     // canvas (see SketchCanvasView.Listener#onMultiSelectionFinalized). Entirely separate from
-    // bottomPanel: it's a small floating strip of vertically-stacked action labels rather than a
-    // draggable sheet, and it auto-dismisses once an action is picked (or the selection is
-    // otherwise cleared).
+    // bottomPanel: it's a small floating sidebar of icon buttons docked to the screen edge
+    // rather than a draggable sheet, and it auto-dismisses once an action is picked (or the
+    // selection is otherwise cleared).
     private lateinit var selectionActionsPanel: LinearLayout
-    private lateinit var actionGroupToggle: TextView
-    private lateinit var actionDuplicateSel: TextView
-    private lateinit var actionMoveSel: TextView
-    private lateinit var actionLockToggleSel: TextView
-    private lateinit var actionHideToggleSel: TextView
-    private lateinit var actionDeleteSel: TextView
+    private lateinit var actionGroupToggle: LinearLayout
+    private lateinit var actionGroupToggleLabel: TextView
+    private lateinit var actionDuplicateSel: LinearLayout
+    private lateinit var actionMoveSel: LinearLayout
+    private lateinit var actionLockToggleSel: LinearLayout
+    private lateinit var actionHideToggleSel: LinearLayout
+    private lateinit var actionDeleteSel: LinearLayout
 
     private lateinit var bottomPanel: LinearLayout
     private lateinit var bottomSheetBehavior: BottomSheetBehavior<LinearLayout>
@@ -118,14 +113,9 @@ class SketchActivity : AppCompatActivity() {
         tabComponents = findViewById(R.id.tabComponents)
         allTabs = listOf(tabSelect, tabShapes, tabText, tabMedia, tabComponents)
 
-        tvPosX = findViewById(R.id.tvPosX)
-        tvPosY = findViewById(R.id.tvPosY)
-        tvSizeW = findViewById(R.id.tvSizeW)
-        tvSizeH = findViewById(R.id.tvSizeH)
-        tvRotation = findViewById(R.id.tvRotation)
-
         selectionActionsPanel = findViewById(R.id.selectionActionsPanel)
         actionGroupToggle = findViewById(R.id.actionGroupToggle)
+        actionGroupToggleLabel = findViewById(R.id.actionGroupToggleLabel)
         actionDuplicateSel = findViewById(R.id.actionDuplicateSel)
         actionMoveSel = findViewById(R.id.actionMoveSel)
         actionLockToggleSel = findViewById(R.id.actionLockToggleSel)
@@ -159,7 +149,7 @@ class SketchActivity : AppCompatActivity() {
                 )
             }
 
-            override fun onSelectionChanged(part: SketchPart?) = updateProperties(part)
+            override fun onSelectionChanged(part: SketchPart?) = Unit
 
             override fun onPartsChanged() = Unit
 
@@ -171,13 +161,7 @@ class SketchActivity : AppCompatActivity() {
         setupTopBar()
         setupBottomPanel()
         setupTabs()
-        setupQuickActions()
-        setupAnimationRow()
         setupSelectionActionsPanel()
-
-        updateProperties(null)
-
-
 
         showTopBar()
     }
@@ -270,13 +254,15 @@ class SketchActivity : AppCompatActivity() {
             insets
         }
 
+        // Select mode no longer has any default tools content (Quick Actions / Properties /
+        // Animation & Interaction were removed), so the collapsed panel should just hug the
+        // Main tools row instead of claiming half the screen.
         bottomPanel.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
                 val rootHeight = (bottomPanel.parent as? View)?.height ?: 0
                 if (panelContentContainer.top > 0 && rootHeight > 0) {
                     val minPanelHeight = panelContentContainer.top + bottomPanel.paddingBottom
-                    defaultPanelHeight = (rootHeight * 0.5f).roundToInt()
-                        .coerceIn(minPanelHeight, rootHeight)
+                    defaultPanelHeight = minPanelHeight.coerceIn(minPanelHeight, rootHeight)
 
                     bottomSheetBehavior.peekHeight = defaultPanelHeight
                     bottomPanel.viewTreeObserver.removeOnGlobalLayoutListener(this)
@@ -469,35 +455,6 @@ class SketchActivity : AppCompatActivity() {
 
 
 
-    private fun setupQuickActions() {
-        val actions = listOf(
-            R.id.actionFrame to "Frame",
-            R.id.actionGroup to "Group",
-            R.id.actionAlign to "Align",
-            R.id.actionDistribute to "Distribute",
-            R.id.actionLock to "Lock",
-        )
-        for ((id, label) in actions) {
-            findViewById<View>(id).setOnClickListener { notAvailableYet(label) }
-        }
-        findViewById<View>(R.id.btnPropertiesMore).setOnClickListener { notAvailableYet("More properties") }
-    }
-
-
-
-    private fun setupAnimationRow() {
-        val actions = listOf(
-            R.id.actionAnimate to "Animate",
-            R.id.actionStates to "States",
-            R.id.actionInteractions to "Interactions",
-            R.id.actionTimeline to "Timeline",
-            R.id.actionMore to "More",
-        )
-        for ((id, label) in actions) {
-            findViewById<View>(id).setOnClickListener { notAvailableYet(label) }
-        }
-    }
-
     // --- Temporary multi-selection actions panel ----------------------------------------------
     // Opened by SketchCanvasView after a long-press + drag marquee release (onMultiSelectionFinalized)
     // and dismissed either by picking an action below or by the selection being cleared some
@@ -533,20 +490,21 @@ class SketchActivity : AppCompatActivity() {
     }
 
     private fun updateSelectionActionLabels() {
-        actionGroupToggle.text = if (canvas.isSelectionGrouped()) "Ungroup" else "Group"
+        actionGroupToggleLabel.text = if (canvas.isSelectionGrouped()) "Ungroup" else "Group"
     }
 
+    // Slides the sidebar in from the right edge of the screen.
     private fun showSelectionActionsPanel() {
         updateSelectionActionLabels()
         panelBackPressedCallback.isEnabled = true
         selectionActionsPanel.animate().cancel()
         selectionActionsPanel.alpha = 1f
         selectionActionsPanel.visibility = View.VISIBLE
-        selectionActionsPanel.translationY = 0f
+        selectionActionsPanel.translationX = 0f
         selectionActionsPanel.post {
             val dp24 = 24f * resources.displayMetrics.density
-            selectionActionsPanel.translationY = selectionActionsPanel.height.toFloat() + dp24
-            selectionActionsPanel.animate().translationY(0f).setDuration(200).start()
+            selectionActionsPanel.translationX = selectionActionsPanel.width.toFloat() + dp24
+            selectionActionsPanel.animate().translationX(0f).setDuration(200).start()
         }
     }
 
@@ -557,20 +515,20 @@ class SketchActivity : AppCompatActivity() {
         if (clearSelection) canvas.clearMultiSelection()
     }
 
-    // Purely visual: slides the panel down and hides it, without touching the canvas selection.
-    // Used both by dismissSelectionActionsPanel() above and directly as the
-    // onMultiSelectionCleared callback, since in that case the canvas has already cleared its
-    // own selection and is just notifying us to close the panel.
+    // Purely visual: slides the panel back off-screen to the right and hides it, without
+    // touching the canvas selection. Used both by dismissSelectionActionsPanel() above and
+    // directly as the onMultiSelectionCleared callback, since in that case the canvas has
+    // already cleared its own selection and is just notifying us to close the panel.
     private fun hideSelectionActionsPanel() {
         if (selectionActionsPanel.visibility != View.VISIBLE) return
         val dp24 = 24f * resources.displayMetrics.density
         selectionActionsPanel.animate().cancel()
         selectionActionsPanel.animate()
-            .translationY(selectionActionsPanel.height.toFloat() + dp24)
+            .translationX(selectionActionsPanel.width.toFloat() + dp24)
             .setDuration(160)
             .withEndAction {
                 selectionActionsPanel.visibility = View.INVISIBLE
-                selectionActionsPanel.translationY = 0f
+                selectionActionsPanel.translationX = 0f
             }
             .start()
         panelBackPressedCallback.isEnabled = bottomSheetBehavior.state != BottomSheetBehavior.STATE_HIDDEN
@@ -581,25 +539,6 @@ class SketchActivity : AppCompatActivity() {
     }
 
 
-
-
-
-    private fun updateProperties(part: SketchPart?) {
-        if (part == null) {
-            tvPosX.text = "\u2013"
-            tvPosY.text = "\u2013"
-            tvSizeW.text = "\u2013"
-            tvSizeH.text = "\u2013"
-            tvRotation.text = "0\u00B0"
-            return
-        }
-        val density = resources.displayMetrics.density
-        tvPosX.text = (part.x / density).roundToInt().toString()
-        tvPosY.text = (part.y / density).roundToInt().toString()
-        tvSizeW.text = (part.w / density).roundToInt().toString()
-        tvSizeH.text = (part.h / density).roundToInt().toString()
-        tvRotation.text = "0\u00B0"
-    }
 
 
 
