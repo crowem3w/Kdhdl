@@ -93,83 +93,15 @@
                 android:elevation="3dp" />
         </LinearLayout>
 
-        <!-- Marks the bottom edge of Page 1 as the end of the app screen: 0px border, white
-             fill, 12dp radius on the bottom two corners only, with an elevation-cast shadow
-             (see bg_page_end_cap.xml). Sits directly above the scroll-depth guide below it. -->
-        <View
-            android:id="@+id/pageEndCap"
-            android:layout_width="match_parent"
-            android:layout_height="12dp"
-            android:layout_gravity="bottom"
-            android:background="@drawable/bg_page_end_cap"
-            android:elevation="6dp" />
-
-        <!-- Scroll-depth guide: a drag handle plus a single blank black region beneath Page 1.
-             It carries no real content and isn't a separate app screen — it's just a visual
-             marker for how much extra vertical scroll depth the one page should have. Dragging
-             the handle grows/shrinks it continuously (1:1 with the finger), with no fixed cap.
-             See setupPagesStrip() in SketchActivity. -->
-        <LinearLayout
-            android:id="@+id/pagesStrip"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom"
-            android:orientation="vertical"
-            android:clipChildren="false"
-            android:clipToPadding="false">
-
-            <FrameLayout
-                android:id="@+id/pagesDragHandle"
-                android:layout_width="match_parent"
-                android:layout_height="28dp"
-                android:clickable="true"
-                android:focusable="true"
-                android:contentDescription="Drag to adjust scroll depth">
-
-                <View
-                    android:layout_width="36dp"
-                    android:layout_height="4dp"
-                    android:layout_gravity="center"
-                    android:background="@drawable/bg_drag_handle" />
-            </FrameLayout>
-
-            <View
-                android:id="@+id/scrollDepthGuide"
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:background="@drawable/bg_page_thumbnail" />
-        </LinearLayout>
-
-    </FrameLayout>
-
-    <!-- Thin strip pinned to the bottom edge, hidden behind the panel whenever the panel is
-         visible. Exposed only when the panel has been swiped/dragged into STATE_HIDDEN, at which
-         point a tap or an upward swipe here brings the shared panel back (see setupHiddenReveal
-         in SketchActivity). -->
-    <FrameLayout
-        android:id="@+id/bottomSwipeHandle"
-        android:layout_width="match_parent"
-        android:layout_height="28dp"
-        android:layout_gravity="bottom"
-        android:clickable="true"
-        android:focusable="true">
-
-        <View
-            android:layout_width="36dp"
-            android:layout_height="4dp"
-            android:layout_gravity="center"
-            android:background="@drawable/bg_drag_handle" />
     </FrameLayout>
 
     <!-- Shared bottom panel: Main tools tab bar stays pinned at the top of the panel; the
          content area beneath it swaps between the default tools content (Quick Actions,
-         Properties, Animation & Interaction) and the Components browser. BottomSheetBehavior is
-         used purely as a height/visibility container here (app:behavior_draggable="false" -
-         see setupDragHandle in SketchActivity): the panel's own dragHandle drives free-form
-         resizing by hand, tracking the finger 1:1 via behavior.peekHeight, rather than relying
-         on the framework's fling-to-snap gesture. Letting go only auto-completes to hidden or
-         full screen when the drag has gone past those extremes; anywhere in between just holds
-         at the height you left it. -->
+         Properties, Animation & Interaction) and the Components browser. The panel has no drag
+         handle of its own: it only ever opens via the "Add to sketch" action (see
+         onLongPressEmptySpace -> openSketchPanel in SketchActivity) and closes via the back
+         button or by swiping it down (app:behavior_draggable="true" lets the framework's native
+         swipe-to-dismiss gesture animate it closed - see setupBottomPanel in SketchActivity). -->
     <LinearLayout
         android:id="@+id/bottomPanel"
         android:layout_width="match_parent"
@@ -177,33 +109,15 @@
         android:orientation="vertical"
         android:background="@drawable/bg_bottom_panel"
         android:paddingHorizontal="16dp"
-        android:paddingTop="10dp"
+        android:paddingTop="18dp"
         android:paddingBottom="18dp"
         android:clipChildren="false"
         android:clipToPadding="false"
         app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
         app:behavior_hideable="true"
+        app:behavior_draggable="true"
         app:behavior_skipCollapsed="false"
         app:behavior_peekHeight="220dp">
-
-        <!-- Touch target is taller (40dp) than the visible pill (4dp) so the handle meets a
-             comfortable Fitts's-law-friendly hit area without adding visual bulk. -->
-        <FrameLayout
-            android:id="@+id/dragHandle"
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:layout_marginTop="-10dp"
-            android:layout_marginBottom="4dp"
-            android:clickable="true"
-            android:focusable="true"
-            android:contentDescription="Drag to resize panel">
-
-            <View
-                android:layout_width="36dp"
-                android:layout_height="4dp"
-                android:layout_gravity="center"
-                android:background="@drawable/bg_drag_handle" />
-        </FrameLayout>
 
         <!-- Main tools tab navigation (always visible, above both the default tools content and
              the Components browser). -->

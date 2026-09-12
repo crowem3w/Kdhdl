@@ -5,8 +5,6 @@ import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.GestureDetector
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
@@ -14,6 +12,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.core.widget.NestedScrollView
@@ -70,30 +69,23 @@ class SketchActivity : AppCompatActivity() {
     private lateinit var defaultToolsContentScroll: NestedScrollView
     private lateinit var defaultToolsContent: LinearLayout
     private lateinit var componentsContentContainer: FrameLayout
-    private lateinit var dragHandle: View
     private var componentsContentBuilt = false
     private var showingComponents = false
 
     
     
-    private lateinit var pagesDragHandle: FrameLayout
-    private lateinit var scrollDepthGuide: View
-    // Height of the blank scroll-depth guide beneath Page 1. Not a separate app screen and not
-    // real canvas content — purely a marker of how far Page 1 is meant to scroll. Grows/shrinks
-    // continuously (1:1 with the finger) via the pagesDragHandle touch listener, with no cap.
+    
+    
+    private var defaultPanelHeight = 0
 
     
     
     
-    
-    
-    
-    
-    private var minPanelHeight = 0
-    private var maxPanelHeight = 0
-    private var defaultPanelHeight = 0
-    private val hideThreshold: Int get() = (minPanelHeight * 0.5f).roundToInt()
-    private val fullscreenThreshold: Int get() = maxPanelHeight - (minPanelHeight * 0.5f).roundToInt()
+    private val panelBackPressedCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            closeSketchPanel()
+        }
+    }
 
     private var nextId = 1L
 
@@ -128,19 +120,11 @@ class SketchActivity : AppCompatActivity() {
         defaultToolsContentScroll = findViewById(R.id.defaultToolsContentScroll)
         defaultToolsContent = findViewById(R.id.defaultToolsContent)
         componentsContentContainer = findViewById(R.id.componentsContentContainer)
-        dragHandle = findViewById(R.id.dragHandle)
         bottomSheetBehavior = BottomSheetBehavior.from(bottomPanel)
-
-        pagesDragHandle = findViewById(R.id.pagesDragHandle)
-        scrollDepthGuide = findViewById(R.id.scrollDepthGuide)
+        onBackPressedDispatcher.addCallback(this, panelBackPressedCallback)
 
         canvas.listener = object : SketchCanvasView.Listener {
-            override fun onLongPressEmptySpace(x: Float, y: Float) = openPartPicker(
-                title = "Add to sketch",
-                kinds = PartKind.values().toList(),
-                x = x,
-                y = y,
-            )
+            override fun onLongPressEmptySpace(x: Float, y: Float) = openSketchPanel()
 
             override fun onPartLongPressed(part: SketchPart) {
                 showPartOptionsDialog(
@@ -162,12 +146,9 @@ class SketchActivity : AppCompatActivity() {
 
         setupTopBar()
         setupBottomPanel()
-        setupDragHandle()
-        setupPagesStrip()
         setupTabs()
         setupQuickActions()
         setupAnimationRow()
-        setupHiddenReveal()
 
         updateProperties(null)
 
@@ -228,7 +209,7 @@ class SketchActivity : AppCompatActivity() {
     }
 
     private fun setupTopBar() {
-        findViewById<View>(R.id.btnBack).setOnClickListener { finish() }
+        findViewById<View>(R.id.btnBack).setOnClickListener { onBackPressedDispatcher.onBackPressed() }
         findViewById<View>(R.id.btnUndo).setOnClickListener { notAvailableYet("Undo") }
         findViewById<View>(R.id.btnRedo).setOnClickListener { notAvailableYet("Redo") }
         findViewById<View>(R.id.btnPlay).setOnClickListener { notAvailableYet("Preview") }
@@ -255,120 +236,69 @@ class SketchActivity : AppCompatActivity() {
 
 
     private fun setupBottomPanel() {
-        bottomSheetBehavior.isDraggable = false 
+        // The panel now only ever opens via openSketchPanel() and closes via closeSketchPanel()
+        // (back button/gesture) or by being swiped down, so we let the framework's own
+        // swipe-to-dismiss gesture drive it instead of a manual drag handle.
+        bottomSheetBehavior.isDraggable = true
         bottomPanel.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
                 val rootHeight = (bottomPanel.parent as? View)?.height ?: 0
                 if (panelContentContainer.top > 0 && rootHeight > 0) {
-                    
-                    
-                    minPanelHeight = panelContentContainer.top + bottomPanel.paddingBottom
-                    
-                    maxPanelHeight = rootHeight
-                    
-                    
-                    
-                    
+                    val minPanelHeight = panelContentContainer.top + bottomPanel.paddingBottom
                     defaultPanelHeight = (rootHeight * 0.5f).roundToInt()
-                        .coerceIn(minPanelHeight, maxPanelHeight)
+                        .coerceIn(minPanelHeight, rootHeight)
 
                     bottomSheetBehavior.peekHeight = defaultPanelHeight
                     bottomPanel.viewTreeObserver.removeOnGlobalLayoutListener(this)
                 }
             }
         })
-        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
-    }
 
-    
-
-    
-
-
-
-
-
-
-    private fun setupDragHandle() {
-        var startRawY = 0f
-        var startHeight = 0
-
-        dragHandle.setOnTouchListener { _, event ->
-            if (maxPanelHeight == 0) return@setOnTouchListener false 
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    if (showingComponents) closeComponentsContent()
-                    startRawY = event.rawY
-                    startHeight = currentPanelHeight()
-                    
-                    
-                    
-                    bottomSheetBehavior.setPeekHeight(startHeight, false)
-                    bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dragUpAmount = startRawY - event.rawY
-                    val newHeight = (startHeight + dragUpAmount.roundToInt())
-                        .coerceIn(0, maxPanelHeight)
-                    bottomSheetBehavior.setPeekHeight(newHeight, false)
-                    true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    val finalHeight = bottomSheetBehavior.peekHeight
-                    when {
-                        finalHeight <= hideThreshold ->
-                            bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
-                        finalHeight >= fullscreenThreshold ->
-                            bottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
-                        else -> {
-                            
-                            
-                            bottomSheetBehavior.setPeekHeight(
-                                finalHeight.coerceAtLeast(minPanelHeight),
-                                false,
-                            )
-                        }
+        // Keeps the back-press callback and the panel's own content in sync with its state,
+        // regardless of whether it was hidden by the back button, a swipe-down, or code.
+        bottomSheetBehavior.addBottomSheetCallback(object : BottomSheetBehavior.BottomSheetCallback() {
+            override fun onStateChanged(sheetView: View, newState: Int) {
+                when (newState) {
+                    BottomSheetBehavior.STATE_HIDDEN -> {
+                        panelBackPressedCallback.isEnabled = false
+                        resetPanelContent()
                     }
-                    true
+                    BottomSheetBehavior.STATE_DRAGGING, BottomSheetBehavior.STATE_SETTLING -> Unit
+                    else -> panelBackPressedCallback.isEnabled = true
                 }
-                else -> false
             }
+
+            override fun onSlide(sheetView: View, slideOffset: Float) = Unit
+        })
+
+        // Hidden by default: the panel only appears once the user triggers "Add to sketch".
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+    }
+
+    // Opens the shared panel - the only entry point is the "Add to sketch" action (long-press on
+    // empty canvas). Goes straight to the Components browser, matching what "Add to sketch" used
+    // to show as a standalone picker.
+    private fun openSketchPanel() {
+        setTabActive(tabComponents)
+        showComponentsContent()
+    }
+
+    // Closes the whole panel (as opposed to closeComponentsContent(), which just switches back to
+    // the default tools tab while keeping the panel open). Used by the back button/gesture and
+    // available to swipe-down-to-dismiss.
+    private fun closeSketchPanel() {
+        if (bottomSheetBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
+            bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
         }
     }
 
-    private fun currentPanelHeight(): Int = when (bottomSheetBehavior.state) {
-        BottomSheetBehavior.STATE_EXPANDED -> maxPanelHeight
-        BottomSheetBehavior.STATE_HIDDEN -> 0
-        else -> bottomSheetBehavior.peekHeight
-    }
-
-    
-
-    
-
-    private fun setupPagesStrip() {
-        var startRawY = 0f
-        var startHeightPx = 0
-
-        pagesDragHandle.setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    startRawY = event.rawY
-                    startHeightPx = scrollDepthGuide.layoutParams.height.coerceAtLeast(0)
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    
-                    val dragDownAmount = event.rawY - startRawY
-                    val newHeightPx = (startHeightPx + dragDownAmount.roundToInt()).coerceAtLeast(0)
-                    scrollDepthGuide.layoutParams = scrollDepthGuide.layoutParams.apply { height = newHeightPx }
-                    true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> true
-                else -> false
-            }
-        }
+    // Resets the panel back to its default tab/content so the next time it's opened it starts
+    // fresh, whichever way it was just closed.
+    private fun resetPanelContent() {
+        showingComponents = false
+        componentsContentContainer.visibility = View.GONE
+        defaultToolsContentScroll.visibility = View.VISIBLE
+        setTabActive(tabSelect)
     }
 
     
@@ -393,37 +323,6 @@ class SketchActivity : AppCompatActivity() {
         componentsContentContainer.visibility = View.GONE
         defaultToolsContentScroll.visibility = View.VISIBLE
         setTabActive(tabSelect)
-        if (defaultPanelHeight > 0) bottomSheetBehavior.setPeekHeight(defaultPanelHeight, false)
-        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
-    }
-
-    
-
-    private fun setupHiddenReveal() {
-        val revealHandle = findViewById<View>(R.id.bottomSwipeHandle)
-        val gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onSingleTapUp(e: MotionEvent): Boolean {
-                revealPanel()
-                return true
-            }
-
-            override fun onFling(
-                e1: MotionEvent?,
-                e2: MotionEvent,
-                velocityX: Float,
-                velocityY: Float,
-            ): Boolean {
-                val startY = e1?.y ?: return false
-                val swipedUp = (startY - e2.y) > 24 && velocityY < 0
-                if (swipedUp) revealPanel()
-                return swipedUp
-            }
-        })
-        revealHandle.setOnTouchListener { _, event -> gestureDetector.onTouchEvent(event) }
-    }
-
-    private fun revealPanel() {
-        if (showingComponents) closeComponentsContent()
         if (defaultPanelHeight > 0) bottomSheetBehavior.setPeekHeight(defaultPanelHeight, false)
         bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
