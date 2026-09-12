@@ -46,6 +46,10 @@ class SketchActivity : AppCompatActivity() {
     
     
     private lateinit var topBar: LinearLayout
+    // Visual-only affordance shown at the bottom of the main canvas screen, hinting that the
+    // panel can be revealed by swiping up. Intentionally left non-functional for now: no
+    // click/touch/drag listener is attached to it.
+    private lateinit var dragHandle: View
     private val topBarHideHandler = Handler(Looper.getMainLooper())
     private val hideTopBarRunnable = Runnable { hideTopBar() }
 
@@ -100,6 +104,7 @@ class SketchActivity : AppCompatActivity() {
 
         canvas = findViewById(R.id.sketchCanvas)
         topBar = findViewById(R.id.topBar)
+        dragHandle = findViewById(R.id.dragHandle)
 
         tabSelect = findViewById(R.id.tabSelect)
         tabShapes = findViewById(R.id.tabShapes)

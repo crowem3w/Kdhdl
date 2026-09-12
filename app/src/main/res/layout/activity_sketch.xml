@@ -93,6 +93,17 @@
                 android:elevation="3dp" />
         </LinearLayout>
 
+        <!-- Persistent "scroll up" hint at the bottom of the main canvas screen. Purely a visual
+             affordance for now (see dragHandle in SketchActivity) - it does not respond to touch
+             or drive the bottom sheet; it just signals that content can be revealed by swiping up. -->
+        <View
+            android:id="@+id/dragHandle"
+            android:layout_width="36dp"
+            android:layout_height="4dp"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="20dp"
+            android:background="@drawable/bg_drag_handle" />
+
     </FrameLayout>
 
     <!-- Shared bottom panel: Main tools tab bar stays pinned at the top of the panel; the
