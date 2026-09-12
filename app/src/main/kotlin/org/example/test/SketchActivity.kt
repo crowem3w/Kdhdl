@@ -7,7 +7,6 @@ import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewConfiguration
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -48,11 +47,9 @@ class SketchActivity : AppCompatActivity() {
     
     
     private lateinit var topBar: LinearLayout
-    // Hint shown at the bottom of the main canvas screen, signaling that the (currently hidden)
-    // dark bottom panel can be revealed by scrolling/swiping up. dragHandleZone is the larger
-    // touch target around it; see setupDragHandleReveal().
+    // Purely decorative hint at the bottom of the main canvas screen - reserved by the user for a
+    // different purpose, so it's left completely non-functional (no listeners attached to it).
     private lateinit var dragHandle: View
-    private lateinit var dragHandleZone: FrameLayout
     private val topBarHideHandler = Handler(Looper.getMainLooper())
     private val hideTopBarRunnable = Runnable { hideTopBar() }
 
@@ -99,6 +96,7 @@ class SketchActivity : AppCompatActivity() {
     companion object {
         private const val TOP_BAR_AUTO_HIDE_DELAY_MS = 5_000L
         private const val TOP_BAR_FADE_MS = 150L
+        private const val SCROLL_REVEAL_THRESHOLD_DP = 64f
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -108,7 +106,6 @@ class SketchActivity : AppCompatActivity() {
         canvas = findViewById(R.id.sketchCanvas)
         topBar = findViewById(R.id.topBar)
         dragHandle = findViewById(R.id.dragHandle)
-        dragHandleZone = findViewById(R.id.dragHandleZone)
 
         tabSelect = findViewById(R.id.tabSelect)
         tabShapes = findViewById(R.id.tabShapes)
@@ -155,7 +152,6 @@ class SketchActivity : AppCompatActivity() {
 
         setupTopBar()
         setupBottomPanel()
-        setupDragHandleReveal()
         setupTabs()
         setupQuickActions()
         setupAnimationRow()
@@ -293,37 +289,37 @@ class SketchActivity : AppCompatActivity() {
         showComponentsContent()
     }
 
-    // Lets the user scroll/swipe up from the drag handle at the bottom of the main screen to
-    // reveal the dark bottom panel (peek height, default tools tab) - a second, gesture-driven
-    // entry point alongside the long-press "Add to sketch" one. While the panel is hidden it sits
-    // fully off-screen and can't be grabbed directly, so this listens on the always-visible
-    // dragHandleZone instead and hands off to the panel's own native drag once it's on-screen.
-    private fun setupDragHandleReveal() {
-        var startY = 0f
-        var handled = false
-        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+    // Lets the user scroll down (swipe up) anywhere on the main screen to reveal the dark bottom
+    // panel (peek height, default tools tab) - independent of the drag handle graphic, which is
+    // reserved for something else. Implemented at the screen/dispatch level (rather than on a
+    // single view) so it works as a general "scroll down" gesture on the main screen; it only
+    // observes touches and never consumes them, so normal canvas interactions (drawing, dragging
+    // parts, long-press) are unaffected.
+    private var scrollGestureStartX = 0f
+    private var scrollGestureStartY = 0f
+    private var scrollGestureTriggered = false
 
-        dragHandleZone.setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    startY = event.rawY
-                    handled = false
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    if (!handled && bottomSheetBehavior.state == BottomSheetBehavior.STATE_HIDDEN) {
-                        val scrolledUp = startY - event.rawY
-                        if (scrolledUp > touchSlop) {
-                            handled = true
-                            revealBottomPanel()
-                        }
-                    }
-                    true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> true
-                else -> false
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                scrollGestureStartX = ev.rawX
+                scrollGestureStartY = ev.rawY
+                scrollGestureTriggered = false
             }
+            MotionEvent.ACTION_MOVE -> {
+                if (!scrollGestureTriggered && bottomSheetBehavior.state == BottomSheetBehavior.STATE_HIDDEN) {
+                    val movedUp = scrollGestureStartY - ev.rawY
+                    val movedSideways = kotlin.math.abs(ev.rawX - scrollGestureStartX)
+                    val thresholdPx = SCROLL_REVEAL_THRESHOLD_DP * resources.displayMetrics.density
+                    if (movedUp > thresholdPx && movedUp > movedSideways) {
+                        scrollGestureTriggered = true
+                        revealBottomPanel()
+                    }
+                }
+            }
+            else -> Unit
         }
+        return super.dispatchTouchEvent(ev)
     }
 
     // Brings the dark bottom panel up from fully hidden to its peek height, showing the default

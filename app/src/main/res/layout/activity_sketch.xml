@@ -93,25 +93,17 @@
                 android:elevation="3dp" />
         </LinearLayout>
 
-        <!-- Persistent "scroll up" hint at the bottom of the main canvas screen. Wrapped in a
-             taller touch zone (see dragHandleZone in SketchActivity) so a swipe-up anywhere near
-             the handle - not just on the 4dp sliver itself - reveals the dark bottom panel. -->
-        <FrameLayout
-            android:id="@+id/dragHandleZone"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:layout_gravity="bottom"
-            android:clickable="true"
-            android:focusable="true">
-
-            <View
-                android:id="@+id/dragHandle"
-                android:layout_width="36dp"
-                android:layout_height="4dp"
-                android:layout_gravity="bottom|center_horizontal"
-                android:layout_marginBottom="20dp"
-                android:background="@drawable/bg_drag_handle" />
-        </FrameLayout>
+        <!-- Persistent visual hint at the bottom of the main canvas screen. Purely decorative /
+             non-functional - reserved for a different purpose (per user), so no touch handling
+             is attached to it. The actual reveal gesture lives elsewhere (see
+             setupScrollDownReveal() in SketchActivity). -->
+        <View
+            android:id="@+id/dragHandle"
+            android:layout_width="36dp"
+            android:layout_height="4dp"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="20dp"
+            android:background="@drawable/bg_drag_handle" />
 
     </FrameLayout>
 
