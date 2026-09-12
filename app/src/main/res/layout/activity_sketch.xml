@@ -93,6 +93,54 @@
                 android:elevation="3dp" />
         </LinearLayout>
 
+        <!-- Marks the bottom edge of Page 1 as the end of the app screen: 0px border, white
+             fill, 12dp radius on the bottom two corners only, with an elevation-cast shadow
+             (see bg_page_end_cap.xml). Sits above the pages strip below it. -->
+        <View
+            android:id="@+id/pageEndCap"
+            android:layout_width="match_parent"
+            android:layout_height="12dp"
+            android:layout_gravity="bottom"
+            android:background="@drawable/bg_page_end_cap"
+            android:elevation="6dp" />
+
+        <!-- Pages strip: a drag handle plus a vertical stack of page thumbnails (Page 2 onward,
+             black by default). Dragging the handle down reveals more pages, up to 10 total;
+             dragging up removes them again, down to a minimum of 2 pages. See setupPagesStrip()
+             and the pagesDragHandle touch listener in SketchActivity. -->
+        <LinearLayout
+            android:id="@+id/pagesStrip"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:orientation="vertical"
+            android:clipChildren="false"
+            android:clipToPadding="false">
+
+            <FrameLayout
+                android:id="@+id/pagesDragHandle"
+                android:layout_width="match_parent"
+                android:layout_height="28dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="Drag to add or remove pages">
+
+                <View
+                    android:layout_width="36dp"
+                    android:layout_height="4dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/bg_drag_handle" />
+            </FrameLayout>
+
+            <LinearLayout
+                android:id="@+id/pagesListContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="16dp"
+                android:clipChildren="false" />
+        </LinearLayout>
+
     </FrameLayout>
 
     <!-- Thin strip pinned to the bottom edge, hidden behind the panel whenever the panel is

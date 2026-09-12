@@ -15,6 +15,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.widget.NestedScrollView
 import com.google.android.material.bottomsheet.BottomSheetBehavior
@@ -76,6 +77,17 @@ class SketchActivity : AppCompatActivity() {
 
     
     
+    private lateinit var pagesDragHandle: FrameLayout
+    private lateinit var pagesListContainer: LinearLayout
+    // Number of blank scroll-depth segments below Page 1 (the main editable canvas). Each
+    // segment is capped at 1/3 of the screen height, so its own height is set once Page 1's
+    // real height is known (see setupPagesStrip). These segments carry no content of their own
+    // — they're not extra app screens, just a way to preview/set how far Page 1 should scroll.
+    private var extraPageCount = 1
+    private var pageSegmentHeightPx = 0
+
+    
+    
     
     
     
@@ -92,6 +104,12 @@ class SketchActivity : AppCompatActivity() {
     companion object {
         private const val TOP_BAR_AUTO_HIDE_DELAY_MS = 5_000L
         private const val TOP_BAR_FADE_MS = 150L
+
+        
+        
+        private const val MIN_EXTRA_PAGES = 1
+        private const val MAX_EXTRA_PAGES = 9
+        private const val PAGE_SEGMENT_MARGIN_TOP_DP = 4f
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -123,6 +141,9 @@ class SketchActivity : AppCompatActivity() {
         dragHandle = findViewById(R.id.dragHandle)
         bottomSheetBehavior = BottomSheetBehavior.from(bottomPanel)
 
+        pagesDragHandle = findViewById(R.id.pagesDragHandle)
+        pagesListContainer = findViewById(R.id.pagesListContainer)
+
         canvas.listener = object : SketchCanvasView.Listener {
             override fun onLongPressEmptySpace(x: Float, y: Float) = openPartPicker(
                 title = "Add to sketch",
@@ -152,6 +173,7 @@ class SketchActivity : AppCompatActivity() {
         setupTopBar()
         setupBottomPanel()
         setupDragHandle()
+        setupPagesStrip()
         setupTabs()
         setupQuickActions()
         setupAnimationRow()
@@ -329,6 +351,72 @@ class SketchActivity : AppCompatActivity() {
         BottomSheetBehavior.STATE_EXPANDED -> maxPanelHeight
         BottomSheetBehavior.STATE_HIDDEN -> 0
         else -> bottomSheetBehavior.peekHeight
+    }
+
+    
+
+    
+
+    private fun setupPagesStrip() {
+        
+        canvas.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                if (canvas.height > 0) {
+                    pageSegmentHeightPx = canvas.height / 3
+                    rebuildPagesList()
+                    canvas.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                }
+            }
+        })
+
+        var startRawY = 0f
+        var startExtraPageCount = extraPageCount
+
+        pagesDragHandle.setOnTouchListener { _, event ->
+            if (pageSegmentHeightPx <= 0) return@setOnTouchListener false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startRawY = event.rawY
+                    startExtraPageCount = extraPageCount
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    
+                    val dragDownAmount = event.rawY - startRawY
+                    val segmentsDragged = (dragDownAmount / pageSegmentHeightPx).roundToInt()
+                    val newExtraPageCount = (startExtraPageCount + segmentsDragged)
+                        .coerceIn(MIN_EXTRA_PAGES, MAX_EXTRA_PAGES)
+                    if (newExtraPageCount != extraPageCount) {
+                        extraPageCount = newExtraPageCount
+                        rebuildPagesList()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> true
+                else -> false
+            }
+        }
+    }
+
+    
+    private fun rebuildPagesList() {
+        pagesListContainer.removeAllViews()
+        if (pageSegmentHeightPx <= 0) return
+        repeat(extraPageCount) {
+            pagesListContainer.addView(createBlankScrollDepthSegment())
+        }
+    }
+
+    
+    private fun createBlankScrollDepthSegment(): View {
+        val density = resources.displayMetrics.density
+        return View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                pageSegmentHeightPx,
+            ).apply { topMargin = (PAGE_SEGMENT_MARGIN_TOP_DP * density).roundToInt() }
+            background = ContextCompat.getDrawable(this@SketchActivity, R.drawable.bg_page_thumbnail)
+        }
     }
 
     
