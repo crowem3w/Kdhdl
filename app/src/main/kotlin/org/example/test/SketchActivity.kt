@@ -5,7 +5,9 @@ import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -46,10 +48,11 @@ class SketchActivity : AppCompatActivity() {
     
     
     private lateinit var topBar: LinearLayout
-    // Visual-only affordance shown at the bottom of the main canvas screen, hinting that the
-    // panel can be revealed by swiping up. Intentionally left non-functional for now: no
-    // click/touch/drag listener is attached to it.
+    // Hint shown at the bottom of the main canvas screen, signaling that the (currently hidden)
+    // dark bottom panel can be revealed by scrolling/swiping up. dragHandleZone is the larger
+    // touch target around it; see setupDragHandleReveal().
     private lateinit var dragHandle: View
+    private lateinit var dragHandleZone: FrameLayout
     private val topBarHideHandler = Handler(Looper.getMainLooper())
     private val hideTopBarRunnable = Runnable { hideTopBar() }
 
@@ -105,6 +108,7 @@ class SketchActivity : AppCompatActivity() {
         canvas = findViewById(R.id.sketchCanvas)
         topBar = findViewById(R.id.topBar)
         dragHandle = findViewById(R.id.dragHandle)
+        dragHandleZone = findViewById(R.id.dragHandleZone)
 
         tabSelect = findViewById(R.id.tabSelect)
         tabShapes = findViewById(R.id.tabShapes)
@@ -151,6 +155,7 @@ class SketchActivity : AppCompatActivity() {
 
         setupTopBar()
         setupBottomPanel()
+        setupDragHandleReveal()
         setupTabs()
         setupQuickActions()
         setupAnimationRow()
@@ -286,6 +291,48 @@ class SketchActivity : AppCompatActivity() {
     private fun openSketchPanel() {
         setTabActive(tabComponents)
         showComponentsContent()
+    }
+
+    // Lets the user scroll/swipe up from the drag handle at the bottom of the main screen to
+    // reveal the dark bottom panel (peek height, default tools tab) - a second, gesture-driven
+    // entry point alongside the long-press "Add to sketch" one. While the panel is hidden it sits
+    // fully off-screen and can't be grabbed directly, so this listens on the always-visible
+    // dragHandleZone instead and hands off to the panel's own native drag once it's on-screen.
+    private fun setupDragHandleReveal() {
+        var startY = 0f
+        var handled = false
+        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+
+        dragHandleZone.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startY = event.rawY
+                    handled = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!handled && bottomSheetBehavior.state == BottomSheetBehavior.STATE_HIDDEN) {
+                        val scrolledUp = startY - event.rawY
+                        if (scrolledUp > touchSlop) {
+                            handled = true
+                            revealBottomPanel()
+                        }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> true
+                else -> false
+            }
+        }
+    }
+
+    // Brings the dark bottom panel up from fully hidden to its peek height, showing the default
+    // tools tab (Select) rather than jumping straight to Components like the long-press entry
+    // point does.
+    private fun revealBottomPanel() {
+        resetPanelContent()
+        if (defaultPanelHeight > 0) bottomSheetBehavior.setPeekHeight(defaultPanelHeight, false)
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
 
     // Closes the whole panel (as opposed to closeComponentsContent(), which just switches back to
