@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.text.Layout
 import android.text.StaticLayout
@@ -46,7 +47,45 @@ class SketchCanvasView @JvmOverloads constructor(
 
     private val density = context.resources.displayMetrics.density
 
-    private val bgPaint = Paint().apply { color = Color.WHITE }
+    // --- Mobile UI "page" (the resizable white artboard) -------------------------------------
+    // The page represents the actual bottom-bounded content area of the mobile app/page being
+    // designed. Everything outside it (below its bottom edge) is pure black - an editor-only
+    // backdrop that exists purely for contrast/visibility and must never factor into the page's
+    // reported height (see pageHeight below, which callers should use instead of View#getHeight
+    // whenever they mean "the height of the app page", e.g. centering new parts or exporting).
+    var pageHeight: Float = 0f
+        private set
+
+    // Exposed so callers outside the view (e.g. the activity's own gesture handling) can avoid
+    // starting a competing gesture while the user is actively resizing the page.
+    val isDraggingPageHandle: Boolean get() = draggingPageHandle
+    private val minPageHeight = 160f * density
+    private val pagePaint = Paint().apply { color = Color.WHITE }
+    private val pagePath = Path()
+    private val pageCornerRadius = 12f * density
+    private val pageRadii = FloatArray(8)
+
+    // Bottom-edge drag handle: a small pill centered under the page's bottom edge, kept in
+    // screen-space (constant on-screen size regardless of zoom) while its Y position tracks the
+    // page's bottom edge through the same pan/zoom transform used for everything else.
+    private var draggingPageHandle = false
+    private var pageHandleHovered = false
+    private var pageDragStartScreenY = 0f
+    private var pageDragStartHeight = 0f
+    private val pageHandleWidth = 56f * density
+    private val pageHandleHeight = 5f * density
+    private val pageHandleTouchHalfWidth = 56f * density
+    private val pageHandleTouchHalfHeight = 24f * density
+    private val pageHandleColorIdle = Color.parseColor("#3A3B47")
+    private val pageHandleColorHover = Color.parseColor("#53556A")
+    private val pageHandleColorDrag = Color.parseColor("#6750A4")
+    private val pageHandlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = pageHandleColorIdle
+        setShadowLayer(6f * density, 0f, 2f * density, Color.parseColor("#40000000"))
+    }
+    private val pageHandleRect = RectF()
+    // -------------------------------------------------------------------------------------------
+
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -129,6 +168,7 @@ class SketchCanvasView @JvmOverloads constructor(
 
     private fun toContentX(screenX: Float) = zoomPivotX + (screenX - zoomPivotX) / scaleFactor
     private fun toContentY(screenY: Float) = zoomPivotY + (screenY - zoomPivotY) / scaleFactor
+    private fun toScreenY(contentY: Float) = zoomPivotY + (contentY - zoomPivotY) * scaleFactor
 
     private val scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
@@ -169,7 +209,16 @@ class SketchCanvasView @JvmOverloads constructor(
         }
     })
 
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        // Defaults the page to fill the whole view the first time it's laid out, so nothing
+        // appears cut off until the user deliberately drags the handle to shorten it.
+        if (pageHeight <= 0f) pageHeight = h.toFloat()
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (handlePageHandleTouch(event)) return true
+
         scaleGestureDetector.onTouchEvent(event)
         gestureDetector.onTouchEvent(event)
         val pinching = scaleGestureDetector.isInProgress || event.pointerCount > 1
@@ -223,7 +272,7 @@ class SketchCanvasView @JvmOverloads constructor(
                             val cx = toContentX(event.x)
                             val cy = toContentY(event.y)
                             p.x = (cx - dragOffsetX).coerceIn(0f, max(0f, width - p.w))
-                            p.y = (cy - dragOffsetY).coerceIn(0f, max(0f, height - p.h))
+                            p.y = (cy - dragOffsetY).coerceIn(0f, max(0f, pageHeight - p.h))
                             dragMoved = true
                             invalidate()
                             listener?.onSelectionChanged(p)
@@ -239,6 +288,77 @@ class SketchCanvasView @JvmOverloads constructor(
             }
         }
         return true
+    }
+
+    // Detects and drives dragging the bottom-edge page handle. Kept entirely separate from (and
+    // checked before) the normal touch pipeline above so it never competes with part
+    // selection/dragging/resizing or pinch-to-zoom for the same touch stream: once a drag on the
+    // handle starts, every event in that stream is consumed here and nothing else sees it.
+    private fun handlePageHandleTouch(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (isNearPageHandle(event.x, event.y)) {
+                    draggingPageHandle = true
+                    pageDragStartScreenY = event.y
+                    pageDragStartHeight = pageHeight
+                    invalidate()
+                    return true
+                }
+                return false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!draggingPageHandle) return false
+                val deltaScreen = event.y - pageDragStartScreenY
+                val deltaContent = deltaScreen / scaleFactor
+                pageHeight = (pageDragStartHeight + deltaContent).coerceAtLeast(minPageHeight)
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // A second finger touching down mid-drag means pinch-to-zoom is taking over;
+                // bail out of the page-resize drag rather than fight it for the gesture.
+                if (draggingPageHandle) {
+                    draggingPageHandle = false
+                    invalidate()
+                }
+                return false
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (!draggingPageHandle) return false
+                draggingPageHandle = false
+                invalidate()
+                return true
+            }
+            else -> return draggingPageHandle
+        }
+    }
+
+    // Mouse-only hover feedback (touch input never generates hover events) so the handle visibly
+    // reacts before the user even presses down on it.
+    override fun onHoverEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE -> {
+                val hovering = isNearPageHandle(event.x, event.y)
+                if (hovering != pageHandleHovered) {
+                    pageHandleHovered = hovering
+                    invalidate()
+                }
+            }
+            MotionEvent.ACTION_HOVER_EXIT -> {
+                if (pageHandleHovered) {
+                    pageHandleHovered = false
+                    invalidate()
+                }
+            }
+        }
+        return super.onHoverEvent(event)
+    }
+
+    private fun isNearPageHandle(screenX: Float, screenY: Float): Boolean {
+        val centerX = width / 2f
+        val centerY = toScreenY(pageHeight)
+        return abs(screenX - centerX) <= pageHandleTouchHalfWidth &&
+            abs(screenY - centerY) <= pageHandleTouchHalfHeight
     }
 
     // Fixed point (in content coordinates) that stays put while a given handle is dragged, i.e.
@@ -387,9 +507,13 @@ class SketchCanvasView @JvmOverloads constructor(
     }
 
     override fun onDraw(canvas: Canvas) {
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
+        // Pure black backdrop, unaffected by pan/zoom, so it always fully covers whatever the
+        // (possibly shorter, possibly zoomed) white page doesn't. This area is editor-only chrome
+        // - never part of the app page - and is what makes the page's true bottom edge legible.
+        canvas.drawColor(Color.BLACK)
         val saveCount = canvas.save()
         canvas.scale(scaleFactor, scaleFactor, zoomPivotX, zoomPivotY)
+        drawPage(canvas)
         for (part in parts) {
             // Draw the shadow frame behind the part first so the frame never covers its content.
             if (part === selected) drawSelectionFrame(canvas, part)
@@ -398,6 +522,38 @@ class SketchCanvasView @JvmOverloads constructor(
         // Handles are drawn last, on top of every part, so they stay grabbable.
         selected?.let { drawSelectionHandles(canvas, it) }
         canvas.restoreToCount(saveCount)
+
+        // Drawn after the pan/zoom transform is restored so the handle keeps a constant on-screen
+        // size (only its Y position tracks the zoomed page bottom edge), matching how a resize
+        // affordance should feel regardless of zoom level.
+        drawPageHandle(canvas)
+    }
+
+    // The white artboard representing the actual mobile app page, rounded only at the bottom two
+    // corners (12dp) to read as the bottom edge of a device screen.
+    private fun drawPage(canvas: Canvas) {
+        pageRadii[0] = 0f; pageRadii[1] = 0f // top-left
+        pageRadii[2] = 0f; pageRadii[3] = 0f // top-right
+        pageRadii[4] = pageCornerRadius; pageRadii[5] = pageCornerRadius // bottom-right
+        pageRadii[6] = pageCornerRadius; pageRadii[7] = pageCornerRadius // bottom-left
+        pagePath.reset()
+        pagePath.addRoundRect(0f, 0f, width.toFloat(), pageHeight, pageRadii, Path.Direction.CW)
+        canvas.drawPath(pagePath, pagePaint)
+    }
+
+    private fun drawPageHandle(canvas: Canvas) {
+        val centerX = width / 2f
+        val centerY = toScreenY(pageHeight)
+        pageHandlePaint.color = when {
+            draggingPageHandle -> pageHandleColorDrag
+            pageHandleHovered -> pageHandleColorHover
+            else -> pageHandleColorIdle
+        }
+        val widthScale = if (draggingPageHandle) 1.15f else if (pageHandleHovered) 1.08f else 1f
+        val halfW = (pageHandleWidth / 2f) * widthScale
+        val halfH = pageHandleHeight / 2f
+        pageHandleRect.set(centerX - halfW, centerY - halfH, centerX + halfW, centerY + halfH)
+        canvas.drawRoundRect(pageHandleRect, halfH, halfH, pageHandlePaint)
     }
 
     private fun drawPart(canvas: Canvas, part: SketchPart) {

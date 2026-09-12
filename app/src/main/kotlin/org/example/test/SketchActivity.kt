@@ -47,9 +47,6 @@ class SketchActivity : AppCompatActivity() {
     
     
     private lateinit var topBar: LinearLayout
-    // Purely decorative hint at the bottom of the main canvas screen - reserved by the user for a
-    // different purpose, so it's left completely non-functional (no listeners attached to it).
-    private lateinit var dragHandle: View
     private val topBarHideHandler = Handler(Looper.getMainLooper())
     private val hideTopBarRunnable = Runnable { hideTopBar() }
 
@@ -105,7 +102,6 @@ class SketchActivity : AppCompatActivity() {
 
         canvas = findViewById(R.id.sketchCanvas)
         topBar = findViewById(R.id.topBar)
-        dragHandle = findViewById(R.id.dragHandle)
 
         tabSelect = findViewById(R.id.tabSelect)
         tabShapes = findViewById(R.id.tabShapes)
@@ -290,16 +286,21 @@ class SketchActivity : AppCompatActivity() {
     }
 
     // Lets the user scroll down (swipe up) anywhere on the main screen to reveal the dark bottom
-    // panel (peek height, default tools tab) - independent of the drag handle graphic, which is
-    // reserved for something else. Implemented at the screen/dispatch level (rather than on a
-    // single view) so it works as a general "scroll down" gesture on the main screen; it only
-    // observes touches and never consumes them, so normal canvas interactions (drawing, dragging
-    // parts, long-press) are unaffected.
+    // panel (peek height, default tools tab). Implemented at the screen/dispatch level (rather
+    // than on a single view) so it works as a general "scroll down" gesture on the main screen; it
+    // only observes touches and never consumes them, so normal canvas interactions (drawing,
+    // dragging parts, long-press, and now dragging the page-height handle) are unaffected - the
+    // isDraggingPageHandle check below additionally keeps it from firing while the user is
+    // resizing the page, since that's also an upward drag.
     private var scrollGestureStartX = 0f
     private var scrollGestureStartY = 0f
     private var scrollGestureTriggered = false
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // Let the canvas process the event first so we can tell whether it just grabbed the page
+        // resize handle - if so, this stream is its drag, not a "scroll down to reveal panel"
+        // gesture, so we skip our own tracking below entirely.
+        val handled = super.dispatchTouchEvent(ev)
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 scrollGestureStartX = ev.rawX
@@ -307,7 +308,10 @@ class SketchActivity : AppCompatActivity() {
                 scrollGestureTriggered = false
             }
             MotionEvent.ACTION_MOVE -> {
-                if (!scrollGestureTriggered && bottomSheetBehavior.state == BottomSheetBehavior.STATE_HIDDEN) {
+                if (!scrollGestureTriggered &&
+                    !canvas.isDraggingPageHandle &&
+                    bottomSheetBehavior.state == BottomSheetBehavior.STATE_HIDDEN
+                ) {
                     val movedUp = scrollGestureStartY - ev.rawY
                     val movedSideways = kotlin.math.abs(ev.rawX - scrollGestureStartX)
                     val thresholdPx = SCROLL_REVEAL_THRESHOLD_DP * resources.displayMetrics.density
@@ -319,7 +323,7 @@ class SketchActivity : AppCompatActivity() {
             }
             else -> Unit
         }
-        return super.dispatchTouchEvent(ev)
+        return handled
     }
 
     // Brings the dark bottom panel up from fully hidden to its peek height, showing the default
@@ -411,7 +415,7 @@ class SketchActivity : AppCompatActivity() {
             context = this,
             onConfirm = { text ->
                 if (text.isNotBlank()) {
-                    addPart(PartKind.TEXT, canvas.width / 2f, canvas.height / 2f, label = text)
+                    addPart(PartKind.TEXT, canvas.width / 2f, canvas.pageHeight / 2f, label = text)
                 }
                 restorePanelAfterTextModal()
             },
@@ -432,7 +436,7 @@ class SketchActivity : AppCompatActivity() {
             title = title,
             kinds = kinds,
             x = canvas.width / 2f,
-            y = canvas.height / 2f,
+            y = canvas.pageHeight / 2f,
             onDismiss = { setTabActive(tabSelect) },
         )
     }
@@ -535,8 +539,8 @@ class SketchActivity : AppCompatActivity() {
         val px = if (fullWidth) 0f else (x - w / 2f).coerceIn(0f, (canvas.width - w).coerceAtLeast(0f))
         val py = when (kind) {
             PartKind.TOP_APP_BAR -> 0f
-            PartKind.NAV_BAR -> (canvas.height - h).coerceAtLeast(0f)
-            else -> (y - h / 2f).coerceIn(0f, (canvas.height - h).coerceAtLeast(0f))
+            PartKind.NAV_BAR -> (canvas.pageHeight - h).coerceAtLeast(0f)
+            else -> (y - h / 2f).coerceIn(0f, (canvas.pageHeight - h).coerceAtLeast(0f))
         }
         val part = SketchPart(nextId++, kind, px, py, w, h, label, fontSize = 13f * density)
         canvas.addPart(part)
@@ -547,7 +551,7 @@ class SketchActivity : AppCompatActivity() {
 
     private fun generatePrompt() {
         val density = resources.displayMetrics.density
-        val prompt = PromptGenerator.build(canvas.parts, canvas.width, canvas.height, density)
+        val prompt = PromptGenerator.build(canvas.parts, canvas.width, canvas.pageHeight.roundToInt(), density)
         showPromptDialog(this, prompt)
     }
 
@@ -558,7 +562,7 @@ class SketchActivity : AppCompatActivity() {
             context = this,
             parts = canvas.parts,
             canvasWidthPx = canvas.width,
-            canvasHeightPx = canvas.height,
+            canvasHeightPx = canvas.pageHeight.roundToInt(),
             density = density,
         )
         val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", zip)

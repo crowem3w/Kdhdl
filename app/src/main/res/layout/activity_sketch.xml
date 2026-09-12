@@ -93,17 +93,11 @@
                 android:elevation="3dp" />
         </LinearLayout>
 
-        <!-- Persistent visual hint at the bottom of the main canvas screen. Purely decorative /
-             non-functional - reserved for a different purpose (per user), so no touch handling
-             is attached to it. The actual reveal gesture lives elsewhere (see
-             setupScrollDownReveal() in SketchActivity). -->
-        <View
-            android:id="@+id/dragHandle"
-            android:layout_width="36dp"
-            android:layout_height="4dp"
-            android:layout_gravity="bottom|center_horizontal"
-            android:layout_marginBottom="20dp"
-            android:background="@drawable/bg_drag_handle" />
+        <!-- The bottom-edge "page height" drag handle previously lived here as a static View
+             pinned to the screen bottom. It's now drawn directly inside SketchCanvasView instead
+             (see drawPageHandle()/handlePageHandleTouch() there), since it has to track the
+             page's actual bottom edge through pan/zoom - something a separate overlay View can't
+             do cleanly. -->
 
     </FrameLayout>
 
