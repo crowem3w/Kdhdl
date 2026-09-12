@@ -366,7 +366,7 @@ class SketchActivity : AppCompatActivity() {
         setTabActive(tabSelect)
 
         tabShapes.setOnClickListener {
-            openPartPickerFromTab(tabShapes, "Shapes", listOf(PartKind.CARD, PartKind.IMAGE, PartKind.CHIP))
+            openPartPickerFromTab(tabShapes, "Pages", listOf(PartKind.CARD, PartKind.IMAGE, PartKind.CHIP))
         }
         tabText.setOnClickListener {
             openTextInputModal()

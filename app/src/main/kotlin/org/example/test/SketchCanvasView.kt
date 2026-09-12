@@ -14,6 +14,8 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -109,10 +111,48 @@ class SketchCanvasView @JvmOverloads constructor(
     // the very bottom edge of the viewport.
     private val panHandleBottomMargin = 32f * density
 
+    // The device's current bottom system-bar/gesture-nav inset in raw pixels, kept live via the
+    // window insets listener below. On gesture-nav devices this can be small; on 3-button-nav
+    // devices it's the full nav bar height. Either way, maxPanOffsetY() below must never let the
+    // handle pan into this zone, since the OS may intercept touches there for its own navigation
+    // gestures before this view ever sees them.
+    private var systemBottomInset = 0f
+    // Small fixed cushion kept *on top of* the system inset, so the handle stops just short of
+    // the inset boundary with a bit of breathing room to grab and drag it, rather than sitting
+    // pixel-perfect flush against it.
+    private val panHandleEdgeBuffer = 8f * density
+
+    init {
+        ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            val newInset = bars.bottom.toFloat()
+            if (newInset != systemBottomInset) {
+                systemBottomInset = newInset
+                clampPan()
+                invalidate()
+            }
+            insets
+        }
+        requestApplyInsetsWhenAttached()
+    }
+
+    private fun requestApplyInsetsWhenAttached() {
+        addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {
+                ViewCompat.requestApplyInsets(v)
+            }
+            override fun onViewDetachedFromWindow(v: View) {}
+        })
+    }
+
     private fun maxPanOffsetY(): Float {
         val handleBottomContentY = pageHeight + panHandleBottomMargin
         val naturalScreenY = zoomPivotY + (handleBottomContentY - zoomPivotY) * scaleFactor
-        return (naturalScreenY - height).coerceAtLeast(0f)
+        // Reserve a safe zone at the true bottom of the view (system nav bar / gesture inset,
+        // plus a small buffer) so panning can never drag the handle into or flush against it.
+        val bottomSafeZone = systemBottomInset + panHandleEdgeBuffer
+        val effectiveHeight = (height - bottomSafeZone).coerceAtLeast(0f)
+        return (naturalScreenY - effectiveHeight).coerceAtLeast(0f)
     }
 
     private fun clampPan() {

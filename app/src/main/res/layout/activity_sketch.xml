@@ -148,8 +148,8 @@
                 style="@style/SketchTabColumn">
 
                 <LinearLayout style="@style/SketchTabPill">
-                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_shapes" app:tint="#9A9AA5" />
-                    <TextView style="@style/SketchTabLabel" android:text="Shapes" android:textColor="#9A9AA5" />
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_pages" app:tint="#9A9AA5" />
+                    <TextView style="@style/SketchTabLabel" android:text="Pages" android:textColor="#9A9AA5" />
                 </LinearLayout>
             </LinearLayout>
 
