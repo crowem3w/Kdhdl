@@ -95,7 +95,7 @@
 
         <!-- Marks the bottom edge of Page 1 as the end of the app screen: 0px border, white
              fill, 12dp radius on the bottom two corners only, with an elevation-cast shadow
-             (see bg_page_end_cap.xml). Sits above the pages strip below it. -->
+             (see bg_page_end_cap.xml). Sits directly above the scroll-depth guide below it. -->
         <View
             android:id="@+id/pageEndCap"
             android:layout_width="match_parent"
@@ -104,10 +104,11 @@
             android:background="@drawable/bg_page_end_cap"
             android:elevation="6dp" />
 
-        <!-- Pages strip: a drag handle plus a vertical stack of page thumbnails (Page 2 onward,
-             black by default). Dragging the handle down reveals more pages, up to 10 total;
-             dragging up removes them again, down to a minimum of 2 pages. See setupPagesStrip()
-             and the pagesDragHandle touch listener in SketchActivity. -->
+        <!-- Scroll-depth guide: a drag handle plus a single blank black region beneath Page 1.
+             It carries no real content and isn't a separate app screen — it's just a visual
+             marker for how much extra vertical scroll depth the one page should have. Dragging
+             the handle grows/shrinks it continuously (1:1 with the finger), with no fixed cap.
+             See setupPagesStrip() in SketchActivity. -->
         <LinearLayout
             android:id="@+id/pagesStrip"
             android:layout_width="match_parent"
@@ -123,7 +124,7 @@
                 android:layout_height="28dp"
                 android:clickable="true"
                 android:focusable="true"
-                android:contentDescription="Drag to add or remove pages">
+                android:contentDescription="Drag to adjust scroll depth">
 
                 <View
                     android:layout_width="36dp"
@@ -132,13 +133,11 @@
                     android:background="@drawable/bg_drag_handle" />
             </FrameLayout>
 
-            <LinearLayout
-                android:id="@+id/pagesListContainer"
+            <View
+                android:id="@+id/scrollDepthGuide"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingHorizontal="16dp"
-                android:clipChildren="false" />
+                android:layout_height="0dp"
+                android:background="@drawable/bg_page_thumbnail" />
         </LinearLayout>
 
     </FrameLayout>
