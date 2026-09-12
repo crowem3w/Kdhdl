@@ -71,6 +71,26 @@
         <item name="android:textSize">10.5sp</item>
     </style>
 
+    <!-- Temporary multi-selection actions panel (Group/Duplicate/Move/Lock/Hide/Delete) -->
+    <style name="SketchSelectionActionLabel">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:paddingHorizontal">28dp</item>
+        <item name="android:paddingVertical">14dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textColor">#FFFFFF</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:foreground">?attr/selectableItemBackground</item>
+    </style>
+
+    <style name="SketchSelectionActionDivider">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">1dp</item>
+        <item name="android:background">#2A2B38</item>
+    </style>
+
     <!-- Properties card -->
     <style name="SketchPropertyLabel">
         <item name="android:layout_width">wrap_content</item>

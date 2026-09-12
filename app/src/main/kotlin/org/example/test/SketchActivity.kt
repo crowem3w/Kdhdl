@@ -47,6 +47,19 @@ class SketchActivity : AppCompatActivity() {
     private lateinit var tvSizeH: TextView
     private lateinit var tvRotation: TextView
 
+    // Temporary panel shown after a long-press + drag marquee selection is released on the
+    // canvas (see SketchCanvasView.Listener#onMultiSelectionFinalized). Entirely separate from
+    // bottomPanel: it's a small floating strip of vertically-stacked action labels rather than a
+    // draggable sheet, and it auto-dismisses once an action is picked (or the selection is
+    // otherwise cleared).
+    private lateinit var selectionActionsPanel: LinearLayout
+    private lateinit var actionGroupToggle: TextView
+    private lateinit var actionDuplicateSel: TextView
+    private lateinit var actionMoveSel: TextView
+    private lateinit var actionLockToggleSel: TextView
+    private lateinit var actionHideToggleSel: TextView
+    private lateinit var actionDeleteSel: TextView
+
     private lateinit var bottomPanel: LinearLayout
     private lateinit var bottomSheetBehavior: BottomSheetBehavior<LinearLayout>
     private lateinit var mainToolsRow: LinearLayout
@@ -77,7 +90,11 @@ class SketchActivity : AppCompatActivity() {
 
     private val panelBackPressedCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
-            closeSketchPanel()
+            if (selectionActionsPanel.visibility == View.VISIBLE) {
+                dismissSelectionActionsPanel(clearSelection = true)
+            } else {
+                closeSketchPanel()
+            }
         }
     }
 
@@ -109,6 +126,14 @@ class SketchActivity : AppCompatActivity() {
         tvSizeH = findViewById(R.id.tvSizeH)
         tvRotation = findViewById(R.id.tvRotation)
 
+        selectionActionsPanel = findViewById(R.id.selectionActionsPanel)
+        actionGroupToggle = findViewById(R.id.actionGroupToggle)
+        actionDuplicateSel = findViewById(R.id.actionDuplicateSel)
+        actionMoveSel = findViewById(R.id.actionMoveSel)
+        actionLockToggleSel = findViewById(R.id.actionLockToggleSel)
+        actionHideToggleSel = findViewById(R.id.actionHideToggleSel)
+        actionDeleteSel = findViewById(R.id.actionDeleteSel)
+
         bottomPanel = findViewById(R.id.bottomPanel)
         mainToolsRow = findViewById(R.id.mainToolsRow)
         panelContentContainer = findViewById(R.id.panelContentContainer)
@@ -137,6 +162,10 @@ class SketchActivity : AppCompatActivity() {
             override fun onSelectionChanged(part: SketchPart?) = updateProperties(part)
 
             override fun onPartsChanged() = Unit
+
+            override fun onMultiSelectionFinalized(parts: List<SketchPart>) = showSelectionActionsPanel()
+
+            override fun onMultiSelectionCleared() = hideSelectionActionsPanel()
         }
 
         setupTopBar()
@@ -144,6 +173,7 @@ class SketchActivity : AppCompatActivity() {
         setupTabs()
         setupQuickActions()
         setupAnimationRow()
+        setupSelectionActionsPanel()
 
         updateProperties(null)
 
@@ -343,6 +373,7 @@ class SketchActivity : AppCompatActivity() {
                 if (!scrollGestureTriggered &&
                     !canvas.isDraggingPageHandle &&
                     !canvas.isPanningCanvas &&
+                    !canvas.isMarqueeActive &&
                     bottomSheetBehavior.state == BottomSheetBehavior.STATE_HIDDEN
                 ) {
                     val movedUp = scrollGestureStartY - ev.rawY
@@ -521,6 +552,84 @@ class SketchActivity : AppCompatActivity() {
         }
     }
 
+    // --- Temporary multi-selection actions panel ----------------------------------------------
+    // Opened by SketchCanvasView after a long-press + drag marquee release (onMultiSelectionFinalized)
+    // and dismissed either by picking an action below or by the selection being cleared some
+    // other way (tapping elsewhere on the canvas, deleting the selection, etc).
+
+    private fun setupSelectionActionsPanel() {
+        actionGroupToggle.setOnClickListener {
+            canvas.toggleGroupSelection()
+            dismissSelectionActionsPanel(clearSelection = true)
+        }
+        actionDuplicateSel.setOnClickListener {
+            canvas.duplicateSelection()
+            dismissSelectionActionsPanel(clearSelection = true)
+        }
+        actionMoveSel.setOnClickListener {
+            // Just dismiss the panel - the multi-selection itself stays active and highlighted,
+            // so the user can immediately drag any of the selected parts to move the whole group.
+            dismissSelectionActionsPanel(clearSelection = false)
+        }
+        actionLockToggleSel.setOnClickListener {
+            canvas.setSelectionLocked(!canvas.isSelectionLocked())
+            dismissSelectionActionsPanel(clearSelection = true)
+        }
+        actionHideToggleSel.setOnClickListener {
+            canvas.setSelectionHidden(!canvas.isSelectionHidden())
+            dismissSelectionActionsPanel(clearSelection = true)
+        }
+        actionDeleteSel.setOnClickListener {
+            // deleteSelection() already clears the selection and fires onMultiSelectionCleared,
+            // which slides the panel back down for us.
+            canvas.deleteSelection()
+        }
+    }
+
+    private fun updateSelectionActionLabels() {
+        actionGroupToggle.text = if (canvas.isSelectionGrouped()) "Ungroup" else "Group"
+    }
+
+    private fun showSelectionActionsPanel() {
+        updateSelectionActionLabels()
+        panelBackPressedCallback.isEnabled = true
+        selectionActionsPanel.animate().cancel()
+        selectionActionsPanel.alpha = 1f
+        selectionActionsPanel.visibility = View.VISIBLE
+        selectionActionsPanel.translationY = 0f
+        selectionActionsPanel.post {
+            val dp24 = 24f * resources.displayMetrics.density
+            selectionActionsPanel.translationY = selectionActionsPanel.height.toFloat() + dp24
+            selectionActionsPanel.animate().translationY(0f).setDuration(200).start()
+        }
+    }
+
+    // Slides the panel back down off-screen. `clearSelection` controls whether the underlying
+    // multi-selection on the canvas is dropped too (false for "Move", where it should persist).
+    private fun dismissSelectionActionsPanel(clearSelection: Boolean) {
+        hideSelectionActionsPanel()
+        if (clearSelection) canvas.clearMultiSelection()
+    }
+
+    // Purely visual: slides the panel down and hides it, without touching the canvas selection.
+    // Used both by dismissSelectionActionsPanel() above and directly as the
+    // onMultiSelectionCleared callback, since in that case the canvas has already cleared its
+    // own selection and is just notifying us to close the panel.
+    private fun hideSelectionActionsPanel() {
+        if (selectionActionsPanel.visibility != View.VISIBLE) return
+        val dp24 = 24f * resources.displayMetrics.density
+        selectionActionsPanel.animate().cancel()
+        selectionActionsPanel.animate()
+            .translationY(selectionActionsPanel.height.toFloat() + dp24)
+            .setDuration(160)
+            .withEndAction {
+                selectionActionsPanel.visibility = View.INVISIBLE
+                selectionActionsPanel.translationY = 0f
+            }
+            .start()
+        panelBackPressedCallback.isEnabled = bottomSheetBehavior.state != BottomSheetBehavior.STATE_HIDDEN
+    }
+
     private fun notAvailableYet(feature: String) {
         Toast.makeText(this, "$feature isn't available yet", Toast.LENGTH_SHORT).show()
     }
@@ -584,16 +693,20 @@ class SketchActivity : AppCompatActivity() {
 
     private fun generatePrompt() {
         val density = resources.displayMetrics.density
-        val prompt = PromptGenerator.build(canvas.parts, canvas.width, canvas.pageHeight.roundToInt(), density)
+        // Hidden parts (see the multi-select "Hide" action) are editor-only and shouldn't leak
+        // into the generated output.
+        val visibleParts = canvas.parts.filterNot { it.hidden }
+        val prompt = PromptGenerator.build(visibleParts, canvas.width, canvas.pageHeight.roundToInt(), density)
         showPromptDialog(this, prompt)
     }
 
 
     private fun exportProject() {
         val density = resources.displayMetrics.density
+        val visibleParts = canvas.parts.filterNot { it.hidden }
         val zip = CodeGenerator.generateProjectZip(
             context = this,
-            parts = canvas.parts,
+            parts = visibleParts,
             canvasWidthPx = canvas.width,
             canvasHeightPx = canvas.pageHeight.roundToInt(),
             density = density,

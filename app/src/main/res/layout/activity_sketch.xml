@@ -101,6 +101,67 @@
 
     </FrameLayout>
 
+    <!-- Temporary multi-selection actions panel: appears after a long-press + drag marquee
+         selection is released over one or more parts (see SketchCanvasView -
+         onMultiSelectionFinalized / SketchActivity#showSelectionActionsPanel). It's a small
+         floating strip of vertically-stacked, label-only actions - not a BottomSheetBehavior
+         sheet - since it's meant to slide in/out on top of the canvas rather than be dragged.
+         Hidden by default; slid up from off-screen and back down entirely in code. -->
+    <LinearLayout
+        android:id="@+id/selectionActionsPanel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="32dp"
+        android:minWidth="220dp"
+        android:orientation="vertical"
+        android:background="@drawable/bg_selection_actions_panel"
+        android:paddingVertical="4dp"
+        android:visibility="invisible"
+        android:elevation="12dp">
+
+        <TextView
+            android:id="@+id/actionGroupToggle"
+            style="@style/SketchSelectionActionLabel"
+            android:text="Group" />
+
+        <View style="@style/SketchSelectionActionDivider" />
+
+        <TextView
+            android:id="@+id/actionDuplicateSel"
+            style="@style/SketchSelectionActionLabel"
+            android:text="Duplicate" />
+
+        <View style="@style/SketchSelectionActionDivider" />
+
+        <TextView
+            android:id="@+id/actionMoveSel"
+            style="@style/SketchSelectionActionLabel"
+            android:text="Move" />
+
+        <View style="@style/SketchSelectionActionDivider" />
+
+        <TextView
+            android:id="@+id/actionLockToggleSel"
+            style="@style/SketchSelectionActionLabel"
+            android:text="Lock" />
+
+        <View style="@style/SketchSelectionActionDivider" />
+
+        <TextView
+            android:id="@+id/actionHideToggleSel"
+            style="@style/SketchSelectionActionLabel"
+            android:text="Hide" />
+
+        <View style="@style/SketchSelectionActionDivider" />
+
+        <TextView
+            android:id="@+id/actionDeleteSel"
+            style="@style/SketchSelectionActionLabel"
+            android:textColor="#F2B8B5"
+            android:text="Delete" />
+    </LinearLayout>
+
     <!-- Shared bottom panel: Main tools tab bar stays pinned at the top of the panel; the
          content area beneath it swaps between the default tools content (Quick Actions,
          Properties, Animation & Interaction) and the Components browser. The panel has no drag

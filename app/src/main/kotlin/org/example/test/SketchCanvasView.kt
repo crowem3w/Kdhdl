@@ -11,6 +11,7 @@ import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.AttributeSet
 import android.view.GestureDetector
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
@@ -34,6 +35,12 @@ class SketchCanvasView @JvmOverloads constructor(
         fun onPartLongPressed(part: SketchPart)
         fun onSelectionChanged(part: SketchPart?)
         fun onPartsChanged()
+        // Fired once when a long-press + drag marquee box is released over one or more parts -
+        // the cue to open the temporary Group/Duplicate/Move/Lock/Hide/Delete panel.
+        fun onMultiSelectionFinalized(parts: List<SketchPart>)
+        // Fired whenever the multi-selection is dropped for any reason (tapping elsewhere,
+        // deleting the selection, etc) so the host can dismiss that panel.
+        fun onMultiSelectionCleared()
     }
 
     var listener: Listener? = null
@@ -43,6 +50,46 @@ class SketchCanvasView @JvmOverloads constructor(
     val selectedPart: SketchPart? get() = selected
 
     private val density = context.resources.displayMetrics.density
+
+    // --- Marquee (long-press + drag) multi-selection -----------------------------------------
+    // multiSelected is the finalized set of parts from the last completed marquee drag (kept
+    // highlighted, and draggable together as a group, until cleared). marqueeLive is the
+    // in-progress preview set while the box is still being dragged.
+    private val multiSelected = mutableSetOf<SketchPart>()
+    val multiSelectedParts: List<SketchPart> get() = multiSelected.toList()
+    val isMarqueeActive: Boolean get() = marqueeArmed || marqueeActive
+
+    private var marqueeArmed = false
+    private var marqueeActive = false
+    private var marqueeAnchorX = 0f
+    private var marqueeAnchorY = 0f
+    private val marqueeRect = RectF()
+    private val marqueeLive = mutableSetOf<SketchPart>()
+    private var nextGroupId = 1L
+
+    private var draggingGroup = false
+    private var groupDragAnchorX = 0f
+    private var groupDragAnchorY = 0f
+
+    private val marqueeFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#296750A4")
+    }
+    private val marqueeStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f * density
+        color = Color.parseColor("#6750A4")
+    }
+    private val multiSelectStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f * density
+        color = Color.parseColor("#6750A4")
+    }
+    private val marqueeArmIndicatorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#6750A4")
+    }
+    // -------------------------------------------------------------------------------------------
 
     // --- Mobile UI "page" (the resizable white artboard) -------------------------------------
     // The page represents the actual bottom-bounded content area of the mobile app/page being
@@ -225,12 +272,35 @@ class SketchCanvasView @JvmOverloads constructor(
             if (hit != null) {
                 listener?.onPartLongPressed(hit)
             } else {
-                listener?.onLongPressEmptySpace(cx, cy)
+                // Empty space: arm marquee-selection mode rather than immediately opening the
+                // "Add to sketch" panel. Whether this turns into a rectangular drag-select or
+                // falls back to the old open-panel behavior is only known once the finger either
+                // moves (ACTION_MOVE below) or lifts without moving (ACTION_UP below).
+                if (multiSelected.isNotEmpty()) clearMultiSelection()
+                marqueeArmed = true
+                marqueeActive = false
+                marqueeAnchorX = cx
+                marqueeAnchorY = cy
+                marqueeRect.set(cx, cy, cx, cy)
+                marqueeLive.clear()
+                panCandidate = false
+                canvasPanning = false
+                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                invalidate()
             }
         }
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
             val hit = hitTest(toContentX(e.x), toContentY(e.y))
+            if (multiSelected.isNotEmpty()) {
+                if (hit == null || hit !in multiSelected) {
+                    clearMultiSelection()
+                } else {
+                    // Tapped a member of the active multi-selection: leave the group selection
+                    // (and its panel) exactly as-is rather than collapsing to a single selection.
+                    return true
+                }
+            }
             if (hit != selected) {
                 selected = hit
                 invalidate()
@@ -282,20 +352,32 @@ class SketchCanvasView @JvmOverloads constructor(
                     resizingPart = null
                     activeHandle = null
                     val hit = hitTest(cx, cy)
-                    draggingPart = hit
                     dragMoved = false
-                    if (hit != null) {
-                        dragOffsetX = cx - hit.x
-                        dragOffsetY = cy - hit.y
+                    if (hit != null && hit in multiSelected) {
+                        // Touching down on a member of the active multi-selection drags the
+                        // whole group together (see the "Move" action in the selection panel).
+                        draggingGroup = true
+                        draggingPart = null
+                        groupDragAnchorX = cx
+                        groupDragAnchorY = cy
                         panCandidate = false
                     } else {
-                        // Empty space: only a *candidate* for panning. It only actually engages
-                        // once the drag clears panTouchSlop, so a quick tap or a long-press to
-                        // open the add-part menu (handled by gestureDetector below) still works.
-                        panCandidate = true
-                        canvasPanning = false
-                        panDragStartScreenY = event.y
-                        panDragStartOffset = panOffsetY
+                        draggingGroup = false
+                        draggingPart = if (hit != null && !hit.locked) hit else null
+                        if (hit != null) {
+                            dragOffsetX = cx - hit.x
+                            dragOffsetY = cy - hit.y
+                            panCandidate = false
+                        } else {
+                            // Empty space: only a *candidate* for panning. It only actually
+                            // engages once the drag clears panTouchSlop, so a quick tap or a
+                            // long-press to open the add-part menu / arm marquee selection
+                            // (handled by gestureDetector below) still works.
+                            panCandidate = true
+                            canvasPanning = false
+                            panDragStartScreenY = event.y
+                            panDragStartOffset = panOffsetY
+                        }
                     }
                 }
             }
@@ -325,6 +407,37 @@ class SketchCanvasView @JvmOverloads constructor(
                             invalidate()
                             listener?.onSelectionChanged(p)
                         }
+                    } else if (draggingGroup) {
+                        val cx = toContentX(event.x)
+                        val cy = toContentY(event.y)
+                        val dx = cx - groupDragAnchorX
+                        val dy = cy - groupDragAnchorY
+                        if (dx != 0f || dy != 0f) {
+                            for (p in multiSelected) {
+                                if (p.locked) continue
+                                p.x = (p.x + dx).coerceIn(0f, max(0f, width - p.w))
+                                p.y = (p.y + dy).coerceIn(0f, max(0f, pageHeight - p.h))
+                            }
+                            groupDragAnchorX = cx
+                            groupDragAnchorY = cy
+                            dragMoved = true
+                            invalidate()
+                        }
+                    } else if (marqueeArmed) {
+                        val cx = toContentX(event.x)
+                        val cy = toContentY(event.y)
+                        marqueeActive = true
+                        marqueeRect.set(
+                            minOf(marqueeAnchorX, cx), minOf(marqueeAnchorY, cy),
+                            maxOf(marqueeAnchorX, cx), maxOf(marqueeAnchorY, cy),
+                        )
+                        marqueeLive.clear()
+                        for (p in parts) {
+                            if (p.hidden) continue
+                            val pr = RectF(p.x, p.y, p.x + p.w, p.y + p.h)
+                            if (RectF.intersects(marqueeRect, pr)) marqueeLive.add(p)
+                        }
+                        invalidate()
                     } else if (panCandidate) {
                         val deltaScreen = panDragStartScreenY - event.y
                         if (!canvasPanning && abs(deltaScreen) > panTouchSlop && maxPanOffsetY() > 0f) {
@@ -337,17 +450,135 @@ class SketchCanvasView @JvmOverloads constructor(
                     }
                 }
             }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // A second finger touching down mid-drag means pinch-to-zoom is taking over;
+                // bail out of an in-progress marquee drag rather than fight it for the gesture.
+                if (marqueeArmed || marqueeActive) {
+                    marqueeArmed = false
+                    marqueeActive = false
+                    marqueeLive.clear()
+                    invalidate()
+                }
+            }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if ((draggingPart != null || resizingPart != null) && dragMoved) listener?.onPartsChanged()
+                if ((draggingPart != null || resizingPart != null || draggingGroup) && dragMoved) {
+                    listener?.onPartsChanged()
+                }
+                if (marqueeActive) {
+                    finalizeMarqueeSelection()
+                } else if (marqueeArmed && event.actionMasked == MotionEvent.ACTION_UP) {
+                    // Held and released without ever dragging: fall back to the original
+                    // long-press-on-empty-space behavior (open the "Add to sketch" panel).
+                    listener?.onLongPressEmptySpace(marqueeAnchorX, marqueeAnchorY)
+                }
                 draggingPart = null
+                draggingGroup = false
                 resizingPart = null
                 activeHandle = null
                 panCandidate = false
                 canvasPanning = false
+                marqueeArmed = false
+                marqueeActive = false
+                marqueeLive.clear()
             }
         }
         return true
     }
+
+    private fun finalizeMarqueeSelection() {
+        val result = mutableSetOf<SketchPart>()
+        result.addAll(marqueeLive)
+        // Selecting any single member of a group pulls the rest of that group in too.
+        val groupIds = marqueeLive.mapNotNull { it.groupId }.toSet()
+        if (groupIds.isNotEmpty()) {
+            for (p in parts) if (p.groupId != null && p.groupId in groupIds) result.add(p)
+        }
+        multiSelected.clear()
+        multiSelected.addAll(result)
+        marqueeLive.clear()
+        if (selected != null) {
+            selected = null
+            listener?.onSelectionChanged(null)
+        }
+        invalidate()
+        if (multiSelected.isNotEmpty()) {
+            listener?.onMultiSelectionFinalized(multiSelected.toList())
+        } else {
+            listener?.onMultiSelectionCleared()
+        }
+    }
+
+    // --- Multi-selection actions (Group/Ungroup, Duplicate, Lock, Hide, Delete) ---------------
+    // Driven by the temporary panel the host shows after onMultiSelectionFinalized fires.
+
+    fun clearMultiSelection() {
+        if (multiSelected.isEmpty()) return
+        multiSelected.clear()
+        invalidate()
+        listener?.onMultiSelectionCleared()
+    }
+
+    fun isSelectionGrouped(): Boolean =
+        multiSelected.isNotEmpty() && multiSelected.all { it.groupId != null }
+
+    fun toggleGroupSelection() {
+        if (multiSelected.isEmpty()) return
+        if (isSelectionGrouped()) {
+            for (p in multiSelected) p.groupId = null
+        } else {
+            val gid = nextGroupId++
+            for (p in multiSelected) p.groupId = gid
+        }
+        invalidate()
+        listener?.onPartsChanged()
+    }
+
+    fun duplicateSelection() {
+        if (multiSelected.isEmpty()) return
+        var newId = (parts.maxOfOrNull { it.id } ?: 0L) + 1
+        val offset = 24f * density
+        val duplicates = multiSelected.map { p ->
+            p.copy(
+                id = newId++,
+                x = (p.x + offset).coerceIn(0f, max(0f, width - p.w)),
+                y = (p.y + offset).coerceIn(0f, max(0f, pageHeight - p.h)),
+                groupId = null,
+            )
+        }
+        parts.addAll(duplicates)
+        multiSelected.clear()
+        multiSelected.addAll(duplicates)
+        invalidate()
+        listener?.onPartsChanged()
+    }
+
+    fun isSelectionLocked(): Boolean = multiSelected.isNotEmpty() && multiSelected.all { it.locked }
+
+    fun setSelectionLocked(locked: Boolean) {
+        if (multiSelected.isEmpty()) return
+        for (p in multiSelected) p.locked = locked
+        invalidate()
+        listener?.onPartsChanged()
+    }
+
+    fun isSelectionHidden(): Boolean = multiSelected.isNotEmpty() && multiSelected.all { it.hidden }
+
+    fun setSelectionHidden(hidden: Boolean) {
+        if (multiSelected.isEmpty()) return
+        for (p in multiSelected) p.hidden = hidden
+        invalidate()
+        listener?.onPartsChanged()
+    }
+
+    fun deleteSelection() {
+        if (multiSelected.isEmpty()) return
+        parts.removeAll(multiSelected)
+        multiSelected.clear()
+        invalidate()
+        listener?.onPartsChanged()
+        listener?.onMultiSelectionCleared()
+    }
+    // -------------------------------------------------------------------------------------------
 
     // Detects and drives dragging the bottom-edge page handle. Kept entirely separate from (and
     // checked before) the normal touch pipeline above so it never competes with part
@@ -537,7 +768,7 @@ class SketchCanvasView @JvmOverloads constructor(
     }
 
     private fun hitTest(x: Float, y: Float): SketchPart? =
-        parts.lastOrNull { p -> x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h }
+        parts.lastOrNull { p -> !p.hidden && x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h }
 
     fun addPart(part: SketchPart) {
         if (part.kind == PartKind.TEXT) applyTextAutoHeight(part)
@@ -554,6 +785,9 @@ class SketchCanvasView @JvmOverloads constructor(
             selected = null
             listener?.onSelectionChanged(null)
         }
+        if (multiSelected.remove(part) && multiSelected.isEmpty()) {
+            listener?.onMultiSelectionCleared()
+        }
         invalidate()
         listener?.onPartsChanged()
     }
@@ -561,8 +795,11 @@ class SketchCanvasView @JvmOverloads constructor(
     fun clearAll() {
         parts.clear()
         selected = null
+        val hadMultiSelection = multiSelected.isNotEmpty()
+        multiSelected.clear()
         invalidate()
         listener?.onSelectionChanged(null)
+        if (hadMultiSelection) listener?.onMultiSelectionCleared()
         listener?.onPartsChanged()
     }
 
@@ -579,12 +816,33 @@ class SketchCanvasView @JvmOverloads constructor(
         canvas.scale(scaleFactor, scaleFactor, zoomPivotX, zoomPivotY)
         drawPage(canvas)
         for (part in parts) {
+            if (part.hidden) continue
             // Draw the shadow frame behind the part first so the frame never covers its content.
             if (part === selected) drawSelectionFrame(canvas, part)
             drawPart(canvas, part)
         }
         // Handles are drawn last, on top of every part, so they stay grabbable.
         selected?.let { drawSelectionHandles(canvas, it) }
+
+        // Marquee (long-press + drag) selection: while dragging, outline every part currently
+        // inside the box plus the box itself; once released, the finalized multi-selection stays
+        // outlined until cleared (see clearMultiSelection / onMultiSelectionCleared).
+        if (marqueeActive) {
+            for (p in marqueeLive) {
+                canvas.drawRoundRect(selectionRect(p), selectionRadius, selectionRadius, multiSelectStrokePaint)
+            }
+            canvas.drawRect(marqueeRect, marqueeFillPaint)
+            canvas.drawRect(marqueeRect, marqueeStrokePaint)
+        } else {
+            if (marqueeArmed) {
+                // Selection mode is "armed" (long-press held, not yet dragged): a small dot at
+                // the press point cues that a drag from here will start a selection box.
+                canvas.drawCircle(marqueeAnchorX, marqueeAnchorY, 6f * density, marqueeArmIndicatorPaint)
+            }
+            for (p in multiSelected) {
+                canvas.drawRoundRect(selectionRect(p), selectionRadius, selectionRadius, multiSelectStrokePaint)
+            }
+        }
         canvas.restoreToCount(saveCount)
 
         // Drawn after the pan/zoom transform is restored so the handle keeps a constant on-screen
