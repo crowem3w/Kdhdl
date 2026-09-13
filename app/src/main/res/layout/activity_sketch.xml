@@ -27,70 +27,87 @@
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:paddingHorizontal="16dp"
-            android:paddingTop="16dp">
+            android:paddingTop="16dp"
+            android:clipChildren="false"
+            android:clipToPadding="false">
 
+            <!-- Back button: its own small raised "chip" frame, extruded via a
+                 light-to-shadow gradient + hairline stroke plus real elevation
+                 for a soft cast shadow underneath. -->
             <ImageButton
                 android:id="@+id/btnBack"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:background="@drawable/bg_top_bar_button_ripple"
+                android:background="@drawable/bg_nav_button_frame"
+                android:foreground="@drawable/bg_nav_icon_ripple"
                 android:padding="10dp"
                 android:scaleType="fitCenter"
                 android:src="@drawable/ic_chevron_left"
+                app:tint="@color/nav_icon_active"
                 android:contentDescription="Back"
-                android:elevation="3dp" />
+                android:elevation="6dp" />
 
             <View
                 android:layout_width="0dp"
                 android:layout_height="1dp"
                 android:layout_weight="1" />
 
-            <ImageButton
-                android:id="@+id/btnUndo"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:layout_marginEnd="8dp"
-                android:background="@drawable/bg_top_bar_button_ripple"
-                android:padding="10dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_undo"
-                android:contentDescription="Undo"
-                android:elevation="3dp" />
+            <!-- Action cluster: undo / redo / more / play share a single raised
+                 pill frame instead of four separate floating circles, so the
+                 group reads as one cohesive nav bar. -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_top_bar_frame"
+                android:paddingHorizontal="4dp"
+                android:elevation="6dp">
 
-            <ImageButton
-                android:id="@+id/btnRedo"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:layout_marginEnd="8dp"
-                android:background="@drawable/bg_top_bar_button_ripple"
-                android:padding="10dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_redo"
-                android:contentDescription="Redo"
-                android:elevation="3dp" />
+                <ImageButton
+                    android:id="@+id/btnUndo"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/bg_nav_icon_ripple"
+                    android:padding="10dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_undo"
+                    app:tint="@color/nav_icon_active"
+                    android:contentDescription="Undo" />
 
-            <ImageButton
-                android:id="@+id/btnMore"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:layout_marginEnd="8dp"
-                android:background="@drawable/bg_top_bar_button_ripple"
-                android:padding="10dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_more_horiz"
-                android:contentDescription="More"
-                android:elevation="3dp" />
+                <ImageButton
+                    android:id="@+id/btnRedo"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/bg_nav_icon_ripple"
+                    android:padding="10dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_redo"
+                    app:tint="@color/nav_icon_active"
+                    android:contentDescription="Redo" />
 
-            <ImageButton
-                android:id="@+id/btnPlay"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:background="@drawable/bg_top_bar_button_ripple"
-                android:padding="11dp"
-                android:scaleType="fitCenter"
-                android:src="@drawable/ic_play"
-                android:contentDescription="Preview"
-                android:elevation="3dp" />
+                <ImageButton
+                    android:id="@+id/btnMore"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/bg_nav_icon_ripple"
+                    android:padding="10dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_more_horiz"
+                    app:tint="@color/nav_icon_active"
+                    android:contentDescription="More" />
+
+                <ImageButton
+                    android:id="@+id/btnPlay"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/bg_nav_icon_ripple"
+                    android:padding="11dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_play"
+                    app:tint="@color/nav_icon_active"
+                    android:contentDescription="Preview" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- The bottom-edge "page height" drag handle previously lived here as a static View
@@ -182,6 +199,7 @@
         android:paddingBottom="18dp"
         android:clipChildren="false"
         android:clipToPadding="false"
+        android:clipToOutline="false"
         app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
         app:behavior_hideable="true"
         app:behavior_draggable="true"
@@ -194,7 +212,11 @@
             android:id="@+id/mainToolsRow"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:background="@drawable/bg_tab_bar_frame"
+            android:paddingHorizontal="4dp"
+            android:paddingVertical="2dp"
+            android:elevation="8dp">
 
             <LinearLayout
                 android:id="@+id/tabSelect"
@@ -256,7 +278,7 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:layout_marginTop="14dp"
+            android:layout_marginTop="18dp"
             android:clipChildren="false">
 
             <androidx.core.widget.NestedScrollView

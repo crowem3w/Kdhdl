@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Raised "dock" frame that sits behind the main tools tab row
+  (Select / Pages / Text / Upload / Elements), separating it visually
+  from the bottom-sheet content beneath. Same raised-chip technique as
+  the top bar frames: light-to-shadow vertical gradient + hairline
+  stroke, paired with android:elevation on mainToolsRow for a real
+  soft cast shadow. Single file, adapts to light/dark via @color refs.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <corners android:radius="18dp" />
+    <gradient
+        android:angle="270"
+        android:startColor="@color/tab_bar_frame_top"
+        android:endColor="@color/tab_bar_frame_bottom" />
+    <stroke
+        android:width="1dp"
+        android:color="@color/tab_bar_frame_stroke" />
+</shape>

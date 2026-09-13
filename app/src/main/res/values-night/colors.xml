@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ============================================================
+         Navigation-bar "depth illusion" palette — DARK mode.
+         Same structure as values/colors.xml: frames use a lighter
+         charcoal top fading to near-black bottom to read as raised
+         off the dark canvas, with a soft white hairline stroke
+         standing in for a cast shadow (real drop shadows barely read
+         against a near-black background, so the edge highlight does
+         the work instead). The active tab pill keeps the same
+         inverted "pressed" gradient logic as light mode.
+         ============================================================ -->
+    <color name="nav_frame_top">#2C2D36</color>
+    <color name="nav_frame_bottom">#18191F</color>
+    <color name="nav_frame_stroke">#26FFFFFF</color>
+    <color name="nav_frame_ripple">#26FFFFFF</color>
+    <color name="nav_icon_active">#F2F1F5</color>
+    <color name="nav_icon_muted">#9A9AA5</color>
+
+    <color name="tab_bar_frame_top">#24252E</color>
+    <color name="tab_bar_frame_bottom">#16171D</color>
+    <color name="tab_bar_frame_stroke">#26FFFFFF</color>
+
+    <color name="tab_pill_top">#2A5BB8</color>
+    <color name="tab_pill_bottom">#4C8CFF</color>
+    <color name="tab_pill_stroke">#26FFFFFF</color>
+    <color name="tab_label_active">#FFFFFF</color>
+    <color name="tab_label_inactive">#9A9AA5</color>
+</resources>

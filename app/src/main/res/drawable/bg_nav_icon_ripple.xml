@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Borderless circular ripple for icon buttons that now live inside a
+  shared frame (bg_top_bar_frame / bg_nav_button_frame). Replaces the
+  old bg_top_bar_button_ripple.xml, which despite its name was just a
+  permanently-visible solid white oval, not an actual press ripple.
+-->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/nav_frame_ripple">
+    <item android:id="@android:id/mask">
+        <shape android:shape="oval">
+            <solid android:color="#FFFFFFFF" />
+        </shape>
+    </item>
+</ripple>
