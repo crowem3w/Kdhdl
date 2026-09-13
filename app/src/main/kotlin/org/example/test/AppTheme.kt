@@ -2,16 +2,16 @@ package org.example.test
 
 import android.content.Context
 
-
-
-
-
-
-
-
-
-
-
+/**
+ * Color palette for the app shell (Home / Templates / Projects / Profile /
+ * Settings + the bottom nav). These screens paint their own colors in code
+ * rather than through XML theme attrs, so they resolve their palette here
+ * based on [ThemeManager]'s saved preference.
+ *
+ * The Sketch canvas editor is intentionally excluded — it behaves like a
+ * design surface (dark workspace regardless of app theme), similar to most
+ * design tools.
+ */
 data class AppPalette(
     val background: Int,
     val surface: Int,

@@ -6,20 +6,20 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.appcompat.app.AppCompatActivity
 
-
-
-
-
-
-
+/**
+ * App shell: hosts the 5 top-level pages (Homepage, Templates, Projects,
+ * Profile, Settings) behind a bottom navigation bar. Only Homepage has
+ * real content today (the hero + "Create app" action that opens
+ * SketchActivity); the other 4 tabs are empty placeholders for now.
+ */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var pageContainer: FrameLayout
     private val pages = LinkedHashMap<AppTab, ViewGroup>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        
-        
+        // Must run before super.onCreate() so the DayNight theme resolves
+        // to the saved preference (and system widgets/status bar match).
         ThemeManager.applySavedMode(this)
         super.onCreate(savedInstanceState)
 
@@ -29,8 +29,8 @@ class MainActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.MATCH_PARENT,
             )
-            
-            
+            // The bottom nav's center item is elevated/translated above its
+            // own box; don't let this LinearLayout clip that overflow.
             clipChildren = false
             clipToPadding = false
         }

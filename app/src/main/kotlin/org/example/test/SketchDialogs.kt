@@ -72,12 +72,12 @@ fun showPartPickerSheet(
     dialog.show()
 }
 
-
-
-
-
-
-
+/**
+ * Modal shown when the "Text" tab is selected: a floating, rounded white card (matching the
+ * white sketch background) with just a shadow at its edges (no stroke/border) so it reads as
+ * "lifted" above the canvas. Sizes itself responsively to the available screen width rather than
+ * a fixed dp value, and focuses its EditText immediately so the keyboard opens automatically.
+ */
 fun showTextInputDialog(
     context: Context,
     onConfirm: (String) -> Unit,
@@ -187,8 +187,8 @@ fun showTextInputDialog(
         addView(buttonRow)
     }
 
-    
-    
+    // 12dp corner radius, white background matching the main (sketch) screen, no stroke/border
+    // (strokeWidth = 0) — the card reads via its drop shadow (cardElevation) only.
     val card = MaterialCardView(context).apply {
         radius = dp(12).toFloat()
         cardElevation = dp(8).toFloat()
@@ -198,8 +198,8 @@ fun showTextInputDialog(
         addView(content, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
-    
-    
+    // Extra padding around the card so its drop shadow isn't clipped, and so the modal stays
+    // comfortably inset from the screen edges on any device size (responsive width above).
     val wrapper = FrameLayout(context).apply {
         setPadding(dp(16), dp(16), dp(16), dp(16))
         clipChildren = false

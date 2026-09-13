@@ -1,9 +1,9 @@
 package org.example.test
 
-
-
-
-
+/**
+ * The 5 top-level destinations of the app, each backed by an outline icon
+ * (default state) and a "shaded" / filled icon (selected state).
+ */
 enum class AppTab(
     val label: String,
     val icon: Int,
