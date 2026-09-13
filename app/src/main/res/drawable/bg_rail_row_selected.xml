@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Selected-state background for a level-1 sidebar row (Structure, Layout, Typography, Geometry, ...).
+  Deliberately flat: no corner radius (stays structurally connected to the sidebar rather than
+  reading as a floating pill), no left/right stroke (the highlight runs edge-to-edge with the
+  row, which itself spans the sidebar's full width), and no elevation/shadow. The fill is a
+  low-alpha white overlay rather than a fixed hex so it always reads as "slightly lighter than
+  whatever's beneath it" against the sidebar's dark background.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#14FFFFFF" />
+    <corners android:radius="0dp" />
+</shape>
