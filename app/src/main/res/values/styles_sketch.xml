@@ -1,27 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- Main tools navigation bar -->
+    <!-- Main tools tab bar -->
     <style name="SketchTabColumn">
         <item name="android:layout_width">0dp</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_weight">1</item>
-        <item name="android:orientation">vertical</item>
         <item name="android:gravity">center</item>
-        <item name="android:clickable">true</item>
-        <item name="android:focusable">true</item>
     </style>
 
-    <!-- Small rounded "indicator" pill that sits behind just the icon (Material-style nav
-         bar), rather than the old capsule that wrapped both icon and label. -->
-    <style name="SketchNavIconPill">
+    <style name="SketchTabPill">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:minWidth">44dp</item>
-        <item name="android:minHeight">32dp</item>
+        <item name="android:orientation">vertical</item>
         <item name="android:gravity">center</item>
-        <item name="android:paddingHorizontal">16dp</item>
-        <item name="android:paddingVertical">6dp</item>
+        <item name="android:paddingHorizontal">14dp</item>
+        <item name="android:paddingVertical">8dp</item>
     </style>
 
     <style name="SketchTabIcon">
@@ -32,7 +26,7 @@
     <style name="SketchTabLabel">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">3dp</item>
+        <item name="android:layout_marginTop">4dp</item>
         <item name="android:textSize">10.5sp</item>
     </style>
 

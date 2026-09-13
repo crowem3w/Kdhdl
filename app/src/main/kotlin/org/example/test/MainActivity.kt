@@ -1,9 +1,9 @@
 package org.example.test
 
 import android.os.Bundle
-import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import androidx.appcompat.app.AppCompatActivity
 
 /**
@@ -23,22 +23,23 @@ class MainActivity : AppCompatActivity() {
         ThemeManager.applySavedMode(this)
         super.onCreate(savedInstanceState)
 
-        // The nav bar is now a floating glass dock that sits *over* the page content
-        // (rather than pushing it up in a column), so the root is a plain FrameLayout
-        // with the dock added last so it draws on top.
-        val root = FrameLayout(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.MATCH_PARENT,
             )
+            // The bottom nav's center item is elevated/translated above its
+            // own box; don't let this LinearLayout clip that overflow.
             clipChildren = false
             clipToPadding = false
         }
 
         pageContainer = FrameLayout(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f,
             )
         }
 
@@ -47,15 +48,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         root.addView(pageContainer)
-        root.addView(bottomNav, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.BOTTOM,
-        ))
+        root.addView(bottomNav)
         setContentView(root)
 
         buildPages()
-        showPage(AppTab.TEMPLATES)
+        showPage(AppTab.HOME)
     }
 
     private fun buildPages() {

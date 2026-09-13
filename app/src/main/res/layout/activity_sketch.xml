@@ -162,134 +162,103 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Shared bottom panel: Main tools tab bar stays pinned at the top of the panel; the
-         content area beneath it swaps between the (now-empty) default tools content and the
-         Components browser. In Select mode the panel shows only the Main tools row - it is
-         sized to that row's height (see setupBottomPanel in SketchActivity). The panel has no
-         drag handle of its own: it opens via a flick or a double-tap on empty canvas (see
-         onFlickEmptySpace / onDoubleTapEmptySpace -> openSketchPanel in SketchActivity) and
-         closes via the back button or by swiping it down (app:behavior_draggable="true" lets the
-         framework's native swipe-to-dismiss gesture animate it closed - see setupBottomPanel in
-         SketchActivity). -->
+    <!-- Bottom navigation bar: a plain, always-visible tab bar floating just above the bottom
+         edge of the screen as a pill-shaped 3D sheet (NOT a BottomSheetBehavior sheet - it
+         never drags, collapses, or hides). Tapping Shapes/Text/Upload opens its own modal
+         picker/dialog; tapping Elements opens elementsPanel below, a separate sheet that
+         floats above this bar (see setupBottomNavBar / setupElementsPanel in SketchActivity).
+         bg_bottom_nav_pill gives it a fully-rounded capsule shape plus a 3mm (~18dp) extruded
+         edge for the "sheet" thickness; paddingBottom is bumped by that same 18dp so the tab
+         row's own bottom edge lines up with the top face's bottom edge instead of overlapping
+         the extruded lip. -->
     <LinearLayout
-        android:id="@+id/bottomPanel"
+        android:id="@+id/bottomNavBar"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:background="@drawable/bg_bottom_panel"
-        android:paddingHorizontal="16dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginHorizontal="20dp"
+        android:layout_marginBottom="20dp"
+        android:orientation="horizontal"
+        android:background="@drawable/bg_bottom_nav_pill"
+        android:paddingHorizontal="24dp"
         android:paddingTop="18dp"
-        android:paddingBottom="18dp"
-        android:clipChildren="false"
-        android:clipToPadding="false"
-        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
-        app:behavior_hideable="true"
-        app:behavior_draggable="true"
-        app:behavior_skipCollapsed="false"
-        app:behavior_peekHeight="110dp">
+        android:paddingBottom="36dp"
+        android:elevation="12dp">
 
-        <!-- Main tools navigation bar (always visible, above both the default tools content and
-             the Components browser). Styled as a proper nav bar: a distinct pill-shaped bar
-             background, evenly spaced destinations, and a small rounded indicator that sits
-             behind just the active item's icon (Material-style), rather than the old capsule
-             that wrapped icon + label together. -->
         <LinearLayout
-            android:id="@+id/mainToolsRow"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:background="@drawable/bg_sketch_nav_bar"
-            android:paddingHorizontal="4dp"
-            android:paddingVertical="8dp"
-            android:elevation="4dp">
+            android:id="@+id/tabSelect"
+            style="@style/SketchTabColumn">
 
-            <LinearLayout
-                android:id="@+id/tabSelect"
-                style="@style/SketchTabColumn">
-
-                <FrameLayout style="@style/SketchNavIconPill" android:background="@drawable/bg_tab_selected">
-                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_select" />
-                </FrameLayout>
-                <TextView style="@style/SketchTabLabel" android:text="Select" android:textColor="#3D7EFF" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/tabShapes"
-                style="@style/SketchTabColumn">
-
-                <FrameLayout style="@style/SketchNavIconPill">
-                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_pages" app:tint="#9A9AA5" />
-                </FrameLayout>
-                <TextView style="@style/SketchTabLabel" android:text="Pages" android:textColor="#9A9AA5" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/tabText"
-                style="@style/SketchTabColumn">
-
-                <FrameLayout style="@style/SketchNavIconPill">
-                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_text" app:tint="#9A9AA5" />
-                </FrameLayout>
-                <TextView style="@style/SketchTabLabel" android:text="Text" android:textColor="#9A9AA5" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/tabMedia"
-                style="@style/SketchTabColumn">
-
-                <FrameLayout style="@style/SketchNavIconPill">
-                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_upload" app:tint="#9A9AA5" />
-                </FrameLayout>
-                <TextView style="@style/SketchTabLabel" android:text="Upload" android:textColor="#9A9AA5" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/tabComponents"
-                style="@style/SketchTabColumn">
-
-                <FrameLayout style="@style/SketchNavIconPill">
-                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_elements" app:tint="#9A9AA5" />
-                </FrameLayout>
-                <TextView style="@style/SketchTabLabel" android:text="Elements" android:textColor="#9A9AA5" />
+            <LinearLayout style="@style/SketchTabPill" android:background="@drawable/bg_tab_selected">
+                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_select" />
+                <TextView style="@style/SketchTabLabel" android:text="Select" android:textColor="#FFFFFF" />
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Content area beneath the Main tools row: swaps between defaultToolsContentScroll and
-             componentsContentContainer. Weighted to fill the rest of the panel, so it grows when
-             the panel is dragged taller (up to full screen) and is what scrolls/clips first when
-             the panel is dragged shorter. -->
-        <FrameLayout
-            android:id="@+id/panelContentContainer"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_marginTop="14dp"
-            android:clipChildren="false">
+        <LinearLayout
+            android:id="@+id/tabShapes"
+            style="@style/SketchTabColumn">
 
-            <androidx.core.widget.NestedScrollView
-                android:id="@+id/defaultToolsContentScroll"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:clipToPadding="false"
-                android:fillViewport="true">
+            <LinearLayout style="@style/SketchTabPill">
+                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_pages" app:tint="#9A9AA5" />
+                <TextView style="@style/SketchTabLabel" android:text="Pages" android:textColor="#9A9AA5" />
+            </LinearLayout>
+        </LinearLayout>
 
-                <LinearLayout
-                    android:id="@+id/defaultToolsContent"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical" />
-            </androidx.core.widget.NestedScrollView>
+        <LinearLayout
+            android:id="@+id/tabText"
+            style="@style/SketchTabColumn">
 
-            <!-- Components browser content, built and attached at runtime by
-                 buildComponentsContent() in ComponentsPanel.kt; hidden until the Components tab
-                 is tapped. Lives in the same shared panel as the tools above, beneath the
-                 always-visible Main tools row. -->
-            <FrameLayout
-                android:id="@+id/componentsContentContainer"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:clipChildren="false"
-                android:visibility="gone" />
-        </FrameLayout>
+            <LinearLayout style="@style/SketchTabPill">
+                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_text" app:tint="#9A9AA5" />
+                <TextView style="@style/SketchTabLabel" android:text="Text" android:textColor="#9A9AA5" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabMedia"
+            style="@style/SketchTabColumn">
+
+            <LinearLayout style="@style/SketchTabPill">
+                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_upload" app:tint="#9A9AA5" />
+                <TextView style="@style/SketchTabLabel" android:text="Upload" android:textColor="#9A9AA5" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabComponents"
+            style="@style/SketchTabColumn">
+
+            <LinearLayout style="@style/SketchTabPill">
+                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_elements" app:tint="#9A9AA5" />
+                <TextView style="@style/SketchTabLabel" android:text="Elements" android:textColor="#9A9AA5" />
+            </LinearLayout>
+        </LinearLayout>
     </LinearLayout>
+
+    <!-- Elements panel: a separate bottom sheet, independent of bottomNavBar, that shows the
+         Components browser once the Elements tab is tapped. Its bottom margin is padded out at
+         runtime to bottomNavBar's measured height (see setupBottomNavBar in SketchActivity) so
+         it sits above the nav bar rather than sliding underneath it. Skips the collapsed state -
+         it only ever toggles between hidden and fully expanded. -->
+    <FrameLayout
+        android:id="@+id/elementsPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_bottom_panel"
+        android:clipChildren="false"
+        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
+        app:behavior_hideable="true"
+        app:behavior_draggable="true"
+        app:behavior_skipCollapsed="true"
+        app:behavior_peekHeight="0dp">
+
+        <!-- Components browser content, built and attached at runtime by
+             buildComponentsContent() in ComponentsPanel.kt. -->
+        <FrameLayout
+            android:id="@+id/componentsContentContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipChildren="false" />
+    </FrameLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -6,7 +6,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
-import android.view.ViewTreeObserver
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -16,8 +17,9 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
+import androidx.core.view.marginBottom
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.widget.NestedScrollView
+import androidx.coordinatorlayout.widget.CoordinatorLayout
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import kotlin.math.roundToInt
 
@@ -42,7 +44,8 @@ class SketchActivity : AppCompatActivity() {
 
     // Temporary panel shown after a long-press + drag marquee selection is released on the
     // canvas (see SketchCanvasView.Listener#onMultiSelectionFinalized). Entirely separate from
-    // bottomPanel: it's a small floating sidebar of icon buttons docked to the screen edge
+    // bottomNavBar/elementsPanel: it's a small floating sidebar of icon buttons docked to the
+    // screen edge
     // rather than a draggable sheet, and it auto-dismisses once an action is picked (or the
     // selection is otherwise cleared).
     private lateinit var selectionActionsPanel: LinearLayout
@@ -54,29 +57,31 @@ class SketchActivity : AppCompatActivity() {
     private lateinit var actionHideToggleSel: LinearLayout
     private lateinit var actionDeleteSel: LinearLayout
 
-    private lateinit var bottomPanel: LinearLayout
-    private lateinit var bottomSheetBehavior: BottomSheetBehavior<LinearLayout>
-    private lateinit var mainToolsRow: LinearLayout
-    private lateinit var panelContentContainer: FrameLayout
-    private lateinit var defaultToolsContentScroll: NestedScrollView
-    private lateinit var defaultToolsContent: LinearLayout
+    // Bottom navigation bar - a pill-shaped, floating LinearLayout (bg_bottom_nav_pill gives it
+    // a fully-rounded capsule shape plus a 3mm extruded edge, like a physical 3D sheet), not a
+    // BottomSheetBehavior sheet. Visible by default when SketchActivity opens; toggled
+    // hidden/visible by tapping empty canvas (see onTapEmptySpace below). Never drags or
+    // collapses - it's either fully shown or fully hidden.
+    private lateinit var bottomNavBar: LinearLayout
+
+    // Separate sheet that opens above bottomNavBar to show the Components ("Elements") browser.
+    // Independent BottomSheetBehavior from anything the nav bar does.
+    private lateinit var elementsPanel: FrameLayout
+    private lateinit var elementsPanelBehavior: BottomSheetBehavior<FrameLayout>
     private lateinit var componentsContentContainer: FrameLayout
     private var componentsContentBuilt = false
     private var showingComponents = false
 
+    // bottomNavBar's own XML bottom margin (20dp - the floating gap beneath the pill), captured
+    // once, plus whatever the bottom system-gesture inset turns out to be, so the floating pill
+    // lifts clear of the system's own gesture/navigation bar instead of sinking behind it.
+    // (paddingBottom is left alone - it's fixed to the pill's 3mm extruded-edge thickness so the
+    // tab row lines up with the sheet's face, not with the system inset.)
+    private var bottomNavBarBaseMarginBottom = 0
 
-
-
-
-    private var defaultPanelHeight = 0
-
-    // bottomPanel's own XML paddingTop (18dp), captured once, plus whatever the status bar
-    // inset turns out to be. When the panel is STATE_EXPANDED it grows to match_parent height,
-    // which puts its top edge (the Select/Shapes/Text/Upload/Elements row) right at the physical
-    // top of the screen, behind the status bar - so on top of the normal 18dp we add the status
-    // bar's own height while expanded, and animate that extra amount in/out as the sheet slides
-    // so the row is never drawn underneath the status bar.
-    private var bottomPanelBasePaddingTop = 0
+    // elementsPanel has no top padding of its own. Since the sheet only ever toggles between
+    // hidden and fully expanded (skipCollapsed), when expanded it reaches the physical top of
+    // the screen - so we pad its content that much to keep it from drawing behind the status bar.
     private var statusBarInsetTop = 0
 
 
@@ -87,7 +92,7 @@ class SketchActivity : AppCompatActivity() {
             if (selectionActionsPanel.visibility == View.VISIBLE) {
                 dismissSelectionActionsPanel(clearSelection = true)
             } else {
-                closeSketchPanel()
+                closeElementsPanel()
             }
         }
     }
@@ -97,6 +102,7 @@ class SketchActivity : AppCompatActivity() {
     companion object {
         private const val TOP_BAR_AUTO_HIDE_DELAY_MS = 5_000L
         private const val TOP_BAR_FADE_MS = 150L
+        private const val BOTTOM_NAV_BAR_ANIM_MS = 250L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -127,21 +133,21 @@ class SketchActivity : AppCompatActivity() {
         actionHideToggleSel = findViewById(R.id.actionHideToggleSel)
         actionDeleteSel = findViewById(R.id.actionDeleteSel)
 
-        bottomPanel = findViewById(R.id.bottomPanel)
-        mainToolsRow = findViewById(R.id.mainToolsRow)
-        panelContentContainer = findViewById(R.id.panelContentContainer)
-        defaultToolsContentScroll = findViewById(R.id.defaultToolsContentScroll)
-        defaultToolsContent = findViewById(R.id.defaultToolsContent)
+        bottomNavBar = findViewById(R.id.bottomNavBar)
+        elementsPanel = findViewById(R.id.elementsPanel)
         componentsContentContainer = findViewById(R.id.componentsContentContainer)
-        bottomSheetBehavior = BottomSheetBehavior.from(bottomPanel)
+        elementsPanelBehavior = BottomSheetBehavior.from(elementsPanel)
         onBackPressedDispatcher.addCallback(this, panelBackPressedCallback)
 
         canvas.listener = object : SketchCanvasView.Listener {
-            override fun onFlickEmptySpace() = openSketchPanel()
+            override fun onLongPressEmptySpace() = openElementsPanel()
 
-            override fun onDoubleTapEmptySpace() = openSketchPanel()
+            override fun onDoubleTapEmptySpace() = openElementsPanel()
 
-            override fun onTapEmptySpace() = closeSketchPanel()
+            override fun onTapEmptySpace() {
+                closeElementsPanel()
+                toggleBottomNavBar()
+            }
 
             override fun onPartLongPressed(part: SketchPart) {
                 showPartOptionsDialog(
@@ -166,7 +172,8 @@ class SketchActivity : AppCompatActivity() {
         }
 
         setupTopBar()
-        setupBottomPanel()
+        setupBottomNavBar()
+        setupElementsPanel()
         setupTabs()
         setupSelectionActionsPanel()
 
@@ -246,40 +253,103 @@ class SketchActivity : AppCompatActivity() {
 
 
 
-    private fun setupBottomPanel() {
-        // The panel opens via openSketchPanel() (flick or double-tap on empty canvas) and closes
-        // via closeSketchPanel() (back button/gesture) or by being swiped down, so we let the
-        // framework's own swipe-to-dismiss gesture drive it instead of a manual drag handle.
-        bottomSheetBehavior.isDraggable = true
-
-        bottomPanelBasePaddingTop = bottomPanel.paddingTop
-        ViewCompat.setOnApplyWindowInsetsListener(bottomPanel) { _, insets ->
-            statusBarInsetTop = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
-            // Insets can arrive after the panel is already expanded (e.g. first layout pass),
-            // so make sure the padding reflects the current state right away.
-            applyBottomPanelTopPadding(bottomSheetBehavior.state == BottomSheetBehavior.STATE_EXPANDED)
+    // Fixed bottom navigation bar (Select/Pages/Text/Upload/Elements), styled as a pill-shaped
+    // floating 3D sheet. Visible on launch; not a BottomSheetBehavior sheet, so there's no
+    // drag/collapse state to manage, just window-inset margin (so the floating pill clears the
+    // system nav bar instead of the sheet's own padding, which is reserved for the pill's
+    // extruded-edge thickness), keeping elementsPanel docked above it, and the show/hide toggle
+    // below.
+    private fun setupBottomNavBar() {
+        val navBarLp = bottomNavBar.layoutParams as? CoordinatorLayout.LayoutParams
+        bottomNavBarBaseMarginBottom = navBarLp?.bottomMargin ?: bottomNavBar.marginBottom
+        ViewCompat.setOnApplyWindowInsetsListener(bottomNavBar) { _, insets ->
+            val navInset = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+            val lp = bottomNavBar.layoutParams as? CoordinatorLayout.LayoutParams
+            if (lp != null) {
+                lp.bottomMargin = bottomNavBarBaseMarginBottom + navInset
+                bottomNavBar.layoutParams = lp
+            }
             insets
         }
 
-        // Select mode no longer has any default tools content (Quick Actions / Properties /
-        // Animation & Interaction were removed), so the collapsed panel should just hug the
-        // Main tools row instead of claiming half the screen.
-        bottomPanel.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
-            override fun onGlobalLayout() {
-                val rootHeight = (bottomPanel.parent as? View)?.height ?: 0
-                if (panelContentContainer.top > 0 && rootHeight > 0) {
-                    val minPanelHeight = panelContentContainer.top + bottomPanel.paddingBottom
-                    defaultPanelHeight = minPanelHeight.coerceIn(minPanelHeight, rootHeight)
-
-                    bottomSheetBehavior.peekHeight = defaultPanelHeight
-                    bottomPanel.viewTreeObserver.removeOnGlobalLayoutListener(this)
-                }
+        // elementsPanel is a sibling sheet, not a child of bottomNavBar, so it doesn't
+        // automatically stop above it - keep its bottom margin matched to the nav bar's total
+        // footprint (its measured height *plus* the floating gap beneath the pill; 0 while
+        // hidden) so the sheet's content never slides underneath the bar - or the gap below it -
+        // when it's shown, and can use the full height when it's hidden.
+        bottomNavBar.viewTreeObserver.addOnGlobalLayoutListener {
+            val navBarHeight = if (bottomNavBar.visibility == View.VISIBLE) {
+                bottomNavBar.height + bottomNavBar.marginBottom
+            } else {
+                0
             }
-        })
+            val lp = elementsPanel.layoutParams as? CoordinatorLayout.LayoutParams
+            if (lp != null && lp.bottomMargin != navBarHeight) {
+                lp.bottomMargin = navBarHeight
+                elementsPanel.layoutParams = lp
+            }
+        }
+    }
+
+    // Shows bottomNavBar by sliding up into place while fading in, easing out (fast start,
+    // gentle settle). Visible by default when SketchActivity opens; this is also the
+    // toggled-on state after tapping empty canvas while it's hidden. Slides/fades in place -
+    // doesn't affect canvas layout either way.
+    private fun showBottomNavBar() {
+        if (bottomNavBar.visibility == View.VISIBLE && bottomNavBar.alpha >= 1f && bottomNavBar.translationY == 0f) return
+        bottomNavBar.animate().cancel()
+        bottomNavBar.alpha = 0f
+        bottomNavBar.translationY = bottomNavBar.height.toFloat()
+        bottomNavBar.visibility = View.VISIBLE
+        bottomNavBar.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setDuration(BOTTOM_NAV_BAR_ANIM_MS)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    // Hides bottomNavBar by sliding down out of view while fading out, easing in (gentle start,
+    // fast finish). Toggled by tapping empty canvas while it's shown. Disappears in place -
+    // the canvas underneath doesn't expand to fill the space.
+    private fun hideBottomNavBar() {
+        if (bottomNavBar.visibility != View.VISIBLE) return
+        bottomNavBar.animate().cancel()
+        bottomNavBar.animate()
+            .alpha(0f)
+            .translationY(bottomNavBar.height.toFloat())
+            .setDuration(BOTTOM_NAV_BAR_ANIM_MS)
+            .setInterpolator(AccelerateInterpolator())
+            .withEndAction {
+                bottomNavBar.visibility = View.GONE
+                bottomNavBar.translationY = 0f
+            }
+            .start()
+    }
+
+    // Toggles bottomNavBar between shown and hidden. The single gesture entry point: a tap on
+    // empty canvas (see onTapEmptySpace below).
+    private fun toggleBottomNavBar() {
+        if (bottomNavBar.visibility == View.VISIBLE) hideBottomNavBar() else showBottomNavBar()
+    }
+
+    // Separate sheet (independent from bottomNavBar) that shows the Components browser. Opened
+    // by tapping the Elements tab, a long-press on empty canvas, or a double-tap on empty
+    // canvas; closed by the back button/gesture, a swipe-down, dragging its handle, or tapping
+    // empty canvas. Skips the collapsed state entirely -
+    // it's either hidden or fully expanded, never a partial peek.
+    private fun setupElementsPanel() {
+        elementsPanelBehavior.isDraggable = true
+
+        ViewCompat.setOnApplyWindowInsetsListener(elementsPanel) { _, insets ->
+            statusBarInsetTop = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
+            applyElementsPanelTopPadding(elementsPanelBehavior.state == BottomSheetBehavior.STATE_EXPANDED)
+            insets
+        }
 
         // Keeps the back-press callback and the panel's own content in sync with its state,
         // regardless of whether it was hidden by the back button, a swipe-down, or code.
-        bottomSheetBehavior.addBottomSheetCallback(object : BottomSheetBehavior.BottomSheetCallback() {
+        elementsPanelBehavior.addBottomSheetCallback(object : BottomSheetBehavior.BottomSheetCallback() {
             override fun onStateChanged(sheetView: View, newState: Int) {
                 when (newState) {
                     BottomSheetBehavior.STATE_HIDDEN -> {
@@ -288,73 +358,61 @@ class SketchActivity : AppCompatActivity() {
                     }
                     BottomSheetBehavior.STATE_EXPANDED -> {
                         panelBackPressedCallback.isEnabled = true
-                        applyBottomPanelTopPadding(expanded = true)
+                        applyElementsPanelTopPadding(expanded = true)
                     }
                     BottomSheetBehavior.STATE_DRAGGING, BottomSheetBehavior.STATE_SETTLING -> Unit
                     else -> {
                         panelBackPressedCallback.isEnabled = true
-                        applyBottomPanelTopPadding(expanded = false)
+                        applyElementsPanelTopPadding(expanded = false)
                     }
                 }
             }
 
-            // Keeps the extra top padding in sync while the sheet is being dragged/settled
-            // between collapsed and expanded, so the tab row eases out from under the status
-            // bar instead of snapping.
+            // Keeps the extra top padding in sync while the sheet is sliding, so its content
+            // eases out from under the status bar instead of snapping.
             override fun onSlide(sheetView: View, slideOffset: Float) {
                 val progress = slideOffset.coerceIn(0f, 1f)
-                applyBottomPanelTopPadding(progressToStatusBarInset = progress)
+                applyElementsPanelTopPadding(progressToStatusBarInset = progress)
             }
         })
 
-        // Open by default, showing just the Select tab row, as soon as SketchActivity launches
-        // (previously hidden until the user triggered "Add to sketch" via flick/double-tap).
-        setTabActive(tabSelect)
-        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+        // Hidden by default: the panel only appears once the user triggers "Add to sketch".
+        elementsPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
     }
 
-    // Adjusts bottomPanel's top padding so the main tools row (Select/Shapes/Text/Upload/
-    // Elements) clears the status bar once the panel is tall enough to reach it. `expanded`
-    // snaps straight to the fully-open or fully-closed amount; `progressToStatusBarInset` (0..1)
-    // interpolates between them while the sheet is sliding. Only one of the two is used per call.
-    private fun applyBottomPanelTopPadding(expanded: Boolean? = null, progressToStatusBarInset: Float? = null) {
+    // Adjusts elementsPanel's top padding so its content clears the status bar once expanded
+    // (it has no top padding of its own otherwise). `expanded` snaps straight to the fully-open
+    // or fully-closed amount; `progressToStatusBarInset` (0..1) interpolates between them while
+    // the sheet is sliding. Only one of the two is used per call.
+    private fun applyElementsPanelTopPadding(expanded: Boolean? = null, progressToStatusBarInset: Float? = null) {
         val extra = when {
             progressToStatusBarInset != null -> (statusBarInsetTop * progressToStatusBarInset).roundToInt()
             expanded == true -> statusBarInsetTop
             else -> 0
         }
-        bottomPanel.setPadding(
-            bottomPanel.paddingLeft,
-            bottomPanelBasePaddingTop + extra,
-            bottomPanel.paddingRight,
-            bottomPanel.paddingBottom,
-        )
+        elementsPanel.setPadding(elementsPanel.paddingLeft, extra, elementsPanel.paddingRight, elementsPanel.paddingBottom)
     }
 
-    // Opens the shared panel. Entry points are a flick (quick, short swipe) or a double-tap, both
-    // on empty canvas space (see SketchCanvasView.Listener#onFlickEmptySpace /
-    // #onDoubleTapEmptySpace above). Always lands on the Select tab with the default tools
-    // content, regardless of whatever tab/content it was showing before it was last hidden.
-    private fun openSketchPanel() {
-        if (showingComponents) closeComponentsContent() else setTabActive(tabSelect)
-        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+    // Opens elementsPanel. Entry points are a long-press or a double-tap on empty canvas space
+    // (see SketchCanvasView.Listener#onLongPressEmptySpace / #onDoubleTapEmptySpace above), as
+    // well as tapping the Elements tab directly.
+    private fun openElementsPanel() {
+        setTabActive(tabComponents)
+        showComponentsContent()
     }
 
-    // Closes the whole panel (as opposed to closeComponentsContent(), which just switches back to
-    // the default tools tab while keeping the panel open). Used by the back button/gesture and
-    // available to swipe-down-to-dismiss.
-    private fun closeSketchPanel() {
-        if (bottomSheetBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
-            bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+    // Closes elementsPanel. Used by the back button/gesture, a tap on empty canvas, a swipe-down,
+    // or dragging the sheet down by its handle (both native to the draggable BottomSheetBehavior).
+    private fun closeElementsPanel() {
+        if (elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
+            elementsPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
         }
     }
 
-    // Resets the panel back to its default tab/content so the next time it's opened it starts
-    // fresh, whichever way it was just closed.
+    // Resets the nav bar back to the Select tab so the next time elementsPanel is opened it
+    // starts fresh, whichever way it was just closed.
     private fun resetPanelContent() {
         showingComponents = false
-        componentsContentContainer.visibility = View.GONE
-        defaultToolsContentScroll.visibility = View.VISIBLE
         setTabActive(tabSelect)
     }
 
@@ -368,20 +426,15 @@ class SketchActivity : AppCompatActivity() {
             componentsContentBuilt = true
         }
         showingComponents = true
-        defaultToolsContentScroll.visibility = View.GONE
-        componentsContentContainer.visibility = View.VISIBLE
-        bottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
+        elementsPanelBehavior.state = BottomSheetBehavior.STATE_EXPANDED
     }
 
 
 
     private fun closeComponentsContent() {
         showingComponents = false
-        componentsContentContainer.visibility = View.GONE
-        defaultToolsContentScroll.visibility = View.VISIBLE
         setTabActive(tabSelect)
-        if (defaultPanelHeight > 0) bottomSheetBehavior.setPeekHeight(defaultPanelHeight, false)
-        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+        elementsPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
     }
 
 
@@ -413,9 +466,6 @@ class SketchActivity : AppCompatActivity() {
         if (showingComponents) closeComponentsContent()
         setTabActive(tabText)
 
-
-        bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
-
         showTextInputDialog(
             context = this,
             onConfirm = { text ->
@@ -430,8 +480,6 @@ class SketchActivity : AppCompatActivity() {
 
     private fun restorePanelAfterTextModal() {
         setTabActive(tabSelect)
-        if (defaultPanelHeight > 0) bottomSheetBehavior.setPeekHeight(defaultPanelHeight, false)
-        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
 
     private fun openPartPickerFromTab(tab: LinearLayout, title: String, kinds: List<PartKind>) {
@@ -451,17 +499,15 @@ class SketchActivity : AppCompatActivity() {
         for (tab in allTabs) setTabVisualState(tab, tab === active)
     }
 
-    // Nav-bar visual state: the active destination gets a small rounded indicator behind just
-    // its icon (icon tinted white for contrast against that indicator) plus an accent-colored
-    // label; inactive destinations show a plain gray icon + label and no indicator.
     private fun setTabVisualState(tab: LinearLayout, active: Boolean) {
-        val iconPill = tab.getChildAt(0) as FrameLayout
-        val label = tab.getChildAt(1) as TextView
-        iconPill.setBackgroundResource(if (active) R.drawable.bg_tab_selected else 0)
-        val iconColor = if (active) Color.WHITE else Color.parseColor("#9A9AA5")
-        val labelColor = if (active) Color.parseColor("#3D7EFF") else Color.parseColor("#9A9AA5")
-        (iconPill.getChildAt(0) as ImageView).setColorFilter(iconColor)
-        label.setTextColor(labelColor)
+        val pill = tab.getChildAt(0) as LinearLayout
+        pill.setBackgroundResource(if (active) R.drawable.bg_tab_selected else 0)
+        val color = if (active) Color.WHITE else Color.parseColor("#9A9AA5")
+        when (val icon = pill.getChildAt(0)) {
+            is ImageView -> icon.setColorFilter(color)
+            is TextView -> icon.setTextColor(color)
+        }
+        (pill.getChildAt(1) as TextView).setTextColor(color)
     }
 
 
@@ -542,7 +588,7 @@ class SketchActivity : AppCompatActivity() {
                 selectionActionsPanel.translationX = 0f
             }
             .start()
-        panelBackPressedCallback.isEnabled = bottomSheetBehavior.state != BottomSheetBehavior.STATE_HIDDEN
+        panelBackPressedCallback.isEnabled = elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
     }
 
     private fun notAvailableYet(feature: String) {

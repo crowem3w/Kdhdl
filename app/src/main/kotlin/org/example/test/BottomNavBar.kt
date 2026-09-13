@@ -1,259 +1,399 @@
 package org.example.test
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
-import android.graphics.Outline
+import android.graphics.PorterDuff
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
-import android.view.View
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.ViewGroup
-import android.view.ViewOutlineProvider
-import android.view.ViewTreeObserver
-import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.graphics.ColorUtils
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlin.math.sign
 
 /**
- * Floating frosted-glass navigation dock.
+ * Minimalist, spatially-layered bottom navigation, now a continuous
+ * carousel: the 5 destinations sit at a fractional "distance" from the
+ * currently centered tab (0 = centered/largest, up to 2 = edge/smallest),
+ * and that distance is a single float ([virtualCenter] vs a tab's index)
+ * that can be driven either by a tap (animated) or by a horizontal drag
+ * (tracks the finger 1:1, then spring-settles on release).
  *
- * A translucent pill (the "glass" dock) floats with a margin above the
- * screen's bottom edge and holds 5 evenly-spaced destinations, each a
- * thin-line icon + small label. The active destination doesn't just
- * recolor in place - a separate rounded-square button rises above it,
- * slightly overlapping the pill's top edge, with a brighter fill, a
- * stronger shadow, and the destination's filled icon. Its own row icon is
- * hidden (alpha 0) while it's active, since the raised button shows it
- * instead; its label stays in the row, promoted to a bold, high-contrast
- * color.
- *
- * Note on "blur": Android has no public API for a live backdrop blur of
- * whatever sits behind a view within the same window (real-time
- * background blur needs a separate window/surface, e.g. dialogs). The
- * frosted-glass read here is approximated with translucency + a subtle
- * edge highlight rather than an actual Gaussian blur of the content
- * underneath. A real blur is possible with a small blur library if that
- * matters more than the translucency approximation.
+ * Every visual property — frame size, icon size, elevation, lift, label
+ * size/color/weight, horizontal offset, and outline/filled icon crossfade —
+ * is interpolated continuously from that one distance value, so dragging
+ * feels like physically sliding the strip rather than jumping between
+ * discrete states.
  */
 class BottomNavBar(context: Context) : FrameLayout(context) {
 
     private val d = resources.displayMetrics.density
     private fun dp(v: Int) = (v * d).toInt()
-    private fun dpF(v: Int) = v * d
+    private fun dpF(v: Float) = v * d
 
     private val palette = AppTheme.of(context)
 
-    // Requested destination order: Settings, Home, Templates, Projects, Profile.
-    private val tabs = listOf(AppTab.SETTINGS, AppTab.HOME, AppTab.TEMPLATES, AppTab.PROJECTS, AppTab.PROFILE)
+    private val tabs = listOf(AppTab.HOME, AppTab.TEMPLATES, AppTab.PROJECTS, AppTab.PROFILE, AppTab.SETTINGS)
     private val n = tabs.size
 
-    companion object {
-        private const val PILL_HEIGHT_DP = 72
-        private const val PILL_MARGIN_H_DP = 24
-        private const val PILL_MARGIN_BOTTOM_DP = 20
-        private const val BUTTON_SIZE_DP = 60
-        private const val BUTTON_POKE_ABOVE_DP = 36 // how far the button rises above the pill's top edge
-        private const val ROOT_HEIGHT_DP = 140
-    }
+    // Breakpoints at distance 0 (centered), 1 (medium), 2 (edge). Values in
+    // between are linearly interpolated so the carousel reads as continuous
+    // motion rather than 3 fixed states.
+    private val bpFrameDp = floatArrayOf(66f, 48f, 38f)
+    private val bpIconDp = floatArrayOf(22f, 18f, 14f)
+    private val bpElevationDp = floatArrayOf(14f, 5f, 2f)
+    private val bpLiftDp = floatArrayOf(14f, 4f, 0f)
+    private val bpLabelSp = floatArrayOf(11f, 9f, 7f)
+    private val bpCenterOffsetDp = floatArrayOf(0f, 53f, 92f)
+    private val labelColors = intArrayOf(palette.navLabelCenter, palette.navLabelMedium, palette.navLabelEdge)
+
+    // Azure glow breakpoints: strongest right on the selected/centered frame,
+    // fading to a faint shadow on the rest so the strip still reads with a
+    // clear visual hierarchy instead of every frame glowing equally. No
+    // border — the glow comes purely from the colored elevation shadow.
+    private val bpGlowShadowAlpha = floatArrayOf(255f, 110f, 45f)
 
     private data class Slot(
         val root: LinearLayout,
-        val icon: ImageView,
+        val frame: FrameLayout,
+        val frameDrawable: GradientDrawable,
+        val iconOutline: ImageView,
+        val iconFilled: ImageView,
         val label: TextView,
     )
 
+    // One persistent view-set per TAB (not per screen position) — the tab's
+    // own views move/resize continuously as its distance from center changes.
     private val slots = tabs.map { buildSlot(it) }
 
-    private lateinit var pill: LinearLayout
-    private lateinit var activeButton: FrameLayout
-    private lateinit var activeIcon: ImageView
+    /** Continuous carousel position: an integer value means a tab is exactly
+     * centered; fractional values happen mid-drag or mid-settle-animation. */
+    private var virtualCenter = 0f
+    private var selectedIndex = 0
+    private var frontIndex = -1
 
-    private var selectedIndex = tabs.indexOf(AppTab.TEMPLATES).coerceAtLeast(0)
-    private var buttonAnimator: ValueAnimator? = null
+    private var settleAnimator: ValueAnimator? = null
+
+    private var downX = 0f
+    private var downY = 0f
+    private var dragStartCenter = 0f
+    private var isDragging = false
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private val dragSensitivityPx = dp(70).toFloat() // px of finger travel per one tab step
+    private val maxDragSteps = 2.4f
 
     var onTabSelected: ((AppTab) -> Unit)? = null
 
     init {
-        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(ROOT_HEIGHT_DP))
+        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(140))
+        setBackgroundColor(palette.navBarBackground)
         clipChildren = false
         clipToPadding = false
 
-        pill = buildPill()
-        addView(
-            pill,
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(PILL_HEIGHT_DP)).apply {
-                gravity = Gravity.BOTTOM
-                leftMargin = dp(PILL_MARGIN_H_DP)
-                rightMargin = dp(PILL_MARGIN_H_DP)
-                bottomMargin = dp(PILL_MARGIN_BOTTOM_DP)
-            },
-        )
-
-        activeButton = buildActiveButton()
-        addView(
-            activeButton,
-            FrameLayout.LayoutParams(dp(BUTTON_SIZE_DP), dp(BUTTON_SIZE_DP)).apply {
-                gravity = Gravity.BOTTOM or Gravity.START
-                bottomMargin = dp(PILL_MARGIN_BOTTOM_DP + PILL_HEIGHT_DP - (BUTTON_SIZE_DP - BUTTON_POKE_ABOVE_DP))
-            },
-        )
-
-        updateSlotVisualStates()
-
-        // Slot x-positions aren't known until after the first layout pass, so the button's
-        // initial placement is deferred to it.
-        viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
-            override fun onGlobalLayout() {
-                if (pill.width > 0) {
-                    positionActiveButton(animate = false)
-                    viewTreeObserver.removeOnGlobalLayoutListener(this)
-                }
-            }
-        })
-    }
-
-    // --- Building blocks --------------------------------------------------
-
-    private fun buildPill(): LinearLayout {
-        val glassDrawable = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dpF(PILL_HEIGHT_DP) / 2f
-            setColor(palette.navGlassFill)
-            setStroke(dp(1), palette.navGlassStroke)
+        val baseBottomMargin = dp(14)
+        tabs.forEachIndexed { idx, tab ->
+            val slot = slots[idx]
+            addView(
+                slot.root,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
+                ).apply { bottomMargin = baseBottomMargin },
+            )
+            val onTap = { onTabTapped(tab) }
+            slot.frame.setOnClickListener { onTap() }
+            slot.root.setOnClickListener { onTap() }
         }
-        return LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            background = glassDrawable
-            clipChildren = false
-            clipToPadding = false
-            // Soft, elevated shadow beneath the whole dock - the closest stand-in for a
-            // neumorphic "raised" look Android's elevation system offers.
-            elevation = dpF(10)
-            outlineAmbientShadowColor = palette.navGlassShadow
-            outlineSpotShadowColor = palette.navGlassShadow
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, dpF(PILL_HEIGHT_DP) / 2f)
-                }
-            }
-            slots.forEach { slot ->
-                addView(slot.root, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-            }
-        }
+
+        updateBoldStates()
+        layoutTabs()
     }
 
     private fun buildSlot(tab: AppTab): Slot {
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
+            gravity = Gravity.CENTER_HORIZONTAL
+            clipChildren = false
+            clipToPadding = false
+        }
+
+        val frameDrawable = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(palette.navFrameFill)
+        }
+
+        val frame = FrameLayout(context).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(66), dp(66))
+            background = frameDrawable
             isClickable = true
             isFocusable = true
+            clipToOutline = false
+            // Tint the elevation shadow itself Azure so the "glow" comes from
+            // the same light source as the frame's existing lift/elevation,
+            // rather than a separate fake-glow layer.
+            outlineAmbientShadowColor = palette.navGlow
+            outlineSpotShadowColor = palette.navGlow
         }
-        val icon = ImageView(context).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(22), dp(22))
+
+        // Outline and filled icons are stacked and cross-faded by alpha as
+        // the tab's distance from center changes, instead of hard-swapping
+        // the drawable resource.
+        val iconOutline = ImageView(context).apply {
+            layoutParams = FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER)
             scaleType = ImageView.ScaleType.FIT_CENTER
             setImageResource(tab.icon)
-            setColorFilter(palette.navInactiveTint)
+            setColorFilter(palette.navIconTint, PorterDuff.Mode.SRC_IN)
         }
+        val iconFilled = ImageView(context).apply {
+            layoutParams = FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setImageResource(tab.iconSelected)
+            setColorFilter(palette.navIconTint, PorterDuff.Mode.SRC_IN)
+            alpha = 0f
+        }
+        frame.addView(iconOutline)
+        frame.addView(iconFilled)
+
         val label = TextView(context).apply {
             text = tab.label
             gravity = Gravity.CENTER
-            textSize = 10.5f
-            setTextColor(palette.navInactiveTint)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(6) }
+            ).apply { topMargin = dp(9) }
         }
-        root.addView(icon)
+
+        root.addView(frame)
         root.addView(label)
-        root.setOnClickListener { onTabTapped(tabs.indexOf(tab)) }
-        return Slot(root, icon, label)
+        return Slot(root, frame, frameDrawable, iconOutline, iconFilled, label)
     }
 
-    private fun buildActiveButton(): FrameLayout {
-        val activeDrawable = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dpF(20)
-            setColor(palette.navActiveButtonFill)
-        }
-        activeIcon = ImageView(context).apply {
-            layoutParams = FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER)
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            setImageResource(tabs[selectedIndex].iconSelected)
-            setColorFilter(palette.navActiveIconTint)
-        }
-        return FrameLayout(context).apply {
-            background = activeDrawable
-            isClickable = true
-            isFocusable = true
-            elevation = dpF(18)
-            outlineAmbientShadowColor = palette.navActiveButtonShadow
-            outlineSpotShadowColor = palette.navActiveButtonShadow
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, dpF(20))
+    // --- Math helpers -------------------------------------------------
+
+    /** Shortest signed distance from `center` to `value` around the n-tab circle,
+     * e.g. for n=5 the result is always in (-2.5, 2.5]. */
+    private fun wrappedDistance(value: Float, center: Float): Float {
+        var diff = (value - center) % n
+        if (diff > n / 2f) diff -= n
+        if (diff <= -n / 2f) diff += n
+        return diff
+    }
+
+    private fun floorMod(a: Int, m: Int): Int = ((a % m) + m) % m
+
+    private fun lerpBp(bp: FloatArray, x: Float): Float {
+        val cx = x.coerceIn(0f, 2f)
+        val i = cx.toInt().coerceAtMost(1)
+        val frac = cx - i
+        return bp[i] + (bp[i + 1] - bp[i]) * frac
+    }
+
+    /** Like [lerpBp] but keeps extrapolating past distance 2 (same slope as the
+     * 1→2 segment) so a rubber-band overdrag still slides smoothly. */
+    private fun lerpBpExtrapolated(bp: FloatArray, x: Float): Float {
+        if (x <= 2f) return lerpBp(bp, x)
+        val slope = bp[2] - bp[1]
+        return bp[2] + slope * (x - 2f)
+    }
+
+    private fun lerpColor(colors: IntArray, x: Float): Int {
+        val cx = x.coerceIn(0f, 2f)
+        val i = cx.toInt().coerceAtMost(1)
+        val frac = cx - i
+        return ColorUtils.blendARGB(colors[i], colors[i + 1], frac)
+    }
+
+    // --- Layout ---------------------------------------------------------
+
+    /** Positions/sizes/colors every slot based on its continuous distance
+     * from [virtualCenter]. Called on every drag move and every animation frame. */
+    private fun layoutTabs() {
+        var nearestIdx = 0
+        var nearestAbs = Float.MAX_VALUE
+
+        tabs.indices.forEach { idx ->
+            val slot = slots[idx]
+            val dist = wrappedDistance(idx.toFloat(), virtualCenter)
+            val absD = abs(dist)
+            if (absD < nearestAbs) {
+                nearestAbs = absD
+                nearestIdx = idx
+            }
+
+            val frameSizeDp = lerpBp(bpFrameDp, absD)
+            val iconSizeDp = lerpBp(bpIconDp, absD)
+            val elevationDp = lerpBp(bpElevationDp, absD)
+            val liftDp = lerpBp(bpLiftDp, absD)
+            val labelSp = lerpBp(bpLabelSp, absD)
+            val labelColor = lerpColor(labelColors, absD)
+            val offsetDp = lerpBpExtrapolated(bpCenterOffsetDp, absD.coerceAtMost(maxDragSteps))
+            val signedOffsetPx = dpF(offsetDp) * dist.sign
+
+            val frameSizePx = dp(frameSizeDp.roundToInt())
+            (slot.frame.layoutParams as LinearLayout.LayoutParams).apply {
+                if (width != frameSizePx || height != frameSizePx) {
+                    width = frameSizePx
+                    height = frameSizePx
+                    slot.frame.layoutParams = this
                 }
             }
-            addView(activeIcon)
-            setOnClickListener { onTabSelected?.invoke(tabs[selectedIndex]) }
+            slot.frameDrawable.cornerRadius = frameSizeDp * 0.32f * d
+
+            // Azure glow: purely a colored elevation shadow (no border),
+            // scaled by the same continuous distance-from-center used for
+            // everything else — full strength when centered (selected),
+            // fading to a minimal accent everywhere else.
+            val glowShadowAlpha = lerpBp(bpGlowShadowAlpha, absD).roundToInt().coerceIn(0, 255)
+            val glowShadowColor = ColorUtils.setAlphaComponent(palette.navGlow, glowShadowAlpha)
+            slot.frame.outlineAmbientShadowColor = glowShadowColor
+            slot.frame.outlineSpotShadowColor = glowShadowColor
+
+            val iconSizePx = dp(iconSizeDp.roundToInt())
+            listOf(slot.iconOutline, slot.iconFilled).forEach { icon ->
+                val lp = icon.layoutParams as FrameLayout.LayoutParams
+                if (lp.width != iconSizePx || lp.height != iconSizePx) {
+                    lp.width = iconSizePx
+                    lp.height = iconSizePx
+                    icon.layoutParams = lp
+                }
+            }
+
+            slot.root.translationX = signedOffsetPx
+            slot.root.translationY = -dpF(liftDp)
+            slot.frame.elevation = dpF(elevationDp)
+            slot.label.textSize = labelSp
+            slot.label.setTextColor(labelColor)
+
+            val filledAlpha = (1f - absD).coerceIn(0f, 1f)
+            slot.iconFilled.alpha = filledAlpha
+            slot.iconOutline.alpha = 1f - filledAlpha
+        }
+
+        if (nearestIdx != frontIndex) {
+            slots[nearestIdx].root.bringToFront()
+            frontIndex = nearestIdx
         }
     }
 
-    // --- Selection ----------------------------------------------------------
-
-    private fun onTabTapped(index: Int) {
-        if (index == selectedIndex) {
-            onTabSelected?.invoke(tabs[index])
-            return
-        }
-        selectedIndex = index
-        updateSlotVisualStates()
-        positionActiveButton(animate = true)
-        onTabSelected?.invoke(tabs[index])
-    }
-
-    /** Public API kept for callers that select a tab programmatically. */
-    fun selectTab(tab: AppTab) {
-        onTabTapped(tabs.indexOf(tab))
-    }
-
-    private fun updateSlotVisualStates() {
+    private fun updateBoldStates() {
         slots.forEachIndexed { idx, slot ->
-            val active = idx == selectedIndex
-            // The active slot's own row icon is hidden - its icon lives in the raised
-            // button above instead - but its label is promoted to a bold, high-contrast
-            // color so the destination is still legible at a glance in the row.
-            slot.icon.alpha = if (active) 0f else 1f
-            slot.label.setTextColor(if (active) palette.navActiveLabelTint else palette.navInactiveTint)
-            slot.label.setTypeface(slot.label.typeface, if (active) Typeface.BOLD else Typeface.NORMAL)
+            val bold = idx == selectedIndex
+            slot.label.setTypeface(slot.label.typeface, if (bold) Typeface.BOLD else Typeface.NORMAL)
         }
-        activeIcon.setImageResource(tabs[selectedIndex].iconSelected)
     }
 
-    private fun positionActiveButton(animate: Boolean) {
-        if (pill.width == 0) return
-        val slotWidth = pill.width.toFloat() / n
-        val targetCenterX = pill.left + slotWidth * (selectedIndex + 0.5f)
-        val targetX = targetCenterX - activeButton.width / 2f
+    // --- Selection / animation -------------------------------------------
 
-        buttonAnimator?.cancel()
-        if (!animate) {
-            activeButton.translationX = targetX
-            return
-        }
-        buttonAnimator = ValueAnimator.ofFloat(activeButton.translationX, targetX).apply {
-            duration = 260
-            interpolator = DecelerateInterpolator()
-            addUpdateListener { activeButton.translationX = it.animatedValue as Float }
+    private fun animateVirtualCenterTo(target: Float, onEnd: () -> Unit) {
+        settleAnimator?.cancel()
+        settleAnimator = ValueAnimator.ofFloat(virtualCenter, target).apply {
+            duration = 380
+            interpolator = OvershootInterpolator(1.1f)
+            addUpdateListener {
+                virtualCenter = it.animatedValue as Float
+                layoutTabs()
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    onEnd()
+                }
+            })
             start()
         }
     }
 
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        post { positionActiveButton(animate = false) }
+    // The nav bar's own settle animation is purely cosmetic — the page switch
+    // fires immediately so the app doesn't feel like it's waiting on it.
+    private fun onTabTapped(tab: AppTab) {
+        if (isDragging) return
+        val idx = tabs.indexOf(tab)
+        if (idx == selectedIndex) {
+            onTabSelected?.invoke(tab)
+            return
+        }
+        val delta = wrappedDistance(idx.toFloat(), selectedIndex.toFloat())
+        onTabSelected?.invoke(tab)
+        animateVirtualCenterTo(virtualCenter + delta) {
+            selectedIndex = idx
+            virtualCenter = idx.toFloat()
+            updateBoldStates()
+            layoutTabs()
+        }
+    }
+
+    /** Public API kept for callers that select a tab programmatically. */
+    fun selectTab(tab: AppTab) {
+        onTabTapped(tab)
+    }
+
+    // --- Touch handling: tap-to-select vs horizontal drag -----------------
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.x
+                downY = ev.y
+                dragStartCenter = virtualCenter
+                isDragging = false
+                settleAnimator?.cancel()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = ev.x - downX
+                val dy = ev.y - downY
+                if (!isDragging && abs(dx) > touchSlop && abs(dx) > abs(dy)) {
+                    isDragging = true
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    override fun onTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!isDragging) {
+                    val dx = ev.x - downX
+                    if (abs(dx) > touchSlop) isDragging = true else return true
+                }
+                val dx = ev.x - downX
+                val deltaSteps = (-dx / dragSensitivityPx).coerceIn(-maxDragSteps, maxDragSteps)
+                virtualCenter = dragStartCenter + deltaSteps
+                layoutTabs()
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (isDragging) {
+                    isDragging = false
+                    val nearest = virtualCenter.roundToInt()
+                    val newIndex = floorMod(nearest, n)
+                    if (newIndex != selectedIndex) onTabSelected?.invoke(tabs[newIndex])
+                    animateVirtualCenterTo(nearest.toFloat()) {
+                        selectedIndex = newIndex
+                        virtualCenter = selectedIndex.toFloat()
+                        updateBoldStates()
+                        layoutTabs()
+                    }
+                    return true
+                }
+                return false
+            }
+        }
+        return super.onTouchEvent(ev)
     }
 }
