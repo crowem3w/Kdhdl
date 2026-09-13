@@ -10,10 +10,10 @@ import android.widget.TextView
 import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
 
-/**
- * Homepage tab content. This is the app's landing/hero screen; its
- * "Create app" action is what opens the SketchActivity editor.
- */
+
+
+
+
 fun buildHomePage(activity: MainActivity): FrameLayout {
     val d = activity.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()

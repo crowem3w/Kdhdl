@@ -40,11 +40,11 @@ class SketchActivity : AppCompatActivity() {
     private lateinit var tabComponents: LinearLayout
     private lateinit var allTabs: List<LinearLayout>
 
-    // Temporary panel shown after a long-press + drag marquee selection is released on the
-    // canvas (see SketchCanvasView.Listener#onMultiSelectionFinalized). Entirely separate from
-    // bottomPanel: it's a small floating sidebar of icon buttons docked to the screen edge
-    // rather than a draggable sheet, and it auto-dismisses once an action is picked (or the
-    // selection is otherwise cleared).
+    
+    
+    
+    
+    
     private lateinit var selectionActionsPanel: LinearLayout
     private lateinit var actionGroupToggle: LinearLayout
     private lateinit var actionGroupToggleLabel: TextView
@@ -70,12 +70,12 @@ class SketchActivity : AppCompatActivity() {
 
     private var defaultPanelHeight = 0
 
-    // bottomPanel's own XML paddingTop (18dp), captured once, plus whatever the status bar
-    // inset turns out to be. When the panel is STATE_EXPANDED it grows to match_parent height,
-    // which puts its top edge (the Select/Shapes/Text/Upload/Elements row) right at the physical
-    // top of the screen, behind the status bar - so on top of the normal 18dp we add the status
-    // bar's own height while expanded, and animate that extra amount in/out as the sheet slides
-    // so the row is never drawn underneath the status bar.
+    
+    
+    
+    
+    
+    
     private var bottomPanelBasePaddingTop = 0
     private var statusBarInsetTop = 0
 
@@ -101,9 +101,9 @@ class SketchActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // The sketch canvas is a fixed dark workspace regardless of the
-        // app's Light/Dark mode setting (Settings tab) — force the system
-        // bars to match rather than following whatever mode is active.
+        
+        
+        
         window.statusBarColor = 0xFF121212.toInt()
         window.navigationBarColor = 0xFF121212.toInt()
         setContentView(R.layout.activity_sketch)
@@ -247,23 +247,23 @@ class SketchActivity : AppCompatActivity() {
 
 
     private fun setupBottomPanel() {
-        // The panel opens via openSketchPanel() (flick or double-tap on empty canvas) and closes
-        // via closeSketchPanel() (back button/gesture) or by being swiped down, so we let the
-        // framework's own swipe-to-dismiss gesture drive it instead of a manual drag handle.
+        
+        
+        
         bottomSheetBehavior.isDraggable = true
 
         bottomPanelBasePaddingTop = bottomPanel.paddingTop
         ViewCompat.setOnApplyWindowInsetsListener(bottomPanel) { _, insets ->
             statusBarInsetTop = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
-            // Insets can arrive after the panel is already expanded (e.g. first layout pass),
-            // so make sure the padding reflects the current state right away.
+            
+            
             applyBottomPanelTopPadding(bottomSheetBehavior.state == BottomSheetBehavior.STATE_EXPANDED)
             insets
         }
 
-        // Select mode no longer has any default tools content (Quick Actions / Properties /
-        // Animation & Interaction were removed), so the collapsed panel should just hug the
-        // Main tools row instead of claiming half the screen.
+        
+        
+        
         bottomPanel.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
                 val rootHeight = (bottomPanel.parent as? View)?.height ?: 0
@@ -277,8 +277,8 @@ class SketchActivity : AppCompatActivity() {
             }
         })
 
-        // Keeps the back-press callback and the panel's own content in sync with its state,
-        // regardless of whether it was hidden by the back button, a swipe-down, or code.
+        
+        
         bottomSheetBehavior.addBottomSheetCallback(object : BottomSheetBehavior.BottomSheetCallback() {
             override fun onStateChanged(sheetView: View, newState: Int) {
                 when (newState) {
@@ -298,23 +298,23 @@ class SketchActivity : AppCompatActivity() {
                 }
             }
 
-            // Keeps the extra top padding in sync while the sheet is being dragged/settled
-            // between collapsed and expanded, so the tab row eases out from under the status
-            // bar instead of snapping.
+            
+            
+            
             override fun onSlide(sheetView: View, slideOffset: Float) {
                 val progress = slideOffset.coerceIn(0f, 1f)
                 applyBottomPanelTopPadding(progressToStatusBarInset = progress)
             }
         })
 
-        // Hidden by default: the panel only appears once the user triggers "Add to sketch".
+        
         bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
     }
 
-    // Adjusts bottomPanel's top padding so the main tools row (Select/Shapes/Text/Upload/
-    // Elements) clears the status bar once the panel is tall enough to reach it. `expanded`
-    // snaps straight to the fully-open or fully-closed amount; `progressToStatusBarInset` (0..1)
-    // interpolates between them while the sheet is sliding. Only one of the two is used per call.
+    
+    
+    
+    
     private fun applyBottomPanelTopPadding(expanded: Boolean? = null, progressToStatusBarInset: Float? = null) {
         val extra = when {
             progressToStatusBarInset != null -> (statusBarInsetTop * progressToStatusBarInset).roundToInt()
@@ -329,26 +329,26 @@ class SketchActivity : AppCompatActivity() {
         )
     }
 
-    // Opens the shared panel. Entry points are a flick (quick, short swipe) or a double-tap, both
-    // on empty canvas space (see SketchCanvasView.Listener#onFlickEmptySpace /
-    // #onDoubleTapEmptySpace above). Goes straight to the Components browser, matching what
-    // "Add to sketch" used to show as a standalone picker.
+    
+    
+    
+    
     private fun openSketchPanel() {
         setTabActive(tabComponents)
         showComponentsContent()
     }
 
-    // Closes the whole panel (as opposed to closeComponentsContent(), which just switches back to
-    // the default tools tab while keeping the panel open). Used by the back button/gesture and
-    // available to swipe-down-to-dismiss.
+    
+    
+    
     private fun closeSketchPanel() {
         if (bottomSheetBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
             bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
         }
     }
 
-    // Resets the panel back to its default tab/content so the next time it's opened it starts
-    // fresh, whichever way it was just closed.
+    
+    
     private fun resetPanelContent() {
         showingComponents = false
         componentsContentContainer.visibility = View.GONE
@@ -462,10 +462,10 @@ class SketchActivity : AppCompatActivity() {
 
 
 
-    // --- Temporary multi-selection actions panel ----------------------------------------------
-    // Opened by SketchCanvasView after a long-press + drag marquee release (onMultiSelectionFinalized)
-    // and dismissed either by picking an action below or by the selection being cleared some
-    // other way (tapping elsewhere on the canvas, deleting the selection, etc).
+    
+    
+    
+    
 
     private fun setupSelectionActionsPanel() {
         actionGroupToggle.setOnClickListener {
@@ -477,8 +477,8 @@ class SketchActivity : AppCompatActivity() {
             dismissSelectionActionsPanel(clearSelection = true)
         }
         actionMoveSel.setOnClickListener {
-            // Just dismiss the panel - the multi-selection itself stays active and highlighted,
-            // so the user can immediately drag any of the selected parts to move the whole group.
+            
+            
             dismissSelectionActionsPanel(clearSelection = false)
         }
         actionLockToggleSel.setOnClickListener {
@@ -490,8 +490,8 @@ class SketchActivity : AppCompatActivity() {
             dismissSelectionActionsPanel(clearSelection = true)
         }
         actionDeleteSel.setOnClickListener {
-            // deleteSelection() already clears the selection and fires onMultiSelectionCleared,
-            // which slides the panel back down for us.
+            
+            
             canvas.deleteSelection()
         }
     }
@@ -500,7 +500,7 @@ class SketchActivity : AppCompatActivity() {
         actionGroupToggleLabel.text = if (canvas.isSelectionGrouped()) "Ungroup" else "Group"
     }
 
-    // Slides the sidebar in from the left edge of the screen.
+    
     private fun showSelectionActionsPanel() {
         updateSelectionActionLabels()
         panelBackPressedCallback.isEnabled = true
@@ -515,17 +515,17 @@ class SketchActivity : AppCompatActivity() {
         }
     }
 
-    // Slides the panel back down off-screen. `clearSelection` controls whether the underlying
-    // multi-selection on the canvas is dropped too (false for "Move", where it should persist).
+    
+    
     private fun dismissSelectionActionsPanel(clearSelection: Boolean) {
         hideSelectionActionsPanel()
         if (clearSelection) canvas.clearMultiSelection()
     }
 
-    // Purely visual: slides the panel back off-screen to the left and hides it, without
-    // touching the canvas selection. Used both by dismissSelectionActionsPanel() above and
-    // directly as the onMultiSelectionCleared callback, since in that case the canvas has
-    // already cleared its own selection and is just notifying us to close the panel.
+    
+    
+    
+    
     private fun hideSelectionActionsPanel() {
         if (selectionActionsPanel.visibility != View.VISIBLE) return
         val dp24 = 24f * resources.displayMetrics.density
@@ -585,8 +585,8 @@ class SketchActivity : AppCompatActivity() {
 
     private fun generatePrompt() {
         val density = resources.displayMetrics.density
-        // Hidden parts (see the multi-select "Hide" action) are editor-only and shouldn't leak
-        // into the generated output.
+        
+        
         val visibleParts = canvas.parts.filterNot { it.hidden }
         val prompt = PromptGenerator.build(visibleParts, canvas.width, canvas.pageHeight.roundToInt(), density)
         showPromptDialog(this, prompt)

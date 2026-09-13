@@ -8,12 +8,12 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.google.android.material.materialswitch.MaterialSwitch
 
-/**
- * Settings tab content. Currently hosts a single row: the app-wide
- * Light/Dark mode toggle, backed by [ThemeManager]. Toggling it persists the
- * preference and recreates the activity so every hand-rolled screen picks
- * up the new [AppPalette] immediately.
- */
+
+
+
+
+
+
 fun buildSettingsPage(activity: MainActivity): FrameLayout {
     val d = activity.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
