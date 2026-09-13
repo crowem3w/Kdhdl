@@ -307,8 +307,10 @@ class SketchActivity : AppCompatActivity() {
             }
         })
 
-        // Hidden by default: the panel only appears once the user triggers "Add to sketch".
-        bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+        // Open by default, showing just the Select tab row, as soon as SketchActivity launches
+        // (previously hidden until the user triggered "Add to sketch" via flick/double-tap).
+        setTabActive(tabSelect)
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
 
     // Adjusts bottomPanel's top padding so the main tools row (Select/Shapes/Text/Upload/
@@ -331,11 +333,11 @@ class SketchActivity : AppCompatActivity() {
 
     // Opens the shared panel. Entry points are a flick (quick, short swipe) or a double-tap, both
     // on empty canvas space (see SketchCanvasView.Listener#onFlickEmptySpace /
-    // #onDoubleTapEmptySpace above). Goes straight to the Components browser, matching what
-    // "Add to sketch" used to show as a standalone picker.
+    // #onDoubleTapEmptySpace above). Always lands on the Select tab with the default tools
+    // content, regardless of whatever tab/content it was showing before it was last hidden.
     private fun openSketchPanel() {
-        setTabActive(tabComponents)
-        showComponentsContent()
+        if (showingComponents) closeComponentsContent() else setTabActive(tabSelect)
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
 
     // Closes the whole panel (as opposed to closeComponentsContent(), which just switches back to
@@ -449,15 +451,17 @@ class SketchActivity : AppCompatActivity() {
         for (tab in allTabs) setTabVisualState(tab, tab === active)
     }
 
+    // Nav-bar visual state: the active destination gets a small rounded indicator behind just
+    // its icon (icon tinted white for contrast against that indicator) plus an accent-colored
+    // label; inactive destinations show a plain gray icon + label and no indicator.
     private fun setTabVisualState(tab: LinearLayout, active: Boolean) {
-        val pill = tab.getChildAt(0) as LinearLayout
-        pill.setBackgroundResource(if (active) R.drawable.bg_tab_selected else 0)
-        val color = if (active) Color.WHITE else Color.parseColor("#9A9AA5")
-        when (val icon = pill.getChildAt(0)) {
-            is ImageView -> icon.setColorFilter(color)
-            is TextView -> icon.setTextColor(color)
-        }
-        (pill.getChildAt(1) as TextView).setTextColor(color)
+        val iconPill = tab.getChildAt(0) as FrameLayout
+        val label = tab.getChildAt(1) as TextView
+        iconPill.setBackgroundResource(if (active) R.drawable.bg_tab_selected else 0)
+        val iconColor = if (active) Color.WHITE else Color.parseColor("#9A9AA5")
+        val labelColor = if (active) Color.parseColor("#3D7EFF") else Color.parseColor("#9A9AA5")
+        (iconPill.getChildAt(0) as ImageView).setColorFilter(iconColor)
+        label.setTextColor(labelColor)
     }
 
 

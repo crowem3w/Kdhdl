@@ -17,34 +17,38 @@ data class AppPalette(
     val surface: Int,
     val onSurface: Int,
     val onSurfaceMuted: Int,
-    val navBarBackground: Int,
-    val navFrameFill: Int,
-    val navIconTint: Int,
-    val navLabelEdge: Int,
-    val navLabelMedium: Int,
-    val navLabelCenter: Int,
-    /** Azure accent used for the selected-tab glow (elevation shadow tint +
-     * border stroke). Non-selected frames use the same hue at a much lower
-     * intensity so the whole strip reads as one coherent visual hierarchy. */
-    val navGlow: Int,
+    /** Translucent fill of the floating glass dock itself (the frosted pill). */
+    val navGlassFill: Int,
+    /** Faint 1px edge highlight that sells the "glass" read on the pill. */
+    val navGlassStroke: Int,
+    /** Shadow tint for the pill's own soft elevation. */
+    val navGlassShadow: Int,
+    /** Muted gray used for every inactive item's thin-line icon + label. */
+    val navInactiveTint: Int,
+    /** Bright background of the raised floating button for the active item. */
+    val navActiveButtonFill: Int,
+    /** Dark tint for the active item's filled icon, sitting on the bright button. */
+    val navActiveIconTint: Int,
+    /** Strong, high-contrast color for the active item's bold label. */
+    val navActiveLabelTint: Int,
+    /** Stronger shadow tint for the raised active button, vs. the pill's own shadow. */
+    val navActiveButtonShadow: Int,
 )
 
 object AppTheme {
-    /** Azure — the single glow color shared by both themes. */
-    private const val AZURE = 0xFF0080FF.toInt()
-
     private val DARK = AppPalette(
         background = 0xFF121212.toInt(),
         surface = 0xFF1E1E1E.toInt(),
         onSurface = 0xFFF5F5F4.toInt(),
         onSurfaceMuted = 0xFFA8A29E.toInt(),
-        navBarBackground = 0xFF121212.toInt(),
-        navFrameFill = 0xFF262626.toInt(),
-        navIconTint = 0xFFFFFFFF.toInt(),
-        navLabelEdge = 0xFF6E6A66.toInt(),
-        navLabelMedium = 0xFF9C9691.toInt(),
-        navLabelCenter = 0xFFF5F5F4.toInt(),
-        navGlow = AZURE,
+        navGlassFill = 0x33FFFFFF,
+        navGlassStroke = 0x40FFFFFF,
+        navGlassShadow = 0xB3000000.toInt(),
+        navInactiveTint = 0xFF9C9691.toInt(),
+        navActiveButtonFill = 0xFFF5F5F4.toInt(),
+        navActiveIconTint = 0xFF1C1B1F.toInt(),
+        navActiveLabelTint = 0xFFF5F5F4.toInt(),
+        navActiveButtonShadow = 0xCC000000.toInt(),
     )
 
     private val LIGHT = AppPalette(
@@ -52,13 +56,14 @@ object AppTheme {
         surface = 0xFFFFFFFF.toInt(),
         onSurface = 0xFF1C1B1F.toInt(),
         onSurfaceMuted = 0xFF6E6A66.toInt(),
-        navBarBackground = 0xFFF3F2F0.toInt(),
-        navFrameFill = 0xFFFFFFFF.toInt(),
-        navIconTint = 0xFF1C1B1F.toInt(),
-        navLabelEdge = 0xFFA19C97.toInt(),
-        navLabelMedium = 0xFF79746F.toInt(),
-        navLabelCenter = 0xFF1C1B1F.toInt(),
-        navGlow = AZURE,
+        navGlassFill = 0xB3FFFFFF.toInt(),
+        navGlassStroke = 0x66FFFFFF,
+        navGlassShadow = 0x33000000,
+        navInactiveTint = 0xFFA19C97.toInt(),
+        navActiveButtonFill = 0xFFFFFFFF.toInt(),
+        navActiveIconTint = 0xFF1C1B1F.toInt(),
+        navActiveLabelTint = 0xFF1C1B1F.toInt(),
+        navActiveButtonShadow = 0x40000000,
     )
 
     fun of(context: Context): AppPalette =
