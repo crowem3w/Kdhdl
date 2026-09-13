@@ -1,14 +1,15 @@
 package org.example.test
 
+import android.animation.ArgbEvaluator
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
-import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -63,7 +64,29 @@ class SketchActivity : AppCompatActivity() {
     // BottomSheetBehavior sheet. Visible by default when SketchActivity opens; toggled
     // hidden/visible by tapping empty canvas (see onTapEmptySpace below). Never drags or
     // collapses - it's either fully shown or fully hidden.
-    private lateinit var bottomNavBar: LinearLayout
+    private lateinit var bottomNavBar: BottomNavSheetBar
+
+    // Per-tab visual state for the elevated-frame illusion: each pill keeps a persistent,
+    // alpha-animatable accent-color background (rather than a hard drawable swap) plus its own
+    // elevation, so a selection change can fade/raise the new pill and fade/lower the old one
+    // in the same animation frame that bottomNavBar's dimple is travelling between them - see
+    // applySelectionProgress().
+    private data class TabPillVisual(
+        val pill: LinearLayout,
+        val fill: GradientDrawable,
+        val icon: ImageView,
+        val label: TextView,
+    )
+
+    private lateinit var pillVisuals: List<TabPillVisual>
+    private val pillBaseElevationPx by lazy { dp(3f) }
+    private val pillRaisedElevationPx by lazy { dp(14f) }
+    private val pillRiseTranslationPx by lazy { -dp(20f) }
+    private val activeAccentColor = Color.parseColor("#3D7EFF")
+    private val inactiveTextColor = Color.parseColor("#9A9AA5")
+    private val activeTextColor = Color.WHITE
+
+    private fun dp(v: Float): Float = v * resources.displayMetrics.density
 
     // Separate sheet that opens above bottomNavBar to show the Components ("Elements") browser.
     // Independent BottomSheetBehavior from anything the nav bar does.
@@ -104,11 +127,6 @@ class SketchActivity : AppCompatActivity() {
         private const val TOP_BAR_AUTO_HIDE_DELAY_MS = 5_000L
         private const val TOP_BAR_FADE_MS = 150L
         private const val BOTTOM_NAV_BAR_ANIM_MS = 250L
-
-        // How far the selected tab's chip (bg_tab_chip.xml) rises above the nav bar's surface,
-        // and how long that rise (plus the matching socket/dent fading in beneath it) takes.
-        private const val TAB_CHIP_LIFT_DP = 5f
-        private const val TAB_CHIP_ANIM_MS = 220L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -446,8 +464,29 @@ class SketchActivity : AppCompatActivity() {
 
 
     private fun setupTabs() {
-        // No animation on first layout - the Select tab is simply active from the start, it
-        // didn't just get tapped.
+        pillVisuals = allTabs.map { column ->
+            // The pill translates ~20dp above its resting position when selected; without this,
+            // the column (which otherwise wraps tightly around the pill) would clip that lift.
+            column.clipChildren = false
+            column.clipToPadding = false
+            val pill = column.getChildAt(0) as LinearLayout
+            val fill = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(14f)
+                setColor(activeAccentColor)
+                alpha = 0
+            }
+            pill.background = fill
+            pill.elevation = pillBaseElevationPx
+            TabPillVisual(
+                pill = pill,
+                fill = fill,
+                icon = pill.getChildAt(0) as ImageView,
+                label = pill.getChildAt(1) as TextView,
+            )
+        }
+        bottomNavBar.onSelectionProgress = { oldIndex, newIndex, t -> applySelectionProgress(oldIndex, newIndex, t) }
+
         setTabActive(tabSelect, animate = false)
 
         tabShapes.setOnClickListener {
@@ -503,73 +542,36 @@ class SketchActivity : AppCompatActivity() {
     }
 
 
+    // Selects `active` and tells bottomNavBar to travel its dimple there; the resulting
+    // per-frame callback (applySelectionProgress) is what actually moves/colors the pills.
+    // `animate = false` is used only for the very first, on-launch selection.
     private fun setTabActive(active: LinearLayout, animate: Boolean = true) {
-        for (tab in allTabs) setTabVisualState(tab, tab === active, animate)
+        val index = allTabs.indexOf(active)
+        if (index < 0) return
+        bottomNavBar.setActiveTabIndex(index, animate)
     }
 
-    // Each tab is: LinearLayout (tabSelect etc, the SketchTabColumn) -> FrameLayout (the
-    // SketchTabSlot) -> [View socket (SketchTabSocket, index 0), LinearLayout pill
-    // (SketchTabPill, index 1)]. socket and pill are same-sized siblings, not parent/child, so
-    // that animating the socket's alpha never fades the icon/label riding on the pill above it.
-    //
-    // Selecting a tab plays two animations in lockstep: the pill rises off the bar
-    // (translationY) at the same time bg_tab_chip.xml is applied to it, while bg_tab_socket.xml
-    // fades in on the socket sitting right where the pill used to rest flush. Together they read
-    // as a small rounded-square tile lifting up and out of a dent pressed into the sheet -
-    // rather than the sheet just changing colour under a flat icon.
-    private fun setTabVisualState(tab: LinearLayout, active: Boolean, animate: Boolean = true) {
-        val slot = tab.getChildAt(0) as FrameLayout
-        val socket = slot.getChildAt(0)
-        val pill = slot.getChildAt(1) as LinearLayout
-
-        val color = if (active) Color.WHITE else Color.parseColor("#9A9AA5")
-        when (val icon = pill.getChildAt(0)) {
-            is ImageView -> icon.setColorFilter(color)
-            is TextView -> icon.setTextColor(color)
-        }
-        (pill.getChildAt(1) as TextView).setTextColor(color)
-
-        pill.animate().cancel()
-        socket.animate().cancel()
-
-        val liftPx = TAB_CHIP_LIFT_DP * resources.displayMetrics.density
-
-        if (!animate) {
-            pill.translationY = if (active) -liftPx else 0f
-            pill.setBackgroundResource(if (active) R.drawable.bg_tab_chip else 0)
-            socket.alpha = if (active) 1f else 0f
-            return
-        }
-
-        if (active) {
-            // The chip needs its raised-tile background in place *before* it starts rising,
-            // otherwise there's nothing to lift - it'd just be a flat icon sliding upward.
-            pill.setBackgroundResource(R.drawable.bg_tab_chip)
-            pill.translationY = 0f
-            pill.animate()
-                .translationY(-liftPx)
-                .setDuration(TAB_CHIP_ANIM_MS)
-                .setInterpolator(OvershootInterpolator(1.5f))
-                .start()
-            socket.animate()
-                .alpha(1f)
-                .setDuration(TAB_CHIP_ANIM_MS)
-                .setInterpolator(DecelerateInterpolator())
-                .start()
-        } else {
-            pill.animate()
-                .translationY(0f)
-                .setDuration(TAB_CHIP_ANIM_MS)
-                .setInterpolator(AccelerateInterpolator())
-                // Only strip the chip background back off once it has settled flush again -
-                // removing it mid-flight would make the tile vanish before it lands.
-                .withEndAction { pill.setBackgroundResource(0) }
-                .start()
-            socket.animate()
-                .alpha(0f)
-                .setDuration(TAB_CHIP_ANIM_MS)
-                .setInterpolator(AccelerateInterpolator())
-                .start()
+    // Driven every frame of bottomNavBar's selection animation (and once, instantly, for the
+    // initial state). `t` runs 0->1 with a small spring overshoot for whichever pill is
+    // becoming active, and the mirrored 1->0 for whichever pill is losing selection; every
+    // other pill just stays fully at rest. Elevation/alpha/color are clamped to valid ranges,
+    // but translationY is left unclamped so the frame's rise/descent carries the same gentle
+    // overshoot as the sheet's dimple beneath it.
+    private fun applySelectionProgress(oldIndex: Int, newIndex: Int, t: Float) {
+        val evaluator = ArgbEvaluator()
+        pillVisuals.forEachIndexed { i, visual ->
+            val localT = when (i) {
+                newIndex -> t
+                oldIndex -> 1f - t
+                else -> 0f
+            }
+            val clamped = localT.coerceIn(0f, 1f)
+            visual.fill.alpha = (clamped * 255f).roundToInt().coerceIn(0, 255)
+            visual.pill.translationY = pillRiseTranslationPx * localT
+            visual.pill.elevation = pillBaseElevationPx + (pillRaisedElevationPx - pillBaseElevationPx) * clamped
+            val color = evaluator.evaluate(clamped, inactiveTextColor, activeTextColor) as Int
+            visual.icon.setColorFilter(color)
+            visual.label.setTextColor(color)
         }
     }
 
