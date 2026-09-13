@@ -31,18 +31,18 @@ private enum class NavRole(
 ) {
     EDGE(
         frameSizeDp = 42, iconSizeDp = 16, elevationDp = 2, liftDp = 0, labelSizeSp = 8f,
-        fill = 0xFF000000.toInt(),
-        iconTint = 0xFF5C5C5C.toInt(), labelColor = 0xFF6E6A66.toInt(), bold = false,
+        fill = 0xFF262626.toInt(),
+        iconTint = 0xFFFFFFFF.toInt(), labelColor = 0xFF6E6A66.toInt(), bold = false,
     ),
     MEDIUM(
         frameSizeDp = 54, iconSizeDp = 20, elevationDp = 6, liftDp = 5, labelSizeSp = 10f,
-        fill = 0xFF000000.toInt(),
-        iconTint = 0xFFB0B0B0.toInt(), labelColor = 0xFF9C9691.toInt(), bold = false,
+        fill = 0xFF262626.toInt(),
+        iconTint = 0xFFFFFFFF.toInt(), labelColor = 0xFF9C9691.toInt(), bold = false,
     ),
     CENTER(
         frameSizeDp = 74, iconSizeDp = 26, elevationDp = 16, liftDp = 16, labelSizeSp = 12f,
-        fill = 0xFF000000.toInt(),
-        iconTint = 0xFFD0BCFF.toInt(), labelColor = 0xFFF5F5F4.toInt(), bold = true,
+        fill = 0xFF262626.toInt(),
+        iconTint = 0xFFFFFFFF.toInt(), labelColor = 0xFFF5F5F4.toInt(), bold = true,
     ),
 }
 
