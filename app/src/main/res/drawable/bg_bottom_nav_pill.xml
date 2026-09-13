@@ -10,14 +10,14 @@
         edge layer shows through beneath it, with a top-to-bottom gradient and a hairline
         stroke to sell the sense of a raised, lit panel.
 
-    Thickness: 3mm ~= 18dp at the 160dpi (mdpi) baseline (3mm / 25.4mm-per-inch * 160dp-per-inch).
+    Thickness: 1mm ~= 6dp at the 160dpi (mdpi) baseline (1mm / 25.4mm-per-inch * 160dp-per-inch).
     Corner radius is set far larger than the bar's half-height (999dp) so Android clamps it to
     a full stadium/pill shape regardless of the bar's actual height.
 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Edge / side-wall layer: shifted down by the 3mm (18dp) thickness. -->
-    <item android:top="18dp">
+    <!-- Edge / side-wall layer: shifted down by the 1mm (6dp) thickness. -->
+    <item android:top="6dp">
         <shape android:shape="rectangle">
             <solid android:color="#0A0A10" />
             <corners android:radius="999dp" />
@@ -25,8 +25,8 @@
     </item>
 
     <!-- Face layer: the visible top surface of the sheet, inset from the bottom by the same
-         18dp thickness so the edge layer above peeks out beneath it. -->
-    <item android:bottom="18dp">
+         6dp thickness so the edge layer above peeks out beneath it. -->
+    <item android:bottom="6dp">
         <shape android:shape="rectangle">
             <gradient
                 android:angle="90"

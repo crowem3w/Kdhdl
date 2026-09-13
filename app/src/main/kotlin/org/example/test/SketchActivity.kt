@@ -8,6 +8,7 @@ import android.os.Looper
 import android.view.View
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -103,6 +104,11 @@ class SketchActivity : AppCompatActivity() {
         private const val TOP_BAR_AUTO_HIDE_DELAY_MS = 5_000L
         private const val TOP_BAR_FADE_MS = 150L
         private const val BOTTOM_NAV_BAR_ANIM_MS = 250L
+
+        // How far the selected tab's chip (bg_tab_chip.xml) rises above the nav bar's surface,
+        // and how long that rise (plus the matching socket/dent fading in beneath it) takes.
+        private const val TAB_CHIP_LIFT_DP = 5f
+        private const val TAB_CHIP_ANIM_MS = 220L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -440,7 +446,9 @@ class SketchActivity : AppCompatActivity() {
 
 
     private fun setupTabs() {
-        setTabActive(tabSelect)
+        // No animation on first layout - the Select tab is simply active from the start, it
+        // didn't just get tapped.
+        setTabActive(tabSelect, animate = false)
 
         tabShapes.setOnClickListener {
             openPartPickerFromTab(tabShapes, "Shapes", listOf(PartKind.CARD, PartKind.IMAGE, PartKind.CHIP))
@@ -495,19 +503,74 @@ class SketchActivity : AppCompatActivity() {
     }
 
 
-    private fun setTabActive(active: LinearLayout) {
-        for (tab in allTabs) setTabVisualState(tab, tab === active)
+    private fun setTabActive(active: LinearLayout, animate: Boolean = true) {
+        for (tab in allTabs) setTabVisualState(tab, tab === active, animate)
     }
 
-    private fun setTabVisualState(tab: LinearLayout, active: Boolean) {
-        val pill = tab.getChildAt(0) as LinearLayout
-        pill.setBackgroundResource(if (active) R.drawable.bg_tab_selected else 0)
+    // Each tab is: LinearLayout (tabSelect etc, the SketchTabColumn) -> FrameLayout (the
+    // SketchTabSlot) -> [View socket (SketchTabSocket, index 0), LinearLayout pill
+    // (SketchTabPill, index 1)]. socket and pill are same-sized siblings, not parent/child, so
+    // that animating the socket's alpha never fades the icon/label riding on the pill above it.
+    //
+    // Selecting a tab plays two animations in lockstep: the pill rises off the bar
+    // (translationY) at the same time bg_tab_chip.xml is applied to it, while bg_tab_socket.xml
+    // fades in on the socket sitting right where the pill used to rest flush. Together they read
+    // as a small rounded-square tile lifting up and out of a dent pressed into the sheet -
+    // rather than the sheet just changing colour under a flat icon.
+    private fun setTabVisualState(tab: LinearLayout, active: Boolean, animate: Boolean = true) {
+        val slot = tab.getChildAt(0) as FrameLayout
+        val socket = slot.getChildAt(0)
+        val pill = slot.getChildAt(1) as LinearLayout
+
         val color = if (active) Color.WHITE else Color.parseColor("#9A9AA5")
         when (val icon = pill.getChildAt(0)) {
             is ImageView -> icon.setColorFilter(color)
             is TextView -> icon.setTextColor(color)
         }
         (pill.getChildAt(1) as TextView).setTextColor(color)
+
+        pill.animate().cancel()
+        socket.animate().cancel()
+
+        val liftPx = TAB_CHIP_LIFT_DP * resources.displayMetrics.density
+
+        if (!animate) {
+            pill.translationY = if (active) -liftPx else 0f
+            pill.setBackgroundResource(if (active) R.drawable.bg_tab_chip else 0)
+            socket.alpha = if (active) 1f else 0f
+            return
+        }
+
+        if (active) {
+            // The chip needs its raised-tile background in place *before* it starts rising,
+            // otherwise there's nothing to lift - it'd just be a flat icon sliding upward.
+            pill.setBackgroundResource(R.drawable.bg_tab_chip)
+            pill.translationY = 0f
+            pill.animate()
+                .translationY(-liftPx)
+                .setDuration(TAB_CHIP_ANIM_MS)
+                .setInterpolator(OvershootInterpolator(1.5f))
+                .start()
+            socket.animate()
+                .alpha(1f)
+                .setDuration(TAB_CHIP_ANIM_MS)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+        } else {
+            pill.animate()
+                .translationY(0f)
+                .setDuration(TAB_CHIP_ANIM_MS)
+                .setInterpolator(AccelerateInterpolator())
+                // Only strip the chip background back off once it has settled flush again -
+                // removing it mid-flight would make the tile vanish before it lands.
+                .withEndAction { pill.setBackgroundResource(0) }
+                .start()
+            socket.animate()
+                .alpha(0f)
+                .setDuration(TAB_CHIP_ANIM_MS)
+                .setInterpolator(AccelerateInterpolator())
+                .start()
+        }
     }
 
 

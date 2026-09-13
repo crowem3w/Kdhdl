@@ -167,8 +167,8 @@
          never drags, collapses, or hides). Tapping Shapes/Text/Upload opens its own modal
          picker/dialog; tapping Elements opens elementsPanel below, a separate sheet that
          floats above this bar (see setupBottomNavBar / setupElementsPanel in SketchActivity).
-         bg_bottom_nav_pill gives it a fully-rounded capsule shape plus a 3mm (~18dp) extruded
-         edge for the "sheet" thickness; paddingBottom is bumped by that same 18dp so the tab
+         bg_bottom_nav_pill gives it a fully-rounded capsule shape plus a 1mm (~6dp) extruded
+         edge for the "sheet" thickness; paddingBottom is bumped by that same 6dp so the tab
          row's own bottom edge lines up with the top face's bottom edge instead of overlapping
          the extruded lip. -->
     <LinearLayout
@@ -182,57 +182,72 @@
         android:background="@drawable/bg_bottom_nav_pill"
         android:paddingHorizontal="24dp"
         android:paddingTop="18dp"
-        android:paddingBottom="36dp"
+        android:paddingBottom="24dp"
         android:elevation="12dp">
 
         <LinearLayout
             android:id="@+id/tabSelect"
             style="@style/SketchTabColumn">
 
-            <LinearLayout style="@style/SketchTabPill" android:background="@drawable/bg_tab_selected">
-                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_select" />
-                <TextView style="@style/SketchTabLabel" android:text="Select" android:textColor="#FFFFFF" />
-            </LinearLayout>
+            <FrameLayout style="@style/SketchTabSlot">
+                <View style="@style/SketchTabSocket" />
+                <LinearLayout style="@style/SketchTabPill">
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_select" />
+                    <TextView style="@style/SketchTabLabel" android:text="Select" android:textColor="#FFFFFF" />
+                </LinearLayout>
+            </FrameLayout>
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/tabShapes"
             style="@style/SketchTabColumn">
 
-            <LinearLayout style="@style/SketchTabPill">
-                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_pages" app:tint="#9A9AA5" />
-                <TextView style="@style/SketchTabLabel" android:text="Pages" android:textColor="#9A9AA5" />
-            </LinearLayout>
+            <FrameLayout style="@style/SketchTabSlot">
+                <View style="@style/SketchTabSocket" />
+                <LinearLayout style="@style/SketchTabPill">
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_pages" app:tint="#9A9AA5" />
+                    <TextView style="@style/SketchTabLabel" android:text="Pages" android:textColor="#9A9AA5" />
+                </LinearLayout>
+            </FrameLayout>
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/tabText"
             style="@style/SketchTabColumn">
 
-            <LinearLayout style="@style/SketchTabPill">
-                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_text" app:tint="#9A9AA5" />
-                <TextView style="@style/SketchTabLabel" android:text="Text" android:textColor="#9A9AA5" />
-            </LinearLayout>
+            <FrameLayout style="@style/SketchTabSlot">
+                <View style="@style/SketchTabSocket" />
+                <LinearLayout style="@style/SketchTabPill">
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_text" app:tint="#9A9AA5" />
+                    <TextView style="@style/SketchTabLabel" android:text="Text" android:textColor="#9A9AA5" />
+                </LinearLayout>
+            </FrameLayout>
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/tabMedia"
             style="@style/SketchTabColumn">
 
-            <LinearLayout style="@style/SketchTabPill">
-                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_upload" app:tint="#9A9AA5" />
-                <TextView style="@style/SketchTabLabel" android:text="Upload" android:textColor="#9A9AA5" />
-            </LinearLayout>
+            <FrameLayout style="@style/SketchTabSlot">
+                <View style="@style/SketchTabSocket" />
+                <LinearLayout style="@style/SketchTabPill">
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_upload" app:tint="#9A9AA5" />
+                    <TextView style="@style/SketchTabLabel" android:text="Upload" android:textColor="#9A9AA5" />
+                </LinearLayout>
+            </FrameLayout>
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/tabComponents"
             style="@style/SketchTabColumn">
 
-            <LinearLayout style="@style/SketchTabPill">
-                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_elements" app:tint="#9A9AA5" />
-                <TextView style="@style/SketchTabLabel" android:text="Elements" android:textColor="#9A9AA5" />
-            </LinearLayout>
+            <FrameLayout style="@style/SketchTabSlot">
+                <View style="@style/SketchTabSocket" />
+                <LinearLayout style="@style/SketchTabPill">
+                    <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_elements" app:tint="#9A9AA5" />
+                    <TextView style="@style/SketchTabLabel" android:text="Elements" android:textColor="#9A9AA5" />
+                </LinearLayout>
+            </FrameLayout>
         </LinearLayout>
     </LinearLayout>
 

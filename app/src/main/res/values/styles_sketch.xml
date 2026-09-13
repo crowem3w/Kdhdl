@@ -18,6 +18,25 @@
         <item name="android:paddingVertical">8dp</item>
     </style>
 
+    <!-- Wrapper around each tab's pill that also hosts the sunken "socket" drawable (see
+         bg_tab_socket.xml) as a same-sized sibling layer behind it. Sized to wrap_content so it
+         shrink-wraps to the pill's own footprint - the match_parent socket beneath then
+         stretches to that same footprint, keeping the dent perfectly aligned under the chip it
+         belongs to regardless of tab. -->
+    <style name="SketchTabSlot">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+    </style>
+
+    <!-- The dent itself: starts invisible (alpha 0) and is only faded in on the selected tab,
+         in lockstep with its chip lifting off of it (see setTabVisualState). -->
+    <style name="SketchTabSocket">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:background">@drawable/bg_tab_socket</item>
+        <item name="android:alpha">0</item>
+    </style>
+
     <style name="SketchTabIcon">
         <item name="android:layout_width">20dp</item>
         <item name="android:layout_height">20dp</item>
