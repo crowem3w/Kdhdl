@@ -57,6 +57,13 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
     private val bpCenterOffsetDp = floatArrayOf(0f, 53f, 92f)
     private val labelColors = intArrayOf(palette.navLabelCenter, palette.navLabelMedium, palette.navLabelEdge)
 
+    // Azure glow breakpoints: strongest right on the selected/centered frame,
+    // fading to a faint hairline on the rest so the strip still reads with a
+    // clear visual hierarchy instead of every frame glowing equally.
+    private val bpGlowStrokeWidthDp = floatArrayOf(2f, 1f, 0.75f)
+    private val bpGlowStrokeAlpha = floatArrayOf(235f, 70f, 30f)
+    private val bpGlowShadowAlpha = floatArrayOf(255f, 110f, 45f)
+
     private data class Slot(
         val root: LinearLayout,
         val frame: FrameLayout,
@@ -132,6 +139,12 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
             background = frameDrawable
             isClickable = true
             isFocusable = true
+            clipToOutline = false
+            // Tint the elevation shadow itself Azure so the "glow" comes from
+            // the same light source as the frame's existing lift/elevation,
+            // rather than a separate fake-glow layer.
+            outlineAmbientShadowColor = palette.navGlow
+            outlineSpotShadowColor = palette.navGlow
         }
 
         // Outline and filled icons are stacked and cross-faded by alpha as
@@ -237,6 +250,19 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
                 }
             }
             slot.frameDrawable.cornerRadius = frameSizeDp * 0.32f * d
+
+            // Azure glow: a thin tinted border plus a colored elevation
+            // shadow, both scaled by the same continuous distance-from-
+            // center used for everything else — full strength when centered
+            // (selected), fading to a minimal accent everywhere else.
+            val glowStrokeWidthPx = (lerpBp(bpGlowStrokeWidthDp, absD) * d).roundToInt().coerceAtLeast(1)
+            val glowStrokeAlpha = lerpBp(bpGlowStrokeAlpha, absD).roundToInt().coerceIn(0, 255)
+            slot.frameDrawable.setStroke(glowStrokeWidthPx, ColorUtils.setAlphaComponent(palette.navGlow, glowStrokeAlpha))
+
+            val glowShadowAlpha = lerpBp(bpGlowShadowAlpha, absD).roundToInt().coerceIn(0, 255)
+            val glowShadowColor = ColorUtils.setAlphaComponent(palette.navGlow, glowShadowAlpha)
+            slot.frame.outlineAmbientShadowColor = glowShadowColor
+            slot.frame.outlineSpotShadowColor = glowShadowColor
 
             val iconSizePx = dp(iconSizeDp.roundToInt())
             listOf(slot.iconOutline, slot.iconFilled).forEach { icon ->

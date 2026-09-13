@@ -1,29 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#FFFFFF</color>
-
-    <!-- ============================================================
-         Navigation-bar "depth illusion" palette — LIGHT mode.
-         Frames read as raised (light-to-dark top-to-bottom gradient +
-         soft cast shadow); the active tab pill reads as pressed-in
-         (inverted, dark-to-light gradient). The values-night copy of
-         this file swaps these for the dark-mode equivalents so every
-         drawable that references them adapts automatically.
-         ============================================================ -->
-    <color name="nav_frame_top">#FFFFFF</color>
-    <color name="nav_frame_bottom">#E9E7E2</color>
-    <color name="nav_frame_stroke">#1F000000</color>
-    <color name="nav_frame_ripple">#1F000000</color>
-    <color name="nav_icon_active">#3C3C43</color>
-    <color name="nav_icon_muted">#8A8A93</color>
-
-    <color name="tab_bar_frame_top">#FFFFFF</color>
-    <color name="tab_bar_frame_bottom">#E9E7E2</color>
-    <color name="tab_bar_frame_stroke">#1F000000</color>
-
-    <color name="tab_pill_top">#2C64C9</color>
-    <color name="tab_pill_bottom">#4C8CFF</color>
-    <color name="tab_pill_stroke">#33FFFFFF</color>
-    <color name="tab_label_active">#FFFFFF</color>
-    <color name="tab_label_inactive">#8A8A93</color>
 </resources>

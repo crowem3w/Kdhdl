@@ -1,6 +1,7 @@
 package org.example.test
 
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -13,7 +14,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -452,10 +452,7 @@ class SketchActivity : AppCompatActivity() {
     private fun setTabVisualState(tab: LinearLayout, active: Boolean) {
         val pill = tab.getChildAt(0) as LinearLayout
         pill.setBackgroundResource(if (active) R.drawable.bg_tab_selected else 0)
-        val color = ContextCompat.getColor(
-            this,
-            if (active) R.color.tab_label_active else R.color.tab_label_inactive,
-        )
+        val color = if (active) Color.WHITE else Color.parseColor("#9A9AA5")
         when (val icon = pill.getChildAt(0)) {
             is ImageView -> icon.setColorFilter(color)
             is TextView -> icon.setTextColor(color)

@@ -23,9 +23,16 @@ data class AppPalette(
     val navLabelEdge: Int,
     val navLabelMedium: Int,
     val navLabelCenter: Int,
+    /** Azure accent used for the selected-tab glow (elevation shadow tint +
+     * border stroke). Non-selected frames use the same hue at a much lower
+     * intensity so the whole strip reads as one coherent visual hierarchy. */
+    val navGlow: Int,
 )
 
 object AppTheme {
+    /** Azure — the single glow color shared by both themes. */
+    private const val AZURE = 0xFF0080FF.toInt()
+
     private val DARK = AppPalette(
         background = 0xFF121212.toInt(),
         surface = 0xFF1E1E1E.toInt(),
@@ -37,6 +44,7 @@ object AppTheme {
         navLabelEdge = 0xFF6E6A66.toInt(),
         navLabelMedium = 0xFF9C9691.toInt(),
         navLabelCenter = 0xFFF5F5F4.toInt(),
+        navGlow = AZURE,
     )
 
     private val LIGHT = AppPalette(
@@ -50,6 +58,7 @@ object AppTheme {
         navLabelEdge = 0xFFA19C97.toInt(),
         navLabelMedium = 0xFF79746F.toInt(),
         navLabelCenter = 0xFF1C1B1F.toInt(),
+        navGlow = AZURE,
     )
 
     fun of(context: Context): AppPalette =
