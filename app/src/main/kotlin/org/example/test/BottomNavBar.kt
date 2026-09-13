@@ -86,7 +86,10 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
         roles.forEach { role -> slots.add(buildSlot(role)) }
 
         val baseBottomMargin = dp(14)
-        val addOrder = listOf(0, 1, 3, 4, 2) // center (index 2) added last -> drawn on top
+        // Draw order must go smallest-first outward-in on each side, so each
+        // layer recedes *behind* the one closer to the center:
+        // edge -> medium -> center (left side), edge -> medium -> center (right side).
+        val addOrder = listOf(0, 1, 4, 3, 2)
         addOrder.forEach { i ->
             val role = roles[i]
             addView(
