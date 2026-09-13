@@ -25,25 +25,24 @@ private enum class NavRole(
     val liftDp: Int,
     val labelSizeSp: Float,
     val fill: Int,
-    val stroke: Int,
     val iconTint: Int,
     val labelColor: Int,
     val bold: Boolean,
 ) {
     EDGE(
-        frameSizeDp = 42, iconSizeDp = 16, elevationDp = 0, liftDp = 0, labelSizeSp = 8f,
-        fill = 0xFF161616.toInt(), stroke = 0xFF262626.toInt(),
-        iconTint = 0xFF6E6A66.toInt(), labelColor = 0xFF6E6A66.toInt(), bold = false,
+        frameSizeDp = 42, iconSizeDp = 16, elevationDp = 2, liftDp = 0, labelSizeSp = 8f,
+        fill = 0xFFFFFFFF.toInt(),
+        iconTint = 0xFFBFBFBF.toInt(), labelColor = 0xFF6E6A66.toInt(), bold = false,
     ),
     MEDIUM(
-        frameSizeDp = 54, iconSizeDp = 20, elevationDp = 3, liftDp = 5, labelSizeSp = 10f,
-        fill = 0xFF1C1C1C.toInt(), stroke = 0xFF323232.toInt(),
-        iconTint = 0xFFAFA9A3.toInt(), labelColor = 0xFF9C9691.toInt(), bold = false,
+        frameSizeDp = 54, iconSizeDp = 20, elevationDp = 6, liftDp = 5, labelSizeSp = 10f,
+        fill = 0xFFFFFFFF.toInt(),
+        iconTint = 0xFF6B6B6B.toInt(), labelColor = 0xFF9C9691.toInt(), bold = false,
     ),
     CENTER(
-        frameSizeDp = 74, iconSizeDp = 26, elevationDp = 14, liftDp = 16, labelSizeSp = 12f,
-        fill = 0xFF211F27.toInt(), stroke = 0x66D0BCFF, // accent, low-alpha, thin
-        iconTint = 0xFFD0BCFF.toInt(), labelColor = 0xFFF5F5F4.toInt(), bold = true,
+        frameSizeDp = 74, iconSizeDp = 26, elevationDp = 16, liftDp = 16, labelSizeSp = 12f,
+        fill = 0xFFFFFFFF.toInt(),
+        iconTint = 0xFF6750A4.toInt(), labelColor = 0xFFF5F5F4.toInt(), bold = true,
     ),
 }
 
@@ -138,7 +137,7 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = role.frameSizeDp * 0.32f * d
             setColor(role.fill)
-            setStroke(dp(1), role.stroke)
+            // No border — depth is communicated purely through elevation/shadow.
         }
 
         val frame = FrameLayout(context).apply {
