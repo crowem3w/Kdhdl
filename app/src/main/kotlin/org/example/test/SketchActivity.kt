@@ -152,7 +152,7 @@ class SketchActivity : AppCompatActivity() {
         tabText = findViewById(R.id.tabText)
         tabMedia = findViewById(R.id.tabMedia)
         tabComponents = findViewById(R.id.tabComponents)
-        allTabs = listOf(tabSelect, tabShapes, tabText, tabMedia, tabComponents)
+        allTabs = listOf(tabShapes, tabText, tabSelect, tabMedia, tabComponents)
 
         selectionActionsPanel = findViewById(R.id.selectionActionsPanel)
         actionGroupToggle = findViewById(R.id.actionGroupToggle)
@@ -443,7 +443,8 @@ class SketchActivity : AppCompatActivity() {
     
     private fun resetPanelContent() {
         showingComponents = false
-        setTabActive(tabSelect)
+        
+        
     }
 
 
@@ -463,7 +464,8 @@ class SketchActivity : AppCompatActivity() {
 
     private fun closeComponentsContent() {
         showingComponents = false
-        setTabActive(tabSelect)
+        
+        
         elementsPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
     }
 
@@ -503,6 +505,7 @@ class SketchActivity : AppCompatActivity() {
         }
         bottomNavBar.onSelectionProgress = { oldIndex, newIndex, t -> applySelectionProgress(oldIndex, newIndex, t) }
 
+        
         setTabActive(tabSelect, animate = false)
         
         
@@ -531,7 +534,10 @@ class SketchActivity : AppCompatActivity() {
             showComponentsContent()
         }
         tabSelect.setOnClickListener {
-            if (showingComponents) closeComponentsContent() else setTabActive(tabSelect)
+            
+            
+            if (showingComponents) closeComponentsContent()
+            setTabActive(tabSelect)
         }
     }
 
@@ -547,16 +553,14 @@ class SketchActivity : AppCompatActivity() {
                 if (text.isNotBlank()) {
                     addPart(PartKind.TEXT, canvas.width / 2f, canvas.pageHeight / 2f, label = text)
                 }
-                restorePanelAfterTextModal()
+                
             },
-            onCancel = { restorePanelAfterTextModal() },
+            onCancel = { },
         )
     }
 
-    private fun restorePanelAfterTextModal() {
-        setTabActive(tabSelect)
-    }
-
+    
+    
     private fun openPartPickerFromTab(tab: LinearLayout, title: String, kinds: List<PartKind>) {
         if (showingComponents) closeComponentsContent()
         setTabActive(tab)
@@ -565,7 +569,7 @@ class SketchActivity : AppCompatActivity() {
             kinds = kinds,
             x = canvas.width / 2f,
             y = canvas.pageHeight / 2f,
-            onDismiss = { setTabActive(tabSelect) },
+            onDismiss = { },
         )
     }
 

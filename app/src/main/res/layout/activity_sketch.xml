@@ -189,16 +189,6 @@
         android:clipToPadding="false">
 
         <LinearLayout
-            android:id="@+id/tabSelect"
-            style="@style/SketchTabColumn">
-
-            <LinearLayout style="@style/SketchTabPill">
-                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_select" />
-                <TextView style="@style/SketchTabLabel" android:text="Select" android:textColor="#FFFFFF" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <LinearLayout
             android:id="@+id/tabShapes"
             style="@style/SketchTabColumn">
 
@@ -215,6 +205,16 @@
             <LinearLayout style="@style/SketchTabPill">
                 <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_text" app:tint="#9A9AA5" />
                 <TextView style="@style/SketchTabLabel" android:text="Text" android:textColor="#9A9AA5" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabSelect"
+            style="@style/SketchTabColumn">
+
+            <LinearLayout style="@style/SketchTabPill">
+                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_select" />
+                <TextView style="@style/SketchTabLabel" android:text="Select" android:textColor="#FFFFFF" />
             </LinearLayout>
         </LinearLayout>
 
