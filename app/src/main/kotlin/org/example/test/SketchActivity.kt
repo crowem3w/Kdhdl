@@ -483,7 +483,10 @@ class SketchActivity : AppCompatActivity() {
             
             column.clipChildren = false
             column.clipToPadding = false
+            
+            
             val pill = column.getChildAt(0) as LinearLayout
+            val label = column.getChildAt(1) as TextView
             val fill = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dp(11f)
@@ -500,7 +503,7 @@ class SketchActivity : AppCompatActivity() {
                 pill = pill,
                 fill = fill,
                 icon = pill.getChildAt(0) as ImageView,
-                label = pill.getChildAt(1) as TextView,
+                label = label,
             )
         }
         bottomNavBar.onSelectionProgress = { oldIndex, newIndex, t -> applySelectionProgress(oldIndex, newIndex, t) }
