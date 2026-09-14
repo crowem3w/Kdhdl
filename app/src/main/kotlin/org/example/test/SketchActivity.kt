@@ -483,8 +483,6 @@ class SketchActivity : AppCompatActivity() {
             
             column.clipChildren = false
             column.clipToPadding = false
-            
-            
             val pill = column.getChildAt(0) as LinearLayout
             val label = column.getChildAt(1) as TextView
             val fill = GradientDrawable().apply {

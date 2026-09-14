@@ -1,20 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- Main tools tab bar -->
+    <!-- Main tools tab bar. Column stacks the pill (icon only) above the label, both
+         horizontally centered so they stay vertically aligned with each other. -->
     <style name="SketchTabColumn">
         <item name="android:layout_width">0dp</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_weight">1</item>
-        <item name="android:gravity">center</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:gravity">center_horizontal</item>
     </style>
 
+    <!-- The rounded-square selection frame. Holds only the icon; equal horizontal/vertical
+         padding keeps it square around the 18dp icon. -->
     <style name="SketchTabPill">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:orientation">vertical</item>
         <item name="android:gravity">center</item>
-        <item name="android:padding">11dp</item>
+        <item name="android:padding">10dp</item>
     </style>
 
     <style name="SketchTabIcon">
@@ -25,7 +29,8 @@
     <style name="SketchTabLabel">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">4dp</item>
+        <item name="android:layout_gravity">center_horizontal</item>
+        <item name="android:layout_marginTop">2dp</item>
         <item name="android:textSize">10.5sp</item>
     </style>
 
