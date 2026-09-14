@@ -3,14 +3,13 @@ package org.example.test
 import android.animation.ArgbEvaluator
 import android.content.Intent
 import android.graphics.Color
-import android.graphics.Outline
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
-import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -85,8 +84,6 @@ class SketchActivity : AppCompatActivity() {
     private lateinit var pillVisuals: List<TabPillVisual>
     private val pillBaseElevationPx by lazy { dp(3f) }
     private val pillRaisedElevationPx by lazy { dp(16f) }
-    private val labelGapInactivePx by lazy { dp(1f) }
-    private val labelGapActivePx by lazy { dp(3f) }
     
     
     
@@ -104,17 +101,36 @@ class SketchActivity : AppCompatActivity() {
     
     
     
-    private val pillCornerRadiusDp = 10f
-
-    // Selected-tab fill: a plain, solid white rounded-square with no stroke/border (0px).
-    // No glow layers - the "lift" now reads via a lime-tinted elevation drop shadow
-    // (see setupTabs, which sets each pill's outlineProvider + shadow colors).
-    private fun buildPillFillDrawable(): GradientDrawable = GradientDrawable().apply {
-        shape = GradientDrawable.RECTANGLE
-        cornerRadius = dp(pillCornerRadiusDp)
-        setColor(pillFillColor)
-        setStroke(0, Color.TRANSPARENT)
-        alpha = 0
+    // Selected-tab fill: a plain white rounded-square (no stroke/border, 0px) with a soft
+    // lime glow bleeding outward underneath it. Built as two translucent lime layers of
+    // increasing size sitting behind a solid white top layer, all inset within the pill's
+    // own padding so the glow reads at the edge without needing to draw outside the view.
+    private fun buildPillFillDrawable(): LayerDrawable {
+        fun glowRing(alpha: Int, cornerDp: Float) = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(cornerDp)
+            setColor(pillGlowColor)
+            this.alpha = alpha
+        }
+        val whiteCenter = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(9f)
+            setColor(pillFillColor)
+            
+            
+        }
+        val layers = arrayOf(
+            glowRing(alpha = 70, cornerDp = 14f),
+            glowRing(alpha = 130, cornerDp = 12.5f),
+            whiteCenter,
+        )
+        return LayerDrawable(layers).apply {
+            
+            
+            setLayerInset(1, dp(2f).toInt(), dp(2f).toInt(), dp(2f).toInt(), dp(2f).toInt())
+            setLayerInset(2, dp(4f).toInt(), dp(4f).toInt(), dp(4f).toInt(), dp(4f).toInt())
+            alpha = 0
+        }
     }
 
     
@@ -511,17 +527,10 @@ class SketchActivity : AppCompatActivity() {
             val fill = buildPillFillDrawable()
             pill.background = fill
             pill.elevation = pillBaseElevationPx
-
-            // Drop shadow (instead of the old glow layers): outline matches the pill's
-            // rounded-square shape so the elevation shadow is cast in that shape, tinted lime.
+            
+            
+            pill.outlineProvider = null
             pill.clipToOutline = false
-            pill.outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, dp(pillCornerRadiusDp))
-                }
-            }
-            pill.outlineAmbientShadowColor = pillGlowColor
-            pill.outlineSpotShadowColor = pillGlowColor
             TabPillVisual(
                 pill = pill,
                 fill = fill,
@@ -641,15 +650,9 @@ class SketchActivity : AppCompatActivity() {
             val color = evaluator.evaluate(clamped, inactiveTextColor, activeTextColor) as Int
             visual.icon.setColorFilter(color)
             visual.label.setTextColor(color)
-
-            val gapPx = labelGapInactivePx + (labelGapActivePx - labelGapInactivePx) * clamped
-            (visual.label.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
-                val topMargin = gapPx.roundToInt()
-                if (lp.topMargin != topMargin) {
-                    lp.topMargin = topMargin
-                    visual.label.layoutParams = lp
-                }
-            }
+            // Base label margin was tightened by 1dp for the unselected look; restore the
+            // original spacing as a tab becomes active so only unselected tabs look tighter.
+            visual.label.translationY = dp(1f) * clamped
         }
     }
 
