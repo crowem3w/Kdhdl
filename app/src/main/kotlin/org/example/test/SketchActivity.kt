@@ -570,6 +570,14 @@ class SketchActivity : AppCompatActivity() {
 
         
         
+        
+        
+        bottomNavBar.onTabDragMove = { index ->
+            allTabs.getOrNull(index)?.let { setTabActive(it) }
+        }
+
+        
+        
         bottomNavBar.onTabDragSelect = { index ->
             when (allTabs.getOrNull(index)) {
                 tabShapes -> selectShapesTab()

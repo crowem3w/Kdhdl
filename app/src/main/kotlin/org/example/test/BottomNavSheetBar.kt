@@ -77,6 +77,12 @@ class BottomNavSheetBar @JvmOverloads constructor(
     
     
     
+    
+    var onTabDragMove: ((index: Int) -> Unit)? = null
+
+    
+    
+    
     var onTabDragSelect: ((index: Int) -> Unit)? = null
 
     private val touchSlopPx = ViewConfiguration.get(context).scaledTouchSlop
@@ -211,10 +217,20 @@ class BottomNavSheetBar @JvmOverloads constructor(
                     if (HapticSettings.isEnabled(context)) {
                         performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                     }
-                    onTabDragSelect?.invoke(idx)
+                    
+                    
+                    onTabDragMove?.invoke(idx)
                 }
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+            MotionEvent.ACTION_UP -> {
+                isDragSelecting = false
+                
+                
+                if (lastDragIndex >= 0) {
+                    onTabDragSelect?.invoke(lastDragIndex)
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
                 isDragSelecting = false
             }
         }
