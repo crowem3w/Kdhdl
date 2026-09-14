@@ -3,6 +3,7 @@ package org.example.test
 import android.animation.ArgbEvaluator
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
@@ -82,9 +83,9 @@ class SketchActivity : AppCompatActivity() {
     private val pillBaseElevationPx by lazy { dp(3f) }
     private val pillRaisedElevationPx by lazy { dp(12f) }
     private val pillRiseTranslationPx by lazy { -dp(16f) }
-    private val activeAccentColor = Color.parseColor("#3D7EFF")
+    private val activePillColor = Color.WHITE
     private val inactiveTextColor = Color.parseColor("#9A9AA5")
-    private val activeTextColor = Color.WHITE
+    private val activeTextColor = Color.parseColor("#1A1B24")
 
     private fun dp(v: Float): Float = v * resources.displayMetrics.density
 
@@ -473,7 +474,7 @@ class SketchActivity : AppCompatActivity() {
             val fill = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dp(11f)
-                setColor(activeAccentColor)
+                setColor(activePillColor)
                 alpha = 0
             }
             pill.background = fill
@@ -572,6 +573,7 @@ class SketchActivity : AppCompatActivity() {
             val color = evaluator.evaluate(clamped, inactiveTextColor, activeTextColor) as Int
             visual.icon.setColorFilter(color)
             visual.label.setTextColor(color)
+            visual.label.setTypeface(visual.label.typeface, if (i == newIndex) Typeface.BOLD else Typeface.NORMAL)
         }
     }
 

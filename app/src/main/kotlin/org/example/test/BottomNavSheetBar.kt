@@ -18,13 +18,13 @@ import kotlin.math.min
 
 /**
  * The Sketch editor's bottom tool bar (Select/Pages/Text/Upload/Elements), rendered as a
- * pill-shaped, floating, physically-thick "sheet" whose upper contour dents inward around
- * whichever tab is currently selected - as though that tab's frame were being pushed up
- * through a thin flexible membrane from underneath, leaving a shallow bowl-shaped dimple in
- * the sheet around its base while the frame itself floats independently above it. The frame's
- * own elevation/translation lives in [SketchActivity] (it's a perfectly normal elevated child
- * view), driven in lock-step with this view's dimple via [onSelectionProgress] so both halves
- * of the illusion move together.
+ * pill-shaped, floating, physically-thick "sheet" whose upper contour rises into a smooth
+ * dome around whichever tab is currently selected - as though that tab's frame were being
+ * pushed up through a thin flexible membrane from underneath, and the frame itself floats
+ * independently just above the crest of that bulge. The frame's own elevation/translation
+ * lives in [SketchActivity] (it's a perfectly normal elevated child view), driven in
+ * lock-step with this view's bulge via [onSelectionProgress] so both halves of the illusion
+ * move together.
  *
  * Replaces the old static bg_bottom_nav_pill background drawable: everything here is painted
  * in [onDraw], which - because this is a ViewGroup - runs *before* [dispatchDraw] paints the
@@ -34,7 +34,7 @@ import kotlin.math.min
  *
  * The bottom ~6dp "edge" slab (the sheet's visible side-wall, which is what originally sold
  * its sense of physical thickness) is left completely static - only the top face's contour is
- * ever deformed, so the pill's overall silhouette is preserved exactly as before.
+ * ever deformed, so the pill's overall silhouette is otherwise preserved.
  */
 class BottomNavSheetBar @JvmOverloads constructor(
     context: Context,
@@ -47,9 +47,9 @@ class BottomNavSheetBar @JvmOverloads constructor(
     private val edgeThicknessPx = dp(6f)
     private val hugeCornerPx = dp(999f)
 
-    private val dipDepthPx = dp(10f)
+    private val bulgeHeightPx = dp(9f)
     private val dipHalfWidthFallbackPx = dp(38f)
-    private val dipHalfWidthPaddingPx = dp(8f) // the dimple is a bit wider than the pill it cradles
+    private val dipHalfWidthPaddingPx = dp(8f) // the bulge is a bit wider than the pill it cradles
 
     private var activeIndex = 0
     private var dipCenterX = 0f
@@ -60,10 +60,10 @@ class BottomNavSheetBar @JvmOverloads constructor(
 
     /**
      * Fired on every frame of a selection change so the Activity can move the (elevated,
-     * independently-drawn) tab frames in perfect lockstep with the dimple beneath them.
+     * independently-drawn) tab frames in perfect lockstep with the bulge beneath them.
      * `t` is intentionally NOT clamped to [0,1] - it carries the OvershootInterpolator's small
-     * overshoot through so the frame lift/descent, its color fade, and the dimple all bounce
-     * together instead of the dimple settling early.
+     * overshoot through so the frame lift/descent, its color fade, and the bulge all bounce
+     * together instead of the bulge settling early.
      */
     var onSelectionProgress: ((oldIndex: Int, newIndex: Int, t: Float) -> Unit)? = null
 
@@ -120,7 +120,7 @@ class BottomNavSheetBar @JvmOverloads constructor(
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
         super.onLayout(changed, l, t, r, b)
-        // Keep the resting dimple locked under the active tab across any layout pass that
+        // Keep the resting bulge locked under the active tab across any layout pass that
         // isn't itself part of an in-flight selection-change animation (rotation, the very
         // first layout pass, etc.) - a live animation owns dipCenterX/dipHalfWidth on its own.
         if (selectionAnimator?.isRunning != true) {
@@ -137,7 +137,7 @@ class BottomNavSheetBar @JvmOverloads constructor(
     // --- Public API -----------------------------------------------------
 
     /**
-     * Selects tab [index]. When [animate] is true (the normal case), the dimple travels from
+     * Selects tab [index]. When [animate] is true (the normal case), the bulge travels from
      * its current position to the new tab's position over a single spring-like animation, and
      * [onSelectionProgress] fires every frame with the shared progress `t` so the Activity can
      * raise the new tab's frame and lower the old one in sync.
@@ -212,7 +212,7 @@ class BottomNavSheetBar @JvmOverloads constructor(
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        // Static side-wall/edge slab - untouched by the dimple, keeps the pill's silhouette
+        // Static side-wall/edge slab - untouched by the bulge, keeps the pill's silhouette
         // intact from the waist down.
         edgeRect.set(0f, edgeThicknessPx, w, h)
         val edgeRadius = min(hugeCornerPx, edgeRect.height() / 2f)
@@ -229,8 +229,7 @@ class BottomNavSheetBar @JvmOverloads constructor(
         if (geometryReady) {
             canvas.save()
             canvas.clipPath(facePath)
-            drawDimpleShading(canvas)
-            drawContactShadow(canvas)
+            drawBulgeShading(canvas)
             canvas.restore()
             // Rim highlight along the curve itself - drawn unclipped so the stroke isn't
             // trimmed right at the silhouette edge.
@@ -257,30 +256,30 @@ class BottomNavSheetBar @JvmOverloads constructor(
             facePath.lineTo(dipLeft, top)
             dipCurvePath.moveTo(dipLeft, top)
 
-            val bottomY = top + dipDepthPx
+            val peakY = top - bulgeHeightPx
             val leftCtrlSpan = (dipCenterX - dipLeft) * 0.55f
             val rightCtrlSpan = (dipRight - dipCenterX) * 0.55f
 
-            // Left half of the bowl: the flat edge dips away from the button, curving down
+            // Left half of the bulge: the flat edge rises away from the flat sheet, curving up
             // toward the centre with a flat tangent at both ends (no sharp corners).
             facePath.cubicTo(
                 dipLeft + leftCtrlSpan, top,
-                dipCenterX - leftCtrlSpan, bottomY,
-                dipCenterX, bottomY,
+                dipCenterX - leftCtrlSpan, peakY,
+                dipCenterX, peakY,
             )
             dipCurvePath.cubicTo(
                 dipLeft + leftCtrlSpan, top,
-                dipCenterX - leftCtrlSpan, bottomY,
-                dipCenterX, bottomY,
+                dipCenterX - leftCtrlSpan, peakY,
+                dipCenterX, peakY,
             )
-            // Right half: mirrors back up, rejoining the flat edge just as smoothly.
+            // Right half: mirrors back down, rejoining the flat edge just as smoothly.
             facePath.cubicTo(
-                dipCenterX + rightCtrlSpan, bottomY,
+                dipCenterX + rightCtrlSpan, peakY,
                 dipRight - rightCtrlSpan, top,
                 dipRight, top,
             )
             dipCurvePath.cubicTo(
-                dipCenterX + rightCtrlSpan, bottomY,
+                dipCenterX + rightCtrlSpan, peakY,
                 dipRight - rightCtrlSpan, top,
                 dipRight, top,
             )
@@ -303,32 +302,28 @@ class BottomNavSheetBar @JvmOverloads constructor(
         facePath.close()
     }
 
-    /** Soft inner-shadow shading that darkens the floor of the dimple, selling concave depth
-     * rather than a flat cut-out. Must be called inside a canvas clipped to [facePath]. */
-    private fun drawDimpleShading(canvas: Canvas) {
-        val cy = dipDepthPx
-        val radius = dipHalfWidth * 1.35f
+    /** Soft light catching the top of the bulge, plus a faint shadow "halo" around its base
+     * where it folds back into the flat sheet - together these sell a smooth raised dome
+     * rather than a flat cut-out or applique. Must be called inside a canvas clipped to
+     * [facePath]. */
+    private fun drawBulgeShading(canvas: Canvas) {
+        val peakY = -bulgeHeightPx
+        val highlightRadius = dipHalfWidth * 1.1f
         dimpleShadePaint.shader = RadialGradient(
-            dipCenterX, cy, radius,
-            intArrayOf(0x66000000, 0x2E000000, 0x00000000),
-            floatArrayOf(0f, 0.6f, 1f),
-            Shader.TileMode.CLAMP,
-        )
-        canvas.drawCircle(dipCenterX, cy, radius, dimpleShadePaint)
-    }
-
-    /** A tighter, darker blob directly beneath where the elevated frame floats, so the frame
-     * reads as grounded above the dimple rather than simply hovering unrelated to the sheet.
-     * Must be called inside a canvas clipped to [facePath]. */
-    private fun drawContactShadow(canvas: Canvas) {
-        val cy = dipDepthPx * 0.9f
-        val radius = dipHalfWidth * 0.85f
-        contactShadowPaint.shader = RadialGradient(
-            dipCenterX, cy, radius,
-            intArrayOf(0x59000000, 0x24000000, 0x00000000),
+            dipCenterX, peakY, highlightRadius,
+            intArrayOf(0x2EFFFFFF, 0x12FFFFFF, 0x00000000),
             floatArrayOf(0f, 0.55f, 1f),
             Shader.TileMode.CLAMP,
         )
-        canvas.drawCircle(dipCenterX, cy, radius, contactShadowPaint)
+        canvas.drawCircle(dipCenterX, peakY, highlightRadius, dimpleShadePaint)
+
+        val creaseRadius = dipHalfWidth * 1.25f
+        contactShadowPaint.shader = RadialGradient(
+            dipCenterX, 0f, creaseRadius,
+            intArrayOf(0x00000000, 0x00000000, 0x2A000000),
+            floatArrayOf(0f, 0.55f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        canvas.drawCircle(dipCenterX, 0f, creaseRadius, contactShadowPaint)
     }
 }
