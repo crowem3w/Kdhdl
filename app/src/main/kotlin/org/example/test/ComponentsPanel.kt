@@ -25,7 +25,7 @@ private val PANEL_PRIMARY_TEXT = Color.parseColor("#1A1B24")
 private val PANEL_SECONDARY_TEXT = Color.parseColor("#6B7280")
 private val PANEL_NEUTRAL_TEXT = Color.parseColor("#9CA3AF")
 private val PANEL_DIVIDER = Color.parseColor("#D1D5DB")
-private val PANEL_ACCENT = Color.parseColor("#A3E635")
+private val PANEL_ACCENT = Color.parseColor("#355E3B")
 
 private data class ComponentCategory(val id: String, val label: String, val iconRes: Int)
 
@@ -591,14 +591,16 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             entry.icon.setColorFilter(color)
 
 
-            val iconSize = if (active) railIconSizeSelected else railIconSizeDefault
+            // Icons + labels are always bold in this sidebar; only size/color/chevron
+            // change to indicate the active category.
+            val iconSize = railIconSizeSelected
             entry.icon.layoutParams = entry.icon.layoutParams.apply {
                 width = iconSize
                 height = iconSize
             }
             entry.label.setTextColor(color)
             entry.label.textSize = if (active) railLabelTextSizeSelected else railLabelTextSizeDefault
-            entry.label.setTypeface(null, if (active) Typeface.BOLD else Typeface.NORMAL)
+            entry.label.setTypeface(null, Typeface.BOLD)
 
             entry.chevron.visibility = if (active) View.VISIBLE else View.GONE
         }
