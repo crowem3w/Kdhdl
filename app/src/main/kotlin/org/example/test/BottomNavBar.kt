@@ -21,20 +21,20 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sign
 
-/**
- * Minimalist, spatially-layered bottom navigation, now a continuous
- * carousel: the 5 destinations sit at a fractional "distance" from the
- * currently centered tab (0 = centered/largest, up to 2 = edge/smallest),
- * and that distance is a single float ([virtualCenter] vs a tab's index)
- * that can be driven either by a tap (animated) or by a horizontal drag
- * (tracks the finger 1:1, then spring-settles on release).
- *
- * Every visual property — frame size, icon size, elevation, lift, label
- * size/color/weight, horizontal offset, and outline/filled icon crossfade —
- * is interpolated continuously from that one distance value, so dragging
- * feels like physically sliding the strip rather than jumping between
- * discrete states.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 class BottomNavBar(context: Context) : FrameLayout(context) {
 
     private val d = resources.displayMetrics.density
@@ -46,9 +46,9 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
     private val tabs = listOf(AppTab.HOME, AppTab.TEMPLATES, AppTab.PROJECTS, AppTab.PROFILE, AppTab.SETTINGS)
     private val n = tabs.size
 
-    // Breakpoints at distance 0 (centered), 1 (medium), 2 (edge). Values in
-    // between are linearly interpolated so the carousel reads as continuous
-    // motion rather than 3 fixed states.
+    
+    
+    
     private val bpFrameDp = floatArrayOf(66f, 48f, 38f)
     private val bpIconDp = floatArrayOf(22f, 18f, 14f)
     private val bpElevationDp = floatArrayOf(14f, 5f, 2f)
@@ -57,10 +57,10 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
     private val bpCenterOffsetDp = floatArrayOf(0f, 53f, 92f)
     private val labelColors = intArrayOf(palette.navLabelCenter, palette.navLabelMedium, palette.navLabelEdge)
 
-    // Azure glow breakpoints: strongest right on the selected/centered frame,
-    // fading to a faint shadow on the rest so the strip still reads with a
-    // clear visual hierarchy instead of every frame glowing equally. No
-    // border — the glow comes purely from the colored elevation shadow.
+    
+    
+    
+    
     private val bpGlowShadowAlpha = floatArrayOf(255f, 110f, 45f)
 
     private data class Slot(
@@ -72,12 +72,12 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
         val label: TextView,
     )
 
-    // One persistent view-set per TAB (not per screen position) — the tab's
-    // own views move/resize continuously as its distance from center changes.
+    
+    
     private val slots = tabs.map { buildSlot(it) }
 
-    /** Continuous carousel position: an integer value means a tab is exactly
-     * centered; fractional values happen mid-drag or mid-settle-animation. */
+    
+
     private var virtualCenter = 0f
     private var selectedIndex = 0
     private var frontIndex = -1
@@ -89,7 +89,7 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
     private var dragStartCenter = 0f
     private var isDragging = false
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
-    private val dragSensitivityPx = dp(70).toFloat() // px of finger travel per one tab step
+    private val dragSensitivityPx = dp(70).toFloat() 
     private val maxDragSteps = 2.4f
 
     var onTabSelected: ((AppTab) -> Unit)? = null
@@ -139,16 +139,16 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
             isClickable = true
             isFocusable = true
             clipToOutline = false
-            // Tint the elevation shadow itself Azure so the "glow" comes from
-            // the same light source as the frame's existing lift/elevation,
-            // rather than a separate fake-glow layer.
+            
+            
+            
             outlineAmbientShadowColor = palette.navGlow
             outlineSpotShadowColor = palette.navGlow
         }
 
-        // Outline and filled icons are stacked and cross-faded by alpha as
-        // the tab's distance from center changes, instead of hard-swapping
-        // the drawable resource.
+        
+        
+        
         val iconOutline = ImageView(context).apply {
             layoutParams = FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER)
             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -179,10 +179,10 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
         return Slot(root, frame, frameDrawable, iconOutline, iconFilled, label)
     }
 
-    // --- Math helpers -------------------------------------------------
+    
 
-    /** Shortest signed distance from `center` to `value` around the n-tab circle,
-     * e.g. for n=5 the result is always in (-2.5, 2.5]. */
+    
+
     private fun wrappedDistance(value: Float, center: Float): Float {
         var diff = (value - center) % n
         if (diff > n / 2f) diff -= n
@@ -199,8 +199,8 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
         return bp[i] + (bp[i + 1] - bp[i]) * frac
     }
 
-    /** Like [lerpBp] but keeps extrapolating past distance 2 (same slope as the
-     * 1→2 segment) so a rubber-band overdrag still slides smoothly. */
+    
+
     private fun lerpBpExtrapolated(bp: FloatArray, x: Float): Float {
         if (x <= 2f) return lerpBp(bp, x)
         val slope = bp[2] - bp[1]
@@ -214,10 +214,10 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
         return ColorUtils.blendARGB(colors[i], colors[i + 1], frac)
     }
 
-    // --- Layout ---------------------------------------------------------
+    
 
-    /** Positions/sizes/colors every slot based on its continuous distance
-     * from [virtualCenter]. Called on every drag move and every animation frame. */
+    
+
     private fun layoutTabs() {
         var nearestIdx = 0
         var nearestAbs = Float.MAX_VALUE
@@ -250,10 +250,10 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
             }
             slot.frameDrawable.cornerRadius = frameSizeDp * 0.32f * d
 
-            // Azure glow: purely a colored elevation shadow (no border),
-            // scaled by the same continuous distance-from-center used for
-            // everything else — full strength when centered (selected),
-            // fading to a minimal accent everywhere else.
+            
+            
+            
+            
             val glowShadowAlpha = lerpBp(bpGlowShadowAlpha, absD).roundToInt().coerceIn(0, 255)
             val glowShadowColor = ColorUtils.setAlphaComponent(palette.navGlow, glowShadowAlpha)
             slot.frame.outlineAmbientShadowColor = glowShadowColor
@@ -293,7 +293,7 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
         }
     }
 
-    // --- Selection / animation -------------------------------------------
+    
 
     private fun animateVirtualCenterTo(target: Float, onEnd: () -> Unit) {
         settleAnimator?.cancel()
@@ -313,8 +313,8 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
         }
     }
 
-    // The nav bar's own settle animation is purely cosmetic — the page switch
-    // fires immediately so the app doesn't feel like it's waiting on it.
+    
+    
     private fun onTabTapped(tab: AppTab) {
         if (isDragging) return
         val idx = tabs.indexOf(tab)
@@ -332,12 +332,12 @@ class BottomNavBar(context: Context) : FrameLayout(context) {
         }
     }
 
-    /** Public API kept for callers that select a tab programmatically. */
+    
     fun selectTab(tab: AppTab) {
         onTabTapped(tab)
     }
 
-    // --- Touch handling: tap-to-select vs horizontal drag -----------------
+    
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {

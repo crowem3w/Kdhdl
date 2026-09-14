@@ -25,8 +25,8 @@ class SketchCanvasView @JvmOverloads constructor(
 ) : View(context, attrs) {
 
     init {
-        // A software layer is required for Paint#setShadowLayer to render on shapes (not just
-        // text) reliably across API levels — used for the shadow-only selection frame below.
+        
+        
         setLayerType(LAYER_TYPE_SOFTWARE, null)
     }
 
@@ -34,23 +34,23 @@ class SketchCanvasView @JvmOverloads constructor(
         fun onPartLongPressed(part: SketchPart)
         fun onSelectionChanged(part: SketchPart?)
         fun onPartsChanged()
-        // Fired once when a long-press + drag marquee box is released over one or more parts -
-        // the cue to open the temporary Group/Duplicate/Move/Lock/Hide/Delete panel.
+        
+        
         fun onMultiSelectionFinalized(parts: List<SketchPart>)
-        // Fired whenever the multi-selection is dropped for any reason (tapping elsewhere,
-        // deleting the selection, etc) so the host can dismiss that panel.
+        
+        
         fun onMultiSelectionCleared()
-        // Fired by a long-press on empty canvas space that's released without ever turning into
-        // a marquee drag. One of two gesture entry points for opening the "Add to sketch" panel
-        // - see onDoubleTapEmptySpace below.
+        
+        
+        
         fun onLongPressEmptySpace()
-        // Fired by a double-tap that lands on empty canvas space. Double-tapping an existing part
-        // still resets zoom (see onDoubleTap below) - this is the other gesture entry point for
-        // the panel.
+        
+        
+        
         fun onDoubleTapEmptySpace()
-        // Fired by a plain single tap that lands on empty canvas space (not a part, not a member
-        // of the active multi-selection). Used to dismiss the bottom sketch panel if it's open
-        // and to toggle bottomNavBar hidden/visible.
+        
+        
+        
         fun onTapEmptySpace()
     }
 
@@ -62,10 +62,10 @@ class SketchCanvasView @JvmOverloads constructor(
 
     private val density = context.resources.displayMetrics.density
 
-    // --- Marquee (long-press + drag) multi-selection -----------------------------------------
-    // multiSelected is the finalized set of parts from the last completed marquee drag (kept
-    // highlighted, and draggable together as a group, until cleared). marqueeLive is the
-    // in-progress preview set while the box is still being dragged.
+    
+    
+    
+    
     private val multiSelected = mutableSetOf<SketchPart>()
     val multiSelectedParts: List<SketchPart> get() = multiSelected.toList()
     val isMarqueeActive: Boolean get() = marqueeArmed || marqueeActive
@@ -100,23 +100,23 @@ class SketchCanvasView @JvmOverloads constructor(
         style = Paint.Style.FILL
         color = Color.parseColor("#6750A4")
     }
-    // -------------------------------------------------------------------------------------------
+    
 
-    // --- Mobile UI "page" (the resizable white artboard) -------------------------------------
-    // The page represents the actual bottom-bounded content area of the mobile app/page being
-    // designed. Everything outside it (below its bottom edge) is pure black - an editor-only
-    // backdrop that exists purely for contrast/visibility and must never factor into the page's
-    // reported height (see pageHeight below, which callers should use instead of View#getHeight
-    // whenever they mean "the height of the app page", e.g. centering new parts or exporting).
+    
+    
+    
+    
+    
+    
     var pageHeight: Float = 0f
         private set
 
-    // Exposed so callers outside the view (e.g. the activity's own gesture handling) can avoid
-    // starting a competing gesture while the user is actively resizing the page.
+    
+    
     val isDraggingPageHandle: Boolean get() = draggingPageHandle
-    // The drag handle can only resize the page between one full screen (the view's own height)
-    // and ten screens' worth of content, so these track `height` live rather than using a fixed
-    // constant.
+    
+    
+    
     private val minPageHeight: Float get() = height.toFloat()
     private val maxPageHeight: Float get() = height.toFloat() * 10f
     private val pagePaint = Paint().apply { color = Color.WHITE }
@@ -124,9 +124,9 @@ class SketchCanvasView @JvmOverloads constructor(
     private val pageCornerRadius = 12f * density
     private val pageRadii = FloatArray(8)
 
-    // Bottom-edge drag handle: a small pill centered under the page's bottom edge, kept in
-    // screen-space (constant on-screen size regardless of zoom) while its Y position tracks the
-    // page's bottom edge through the same pan/zoom transform used for everything else.
+    
+    
+    
     private var draggingPageHandle = false
     private var pageHandleHovered = false
     private var pageDragStartScreenY = 0f
@@ -143,17 +143,17 @@ class SketchCanvasView @JvmOverloads constructor(
         setShadowLayer(6f * density, 0f, 2f * density, Color.parseColor("#40000000"))
     }
     private val pageHandleRect = RectF()
-    // -------------------------------------------------------------------------------------------
+    
 
-    // --- Canvas panning (vertical only) -------------------------------------------------------
-    // Lets the user drag on empty canvas space to shift the visible window up/down when the page
-    // (plus a little breathing room past its bottom handle) is taller than the view. Bounded: 0
-    // means the page's top edge sits at its natural position (can't pan "past" the top and reveal
-    // nothing above it); maxPanOffsetY() means the handle (plus margin) sits right at the bottom
-    // of the viewport (can't pan further and reveal nothing below it either). A one-finger drag
-    // that starts on empty space is a *candidate* for panning but only actually engages once it
-    // clears panTouchSlop AND there's real pannable range - if the page already fits on screen,
-    // the drag simply does nothing here.
+    
+    
+    
+    
+    
+    
+    
+    
+    
     var panOffsetY: Float = 0f
         private set
     val isPanningCanvas: Boolean get() = canvasPanning
@@ -162,8 +162,8 @@ class SketchCanvasView @JvmOverloads constructor(
     private var panDragStartScreenY = 0f
     private var panDragStartOffset = 0f
     private val panTouchSlop = 8f * density
-    // Extra room kept below the handle when fully panned down, so it doesn't sit flush against
-    // the very bottom edge of the viewport.
+    
+    
     private val panHandleBottomMargin = 32f * density
 
     private fun maxPanOffsetY(): Float {
@@ -176,7 +176,7 @@ class SketchCanvasView @JvmOverloads constructor(
         val newPan = panOffsetY.coerceIn(0f, maxPanOffsetY())
         if (newPan != panOffsetY) panOffsetY = newPan
     }
-    // -------------------------------------------------------------------------------------------
+    
 
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -184,26 +184,26 @@ class SketchCanvasView @JvmOverloads constructor(
         strokeWidth = 2f * density
         color = Color.parseColor("#6750A4")
     }
-    // Used for single-line, centered labels on non-text parts (buttons, cards, chips, etc).
-    // textSize is set per-part (part.fontSize) right before each draw call.
+    
+    
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#1D1B20")
         textSize = 13f * density
         textAlign = Paint.Align.CENTER
     }
-    // Used for wrapped, left-aligned TEXT parts via StaticLayout. textSize is set per-part
-    // (part.fontSize) right before each draw/measure call.
+    
+    
     private val wrapTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#1D1B20")
     }
-    // Inner padding kept between a TEXT part's bounding box edges and its wrapped text, both for
-    // rendering and for measuring how tall the wrapped text needs the box to be.
+    
+    
     private val textWrapHorizontalPadding = 6f * density
     private val textWrapVerticalPadding = 4f * density
 
-    // Selection frame: 0px border, 12dp corner radius, rendered as a white card matching the
-    // canvas background so it reads as a soft drop shadow around the selected element rather
-    // than a visible box outline.
+    
+    
+    
     private val selectionFramePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = Color.WHITE
@@ -212,9 +212,9 @@ class SketchCanvasView @JvmOverloads constructor(
     private val selectionPad = 10f * density
     private val selectionRadius = 12f * density
 
-    // Purple resize handles on the 4 sides + 4 corners of the selection frame, drawn as short
-    // straight lines on the sides and small curved (quarter-circle) lines on the corners, sitting
-    // 1px outside the (0px) selection border.
+    
+    
+    
     private val handleOffset = 1f * density
     private val handleLineHalfLength = 7f * density
     private val handleCornerRadius = 5f * density
@@ -231,13 +231,13 @@ class SketchCanvasView @JvmOverloads constructor(
     private var dragOffsetY = 0f
     private var dragMoved = false
 
-    // Resize handle interaction. A handle grab is detected on ACTION_DOWN (only when the touched
-    // part is already selected) and takes priority over the plain move/drag path.
+    
+    
     private enum class Handle { TOP_LEFT, TOP, TOP_RIGHT, RIGHT, BOTTOM_RIGHT, BOTTOM, BOTTOM_LEFT, LEFT }
 
     private val handleHitSlop = 16f * density
-    // Safety floor only (not a design minimum) so dimensions/font size never hit zero or flip
-    // negative mid-drag.
+    
+    
     private val minDimension = 4f * density
     private val minFontSize = 1f * density
 
@@ -273,8 +273,8 @@ class SketchCanvasView @JvmOverloads constructor(
 
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onLongPress(e: MotionEvent) {
-            // Don't treat a long-press that starts on a resize handle - or that's actually turned
-            // into a canvas pan - as a long-press-to-open-menu.
+            
+            
             if (resizingPart != null || canvasPanning) return
             val cx = toContentX(e.x)
             val cy = toContentY(e.y)
@@ -282,10 +282,10 @@ class SketchCanvasView @JvmOverloads constructor(
             if (hit != null) {
                 listener?.onPartLongPressed(hit)
             } else {
-                // Empty space: arm marquee-selection mode. Whether this turns into a rectangular
-                // drag-select or falls back to opening the "Add to sketch" panel is only known
-                // once the finger either moves (ACTION_MOVE below) or lifts without moving
-                // (ACTION_UP below).
+                
+                
+                
+                
                 if (multiSelected.isNotEmpty()) clearMultiSelection()
                 marqueeArmed = true
                 marqueeActive = false
@@ -306,8 +306,8 @@ class SketchCanvasView @JvmOverloads constructor(
                 if (hit == null || hit !in multiSelected) {
                     clearMultiSelection()
                 } else {
-                    // Tapped a member of the active multi-selection: leave the group selection
-                    // (and its panel) exactly as-is rather than collapsing to a single selection.
+                    
+                    
                     return true
                 }
             }
@@ -317,7 +317,7 @@ class SketchCanvasView @JvmOverloads constructor(
                 listener?.onSelectionChanged(hit)
             }
             if (hit == null) {
-                // Plain tap on empty canvas: dismiss the bottom sketch panel if it's open.
+                
                 listener?.onTapEmptySpace()
             }
             return true
@@ -326,7 +326,7 @@ class SketchCanvasView @JvmOverloads constructor(
         override fun onDoubleTap(e: MotionEvent): Boolean {
             val hit = hitTest(toContentX(e.x), toContentY(e.y))
             if (hit == null) {
-                // Empty space: this is a panel-opening gesture, not a zoom-reset.
+                
                 listener?.onDoubleTapEmptySpace()
             } else {
                 scaleFactor = 1f
@@ -339,8 +339,8 @@ class SketchCanvasView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        // Defaults the page to fill the whole view the first time it's laid out, so nothing
-        // appears cut off until the user deliberately drags the handle to shorten it.
+        
+        
         if (pageHeight <= 0f) pageHeight = h.toFloat()
         clampPan()
     }
@@ -374,8 +374,8 @@ class SketchCanvasView @JvmOverloads constructor(
                     val hit = hitTest(cx, cy)
                     dragMoved = false
                     if (hit != null && hit in multiSelected) {
-                        // Touching down on a member of the active multi-selection drags the
-                        // whole group together (see the "Move" action in the selection panel).
+                        
+                        
                         draggingGroup = true
                         draggingPart = null
                         groupDragAnchorX = cx
@@ -389,10 +389,10 @@ class SketchCanvasView @JvmOverloads constructor(
                             dragOffsetY = cy - hit.y
                             panCandidate = false
                         } else {
-                            // Empty space: only a *candidate* for panning. It only actually
-                            // engages once the drag clears panTouchSlop, so a quick tap or a
-                            // long-press to open the add-part menu / arm marquee selection
-                            // (handled by gestureDetector below) still works.
+                            
+                            
+                            
+                            
                             panCandidate = true
                             canvasPanning = false
                             panDragStartScreenY = event.y
@@ -471,8 +471,8 @@ class SketchCanvasView @JvmOverloads constructor(
                 }
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                // A second finger touching down mid-drag means pinch-to-zoom is taking over;
-                // bail out of an in-progress marquee drag rather than fight it for the gesture.
+                
+                
                 if (marqueeArmed || marqueeActive) {
                     marqueeArmed = false
                     marqueeActive = false
@@ -487,8 +487,8 @@ class SketchCanvasView @JvmOverloads constructor(
                 if (marqueeActive) {
                     finalizeMarqueeSelection()
                 } else if (marqueeArmed) {
-                    // Long-press on empty space, released without ever turning into a marquee
-                    // drag: this is the gesture entry point for opening the "Add to sketch" panel.
+                    
+                    
                     listener?.onLongPressEmptySpace()
                 }
                 draggingPart = null
@@ -508,7 +508,7 @@ class SketchCanvasView @JvmOverloads constructor(
     private fun finalizeMarqueeSelection() {
         val result = mutableSetOf<SketchPart>()
         result.addAll(marqueeLive)
-        // Selecting any single member of a group pulls the rest of that group in too.
+        
         val groupIds = marqueeLive.mapNotNull { it.groupId }.toSet()
         if (groupIds.isNotEmpty()) {
             for (p in parts) if (p.groupId != null && p.groupId in groupIds) result.add(p)
@@ -528,8 +528,8 @@ class SketchCanvasView @JvmOverloads constructor(
         }
     }
 
-    // --- Multi-selection actions (Group/Ungroup, Duplicate, Lock, Hide, Delete) ---------------
-    // Driven by the temporary panel the host shows after onMultiSelectionFinalized fires.
+    
+    
 
     fun clearMultiSelection() {
         if (multiSelected.isEmpty()) return
@@ -598,12 +598,12 @@ class SketchCanvasView @JvmOverloads constructor(
         listener?.onPartsChanged()
         listener?.onMultiSelectionCleared()
     }
-    // -------------------------------------------------------------------------------------------
+    
 
-    // Detects and drives dragging the bottom-edge page handle. Kept entirely separate from (and
-    // checked before) the normal touch pipeline above so it never competes with part
-    // selection/dragging/resizing or pinch-to-zoom for the same touch stream: once a drag on the
-    // handle starts, every event in that stream is consumed here and nothing else sees it.
+    
+    
+    
+    
     private fun handlePageHandleTouch(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -626,8 +626,8 @@ class SketchCanvasView @JvmOverloads constructor(
                 return true
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                // A second finger touching down mid-drag means pinch-to-zoom is taking over;
-                // bail out of the page-resize drag rather than fight it for the gesture.
+                
+                
                 if (draggingPageHandle) {
                     draggingPageHandle = false
                     invalidate()
@@ -644,8 +644,8 @@ class SketchCanvasView @JvmOverloads constructor(
         }
     }
 
-    // Mouse-only hover feedback (touch input never generates hover events) so the handle visibly
-    // reacts before the user even presses down on it.
+    
+    
     override fun onHoverEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE -> {
@@ -672,8 +672,8 @@ class SketchCanvasView @JvmOverloads constructor(
             abs(screenY - centerY) <= pageHandleTouchHalfHeight
     }
 
-    // Fixed point (in content coordinates) that stays put while a given handle is dragged, i.e.
-    // the corner/edge of the part's bounding box opposite the one being grabbed.
+    
+    
     private fun anchorPointFor(part: SketchPart, handle: Handle): Pair<Float, Float> {
         val left = part.x
         val top = part.y
@@ -691,9 +691,9 @@ class SketchCanvasView @JvmOverloads constructor(
         }
     }
 
-    // Corner handles: scale font size and both box dimensions together, anchored at the opposite
-    // corner. For TEXT parts, if the wrapped label needs more vertical room than the proportional
-    // scale gives it, the box expands downward to fit (auto-wrap/overflow takes priority).
+    
+    
+    
     private fun resizeCorner(part: SketchPart, cx: Float, cy: Float) {
         val handle = activeHandle ?: return
         val rawW = abs(cx - resizeAnchorX).coerceAtLeast(minDimension)
@@ -715,8 +715,8 @@ class SketchCanvasView @JvmOverloads constructor(
         if (part.kind == PartKind.TEXT) applyTextAutoHeight(part)
     }
 
-    // Left/right side handles: change only the box width (and x, if grabbed from the left), never
-    // the font size. This re-wraps (or unwraps) TEXT content within the new width.
+    
+    
     private fun resizeSideWidth(part: SketchPart, cx: Float, cy: Float) {
         val handle = activeHandle ?: return
         val newW = abs(cx - resizeAnchorX).coerceAtLeast(minDimension)
@@ -727,9 +727,9 @@ class SketchCanvasView @JvmOverloads constructor(
         if (part.kind == PartKind.TEXT) applyTextAutoHeight(part)
     }
 
-    // Top/bottom side handles: change only the box height (and y, if grabbed from the top). Not
-    // reachable for TEXT parts — handleHitTest excludes them there since TEXT height is driven by
-    // wrapped content, not a manual side drag.
+    
+    
+    
     private fun resizeSideHeight(part: SketchPart, cx: Float, cy: Float) {
         val handle = activeHandle ?: return
         val newH = abs(cy - resizeAnchorY).coerceAtLeast(minDimension)
@@ -738,8 +738,8 @@ class SketchCanvasView @JvmOverloads constructor(
         part.h = newH
     }
 
-    // Grows (never shrinks) a TEXT part's height so its wrapped label always fits, expanding
-    // downward since y is left untouched.
+    
+    
     private fun applyTextAutoHeight(part: SketchPart) {
         val needed = measureWrappedTextHeight(part.label.ifBlank { part.kind.displayLabel }, part.fontSize, part.w)
         if (needed > part.h) part.h = needed
@@ -757,8 +757,8 @@ class SketchCanvasView @JvmOverloads constructor(
         return layout.height.toFloat() + textWrapVerticalPadding * 2f
     }
 
-    // Recomputes a TEXT part's auto-expanded height (e.g. after its label changes externally)
-    // and redraws. No-op for non-text parts.
+    
+    
     fun relayoutTextIfNeeded(part: SketchPart) {
         if (part.kind != PartKind.TEXT) return
         applyTextAutoHeight(part)
@@ -776,8 +776,8 @@ class SketchCanvasView @JvmOverloads constructor(
         if (near(rect.right, rect.top)) return Handle.TOP_RIGHT
         if (near(rect.left, rect.bottom)) return Handle.BOTTOM_LEFT
         if (near(rect.right, rect.bottom)) return Handle.BOTTOM_RIGHT
-        // Top/bottom side handles are disabled for TEXT: its height always follows wrapped
-        // content, so there's nothing meaningful for them to drag.
+        
+        
         if (part.kind != PartKind.TEXT) {
             if (near(midX, rect.top)) return Handle.TOP
             if (near(midX, rect.bottom)) return Handle.BOTTOM
@@ -824,29 +824,29 @@ class SketchCanvasView @JvmOverloads constructor(
     }
 
     override fun onDraw(canvas: Canvas) {
-        // Pure black backdrop, unaffected by pan/zoom, so it always fully covers whatever the
-        // (possibly shorter, possibly zoomed) white page doesn't. This area is editor-only chrome
-        // - never part of the app page - and is what makes the page's true bottom edge legible.
+        
+        
+        
         canvas.drawColor(Color.BLACK)
         val saveCount = canvas.save()
-        // Pan first, then scale: this makes the pan a pure post-scale screen-space shift (matching
-        // toScreenY/toContentY below) while the scale pivot itself stays anchored to the view's
-        // center regardless of how far the user has panned.
+        
+        
+        
         canvas.translate(0f, -panOffsetY)
         canvas.scale(scaleFactor, scaleFactor, zoomPivotX, zoomPivotY)
         drawPage(canvas)
         for (part in parts) {
             if (part.hidden) continue
-            // Draw the shadow frame behind the part first so the frame never covers its content.
+            
             if (part === selected) drawSelectionFrame(canvas, part)
             drawPart(canvas, part)
         }
-        // Handles are drawn last, on top of every part, so they stay grabbable.
+        
         selected?.let { drawSelectionHandles(canvas, it) }
 
-        // Marquee (long-press + drag) selection: while dragging, outline every part currently
-        // inside the box plus the box itself; once released, the finalized multi-selection stays
-        // outlined until cleared (see clearMultiSelection / onMultiSelectionCleared).
+        
+        
+        
         if (marqueeActive) {
             for (p in marqueeLive) {
                 canvas.drawRoundRect(selectionRect(p), selectionRadius, selectionRadius, multiSelectStrokePaint)
@@ -855,8 +855,8 @@ class SketchCanvasView @JvmOverloads constructor(
             canvas.drawRect(marqueeRect, marqueeStrokePaint)
         } else {
             if (marqueeArmed) {
-                // Selection mode is "armed" (long-press held, not yet dragged): a small dot at
-                // the press point cues that a drag from here will start a selection box.
+                
+                
                 canvas.drawCircle(marqueeAnchorX, marqueeAnchorY, 6f * density, marqueeArmIndicatorPaint)
             }
             for (p in multiSelected) {
@@ -865,20 +865,20 @@ class SketchCanvasView @JvmOverloads constructor(
         }
         canvas.restoreToCount(saveCount)
 
-        // Drawn after the pan/zoom transform is restored so the handle keeps a constant on-screen
-        // size (only its Y position tracks the panned/zoomed page bottom edge, via toScreenY -
-        // which already factors in panOffsetY), matching how a resize affordance should feel
-        // regardless of zoom or scroll position.
+        
+        
+        
+        
         drawPageHandle(canvas)
     }
 
-    // The white artboard representing the actual mobile app page, rounded only at the bottom two
-    // corners (12dp) to read as the bottom edge of a device screen.
+    
+    
     private fun drawPage(canvas: Canvas) {
-        pageRadii[0] = 0f; pageRadii[1] = 0f // top-left
-        pageRadii[2] = 0f; pageRadii[3] = 0f // top-right
-        pageRadii[4] = pageCornerRadius; pageRadii[5] = pageCornerRadius // bottom-right
-        pageRadii[6] = pageCornerRadius; pageRadii[7] = pageCornerRadius // bottom-left
+        pageRadii[0] = 0f; pageRadii[1] = 0f 
+        pageRadii[2] = 0f; pageRadii[3] = 0f 
+        pageRadii[4] = pageCornerRadius; pageRadii[5] = pageCornerRadius 
+        pageRadii[6] = pageCornerRadius; pageRadii[7] = pageCornerRadius 
         pagePath.reset()
         pagePath.addRoundRect(0f, 0f, width.toFloat(), pageHeight, pageRadii, Path.Direction.CW)
         canvas.drawPath(pagePath, pagePaint)
@@ -918,8 +918,8 @@ class SketchCanvasView @JvmOverloads constructor(
         }
     }
 
-    // TEXT parts wrap within their bounding box width and draw top-left aligned, rather than as a
-    // single centered line.
+    
+    
     private fun drawWrappedText(canvas: Canvas, part: SketchPart, label: String) {
         wrapTextPaint.textSize = part.fontSize.coerceAtLeast(minFontSize)
         val innerWidth = max(1, (part.w - textWrapHorizontalPadding * 2f).roundToInt())
@@ -952,15 +952,15 @@ class SketchCanvasView @JvmOverloads constructor(
         val o = handleOffset
         val half = handleLineHalfLength
 
-        // 4 sides: short straight lines, 1px outside the border, one horizontal (—) on
-        // top/bottom, one vertical (|) on left/right.
+        
+        
         canvas.drawLine(midX - half, rect.top - o, midX + half, rect.top - o, handleLinePaint)
         canvas.drawLine(midX - half, rect.bottom + o, midX + half, rect.bottom + o, handleLinePaint)
         canvas.drawLine(rect.left - o, midY - half, rect.left - o, midY + half, handleLinePaint)
         canvas.drawLine(rect.right + o, midY - half, rect.right + o, midY + half, handleLinePaint)
 
-        // 4 corners: small curved (quarter-circle) lines, 1px outside the border, each one
-        // bowing away from the selection and tangent to its two adjacent side lines.
+        
+        
         val r = handleCornerRadius
         val d = r * 2f
         handleCornerOval.set(rect.left - o, rect.top - o, rect.left - o + d, rect.top - o + d)

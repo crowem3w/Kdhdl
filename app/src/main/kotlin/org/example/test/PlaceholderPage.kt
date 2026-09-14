@@ -7,10 +7,10 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 
-/**
- * Simple "coming soon" placeholder used for the tabs that don't have their
- * content implemented yet (Templates, Projects, Profile, Settings).
- */
+
+
+
+
 fun buildPlaceholderPage(context: Context, title: String): FrameLayout {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()

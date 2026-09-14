@@ -3,20 +3,20 @@ package org.example.test
 import android.content.Context
 import androidx.appcompat.app.AppCompatDelegate
 
-/**
- * Persists the user's Light/Dark mode preference (Settings tab) and keeps
- * AppCompatDelegate's night mode in sync with it, so DayNight-aware system
- * widgets (buttons, switches, status bar) follow along automatically.
- *
- * Screens built with hand-rolled colors don't pick up DayNight resources on
- * their own, so they instead read [isDarkMode] via [AppTheme.of] to choose
- * their palette explicitly.
- */
+
+
+
+
+
+
+
+
+
 object ThemeManager {
     private const val PREFS = "theme_prefs"
     private const val KEY_DARK = "dark_mode"
 
-    /** App shipped as dark-only before this feature existed, so that's the default. */
+    
     private const val DEFAULT_DARK = true
 
     fun isDarkMode(context: Context): Boolean =
@@ -27,8 +27,8 @@ object ThemeManager {
         applyNightMode(enabled)
     }
 
-    /** Call once at activity startup, before setContentView, so the DayNight
-     * theme resources resolve to the saved preference immediately. */
+    
+
     fun applySavedMode(context: Context) {
         applyNightMode(isDarkMode(context))
     }
