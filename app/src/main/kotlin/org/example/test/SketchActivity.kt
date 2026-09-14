@@ -4,6 +4,7 @@ import android.animation.ArgbEvaluator
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -75,7 +76,7 @@ class SketchActivity : AppCompatActivity() {
     
     private data class TabPillVisual(
         val pill: LinearLayout,
-        val fill: GradientDrawable,
+        val fill: android.graphics.drawable.Drawable,
         val icon: ImageView,
         val label: TextView,
     )
@@ -88,11 +89,49 @@ class SketchActivity : AppCompatActivity() {
     
     
     private val navBarTopPaddingPx by lazy { bottomNavBar.paddingTop.toFloat() }
-    private val activeAccentColor = Color.parseColor("#3D7EFF")
-    private val inactiveTextColor = Color.parseColor("#9A9AA5")
-    private val activeTextColor = Color.WHITE
+    
+    private val pillFillColor = Color.WHITE
+    private val pillGlowColor = Color.parseColor("#C6FF00")
+    private val inactiveTextColor = Color.parseColor("#8A8A94")
+    private val activeTextColor = Color.parseColor("#1A1B24")
 
     private fun dp(v: Float): Float = v * resources.displayMetrics.density
+
+    
+    
+    
+    
+    // Selected-tab fill: a plain white rounded-square (no stroke/border, 0px) with a soft
+    // lime glow bleeding outward underneath it. Built as two translucent lime layers of
+    // increasing size sitting behind a solid white top layer, all inset within the pill's
+    // own padding so the glow reads at the edge without needing to draw outside the view.
+    private fun buildPillFillDrawable(): LayerDrawable {
+        fun glowRing(alpha: Int, cornerDp: Float) = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(cornerDp)
+            setColor(pillGlowColor)
+            this.alpha = alpha
+        }
+        val whiteCenter = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(9f)
+            setColor(pillFillColor)
+            
+            
+        }
+        val layers = arrayOf(
+            glowRing(alpha = 70, cornerDp = 14f),
+            glowRing(alpha = 130, cornerDp = 12.5f),
+            whiteCenter,
+        )
+        return LayerDrawable(layers).apply {
+            
+            
+            setLayerInset(1, dp(2f).toInt(), dp(2f).toInt(), dp(2f).toInt(), dp(2f).toInt())
+            setLayerInset(2, dp(4f).toInt(), dp(4f).toInt(), dp(4f).toInt(), dp(4f).toInt())
+            alpha = 0
+        }
+    }
 
     
     
@@ -485,12 +524,7 @@ class SketchActivity : AppCompatActivity() {
             column.clipToPadding = false
             val pill = column.getChildAt(0) as LinearLayout
             val label = column.getChildAt(1) as TextView
-            val fill = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(11f)
-                setColor(activeAccentColor)
-                alpha = 0
-            }
+            val fill = buildPillFillDrawable()
             pill.background = fill
             pill.elevation = pillBaseElevationPx
             

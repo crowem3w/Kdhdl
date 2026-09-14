@@ -72,25 +72,25 @@ class BottomNavSheetBar @JvmOverloads constructor(
 
     
 
-    private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#0A0A10") }
+    private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#D6D6DE") }
     private val edgeTopHighlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = dp(1f)
-        color = Color.parseColor("#3E3F4C")
+        color = Color.parseColor("#FFFFFF")
         strokeCap = Paint.Cap.ROUND
     }
     private val facePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val faceStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = dp(1f)
-        color = Color.parseColor("#33343F")
+        color = Color.parseColor("#E1E1E7")
     }
     private val dimpleShadePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val contactShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rimHighlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = dp(1.25f)
-        color = Color.parseColor("#4A4B58")
+        color = Color.parseColor("#C6C6D0")
         strokeCap = Paint.Cap.ROUND
     }
     
@@ -124,7 +124,7 @@ class BottomNavSheetBar @JvmOverloads constructor(
         
         facePaint.shader = LinearGradient(
             0f, edgeThicknessPx, 0f, h.toFloat(),
-            intArrayOf(Color.parseColor("#24252F"), Color.parseColor("#1A1B24"), Color.parseColor("#131319")),
+            intArrayOf(Color.parseColor("#FFFFFF"), Color.parseColor("#F7F7FA"), Color.parseColor("#ECECF1")),
             floatArrayOf(0f, 0.4f, 1f),
             Shader.TileMode.CLAMP,
         )
