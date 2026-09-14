@@ -3,7 +3,6 @@ package org.example.test
 import android.animation.ArgbEvaluator
 import android.content.Intent
 import android.graphics.Color
-import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
@@ -60,12 +59,21 @@ class SketchActivity : AppCompatActivity() {
     private lateinit var actionHideToggleSel: LinearLayout
     private lateinit var actionDeleteSel: LinearLayout
 
-    // Bottom navigation bar - a pill-shaped, floating LinearLayout (bg_bottom_nav_pill gives it
+    // Bottom navigation bar - a pill-shaped, floating "sheet" (bg drawn by bottomNavBar itself,
     // a fully-rounded capsule shape plus a 3mm extruded edge, like a physical 3D sheet), not a
     // BottomSheetBehavior sheet. Visible by default when SketchActivity opens; toggled
     // hidden/visible by tapping empty canvas (see onTapEmptySpace below). Never drags or
     // collapses - it's either fully shown or fully hidden.
+    //
+    // bottomNavBarContainer is the actual CoordinatorLayout child (owns the real margins/
+    // insets and is what showBottomNavBar/hideBottomNavBar animate); bottomNavBar is just the
+    // decorative sheet painted underneath; bottomNavTabs is the sibling row that holds the
+    // real, tappable tab columns. Tabs are deliberately NOT children of bottomNavBar - see the
+    // class doc on BottomNavSheetBar for why (the elevated selected frame must be free to float
+    // above the sheet without being clipped by the sheet's own bounds).
+    private lateinit var bottomNavBarContainer: FrameLayout
     private lateinit var bottomNavBar: BottomNavSheetBar
+    private lateinit var bottomNavTabs: LinearLayout
 
     // Per-tab visual state for the elevated-frame illusion: each pill keeps a persistent,
     // alpha-animatable accent-color background (rather than a hard drawable swap) plus its own
@@ -81,11 +89,17 @@ class SketchActivity : AppCompatActivity() {
 
     private lateinit var pillVisuals: List<TabPillVisual>
     private val pillBaseElevationPx by lazy { dp(3f) }
-    private val pillRaisedElevationPx by lazy { dp(12f) }
-    private val pillRiseTranslationPx by lazy { -dp(16f) }
-    private val activePillColor = Color.WHITE
+    // Raised further than before (was 12dp) now that the frame lives on a sibling layer free of
+    // the sheet's own elevation-clip - a bigger elevation both lifts the frame clearly clear of
+    // the sheet's surface and gives it a larger, softer native shadow blur.
+    private val pillRaisedElevationPx by lazy { dp(20f) }
+    private val pillRiseTranslationPx by lazy { -dp(20f) }
+    private val activeAccentColor = Color.parseColor("#3D7EFF")
     private val inactiveTextColor = Color.parseColor("#9A9AA5")
-    private val activeTextColor = Color.parseColor("#1A1B24")
+    private val activeTextColor = Color.WHITE
+    // Dark neutral rather than pure black, for a softer-looking drop shadow under the floating
+    // selected frame.
+    private val pillShadowColor = Color.parseColor("#1A1B24")
 
     private fun dp(v: Float): Float = v * resources.displayMetrics.density
 
@@ -158,7 +172,9 @@ class SketchActivity : AppCompatActivity() {
         actionHideToggleSel = findViewById(R.id.actionHideToggleSel)
         actionDeleteSel = findViewById(R.id.actionDeleteSel)
 
+        bottomNavBarContainer = findViewById(R.id.bottomNavBarContainer)
         bottomNavBar = findViewById(R.id.bottomNavBar)
+        bottomNavTabs = findViewById(R.id.bottomNavTabs)
         elementsPanel = findViewById(R.id.elementsPanel)
         componentsContentContainer = findViewById(R.id.componentsContentContainer)
         elementsPanelBehavior = BottomSheetBehavior.from(elementsPanel)
@@ -285,26 +301,28 @@ class SketchActivity : AppCompatActivity() {
     // extruded-edge thickness), keeping elementsPanel docked above it, and the show/hide toggle
     // below.
     private fun setupBottomNavBar() {
-        val navBarLp = bottomNavBar.layoutParams as? CoordinatorLayout.LayoutParams
-        bottomNavBarBaseMarginBottom = navBarLp?.bottomMargin ?: bottomNavBar.marginBottom
-        ViewCompat.setOnApplyWindowInsetsListener(bottomNavBar) { _, insets ->
+        // bottomNavBarContainer (not bottomNavBar) is the real CoordinatorLayout child that
+        // owns the 20dp floating-gap margin and needs to grow for the nav-bar inset.
+        val navBarLp = bottomNavBarContainer.layoutParams as? CoordinatorLayout.LayoutParams
+        bottomNavBarBaseMarginBottom = navBarLp?.bottomMargin ?: bottomNavBarContainer.marginBottom
+        ViewCompat.setOnApplyWindowInsetsListener(bottomNavBarContainer) { _, insets ->
             val navInset = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
-            val lp = bottomNavBar.layoutParams as? CoordinatorLayout.LayoutParams
+            val lp = bottomNavBarContainer.layoutParams as? CoordinatorLayout.LayoutParams
             if (lp != null) {
                 lp.bottomMargin = bottomNavBarBaseMarginBottom + navInset
-                bottomNavBar.layoutParams = lp
+                bottomNavBarContainer.layoutParams = lp
             }
             insets
         }
 
-        // elementsPanel is a sibling sheet, not a child of bottomNavBar, so it doesn't
+        // elementsPanel is a sibling sheet, not a child of bottomNavBarContainer, so it doesn't
         // automatically stop above it - keep its bottom margin matched to the nav bar's total
         // footprint (its measured height *plus* the floating gap beneath the pill; 0 while
         // hidden) so the sheet's content never slides underneath the bar - or the gap below it -
         // when it's shown, and can use the full height when it's hidden.
-        bottomNavBar.viewTreeObserver.addOnGlobalLayoutListener {
-            val navBarHeight = if (bottomNavBar.visibility == View.VISIBLE) {
-                bottomNavBar.height + bottomNavBar.marginBottom
+        bottomNavBarContainer.viewTreeObserver.addOnGlobalLayoutListener {
+            val navBarHeight = if (bottomNavBarContainer.visibility == View.VISIBLE) {
+                bottomNavBarContainer.height + bottomNavBarContainer.marginBottom
             } else {
                 0
             }
@@ -314,19 +332,31 @@ class SketchActivity : AppCompatActivity() {
                 elementsPanel.layoutParams = lp
             }
         }
+
+        // bottomNavBar (the decorative sheet) no longer has the tab columns as children, so it
+        // can't read their positions off itself any more - keep its dimple synced to whichever
+        // tab is active whenever the sibling bottomNavTabs row re-lays-out (rotation, first
+        // layout, etc.); a live selection animation owns the dimple's position on its own.
+        bottomNavTabs.viewTreeObserver.addOnGlobalLayoutListener {
+            bottomNavBar.syncRestingGeometry()
+        }
     }
 
-    // Shows bottomNavBar by sliding up into place while fading in, easing out (fast start,
+    // Shows the nav bar by sliding up into place while fading in, easing out (fast start,
     // gentle settle). Visible by default when SketchActivity opens; this is also the
     // toggled-on state after tapping empty canvas while it's hidden. Slides/fades in place -
-    // doesn't affect canvas layout either way.
+    // doesn't affect canvas layout either way. Animates bottomNavBarContainer as a whole so the
+    // sheet and its tab row move together.
     private fun showBottomNavBar() {
-        if (bottomNavBar.visibility == View.VISIBLE && bottomNavBar.alpha >= 1f && bottomNavBar.translationY == 0f) return
-        bottomNavBar.animate().cancel()
-        bottomNavBar.alpha = 0f
-        bottomNavBar.translationY = bottomNavBar.height.toFloat()
-        bottomNavBar.visibility = View.VISIBLE
-        bottomNavBar.animate()
+        if (bottomNavBarContainer.visibility == View.VISIBLE &&
+            bottomNavBarContainer.alpha >= 1f &&
+            bottomNavBarContainer.translationY == 0f
+        ) return
+        bottomNavBarContainer.animate().cancel()
+        bottomNavBarContainer.alpha = 0f
+        bottomNavBarContainer.translationY = bottomNavBarContainer.height.toFloat()
+        bottomNavBarContainer.visibility = View.VISIBLE
+        bottomNavBarContainer.animate()
             .alpha(1f)
             .translationY(0f)
             .setDuration(BOTTOM_NAV_BAR_ANIM_MS)
@@ -334,28 +364,28 @@ class SketchActivity : AppCompatActivity() {
             .start()
     }
 
-    // Hides bottomNavBar by sliding down out of view while fading out, easing in (gentle start,
+    // Hides the nav bar by sliding down out of view while fading out, easing in (gentle start,
     // fast finish). Toggled by tapping empty canvas while it's shown. Disappears in place -
     // the canvas underneath doesn't expand to fill the space.
     private fun hideBottomNavBar() {
-        if (bottomNavBar.visibility != View.VISIBLE) return
-        bottomNavBar.animate().cancel()
-        bottomNavBar.animate()
+        if (bottomNavBarContainer.visibility != View.VISIBLE) return
+        bottomNavBarContainer.animate().cancel()
+        bottomNavBarContainer.animate()
             .alpha(0f)
-            .translationY(bottomNavBar.height.toFloat())
+            .translationY(bottomNavBarContainer.height.toFloat())
             .setDuration(BOTTOM_NAV_BAR_ANIM_MS)
             .setInterpolator(AccelerateInterpolator())
             .withEndAction {
-                bottomNavBar.visibility = View.GONE
-                bottomNavBar.translationY = 0f
+                bottomNavBarContainer.visibility = View.GONE
+                bottomNavBarContainer.translationY = 0f
             }
             .start()
     }
 
-    // Toggles bottomNavBar between shown and hidden. The single gesture entry point: a tap on
+    // Toggles the nav bar between shown and hidden. The single gesture entry point: a tap on
     // empty canvas (see onTapEmptySpace below).
     private fun toggleBottomNavBar() {
-        if (bottomNavBar.visibility == View.VISIBLE) hideBottomNavBar() else showBottomNavBar()
+        if (bottomNavBarContainer.visibility == View.VISIBLE) hideBottomNavBar() else showBottomNavBar()
     }
 
     // Separate sheet (independent from bottomNavBar) that shows the Components browser. Opened
@@ -465,8 +495,13 @@ class SketchActivity : AppCompatActivity() {
 
 
     private fun setupTabs() {
+        // bottomNavTabs (not bottomNavBar) now owns the tab columns - see the class doc on
+        // BottomNavSheetBar - but the sheet still needs to read their positions to place its
+        // dimple.
+        bottomNavBar.tabColumns = allTabs
+
         pillVisuals = allTabs.map { column ->
-            // The pill translates ~20dp above its resting position when selected; without this,
+            // The pill translates well above its resting position when selected; without this,
             // the column (which otherwise wraps tightly around the pill) would clip that lift.
             column.clipChildren = false
             column.clipToPadding = false
@@ -474,11 +509,17 @@ class SketchActivity : AppCompatActivity() {
             val fill = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dp(11f)
-                setColor(activePillColor)
+                setColor(activeAccentColor)
                 alpha = 0
             }
             pill.background = fill
             pill.elevation = pillBaseElevationPx
+            pill.outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+            pill.clipToOutline = false
+            // Soft, dark-neutral shadow (rather than the harsher default pure-black) so the
+            // raised frame reads as gently floating above the sheet instead of harshly cut out.
+            pill.outlineAmbientShadowColor = pillShadowColor
+            pill.outlineSpotShadowColor = pillShadowColor
             TabPillVisual(
                 pill = pill,
                 fill = fill,
@@ -573,7 +614,6 @@ class SketchActivity : AppCompatActivity() {
             val color = evaluator.evaluate(clamped, inactiveTextColor, activeTextColor) as Int
             visual.icon.setColorFilter(color)
             visual.label.setTextColor(color)
-            visual.label.setTypeface(visual.label.typeface, if (i == newIndex) Typeface.BOLD else Typeface.NORMAL)
         }
     }
 
