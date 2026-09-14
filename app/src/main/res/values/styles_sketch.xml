@@ -12,13 +12,15 @@
     </style>
 
     <!-- The rounded-square selection frame. Holds only the icon; equal horizontal/vertical
-         padding keeps it square around the 18dp icon. -->
+         padding keeps it square around the 18dp icon. Padding bumped up (vs the icon-only
+         label change) so the frame reads as a clearly larger, more prominent shape than the
+         now-tighter bar around it. -->
     <style name="SketchTabPill">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:orientation">vertical</item>
         <item name="android:gravity">center</item>
-        <item name="android:padding">10dp</item>
+        <item name="android:padding">13dp</item>
     </style>
 
     <style name="SketchTabIcon">
@@ -26,12 +28,14 @@
         <item name="android:layout_height">18dp</item>
     </style>
 
+    <!-- Kept small/tight so the pill stays the dominant shape (visual hierarchy: big icon
+         frame, small supporting label). -->
     <style name="SketchTabLabel">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_gravity">center_horizontal</item>
-        <item name="android:layout_marginTop">2dp</item>
-        <item name="android:textSize">10.5sp</item>
+        <item name="android:layout_marginTop">3dp</item>
+        <item name="android:textSize">10sp</item>
     </style>
 
     <!-- Section headers ("Quick Actions", "Properties", "Animation & Interaction") -->
