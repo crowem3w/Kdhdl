@@ -80,8 +80,8 @@ class SketchActivity : AppCompatActivity() {
 
     private lateinit var pillVisuals: List<TabPillVisual>
     private val pillBaseElevationPx by lazy { dp(3f) }
-    private val pillRaisedElevationPx by lazy { dp(14f) }
-    private val pillRiseTranslationPx by lazy { -dp(20f) }
+    private val pillRaisedElevationPx by lazy { dp(12f) }
+    private val pillRiseTranslationPx by lazy { -dp(16f) }
     private val activeAccentColor = Color.parseColor("#3D7EFF")
     private val inactiveTextColor = Color.parseColor("#9A9AA5")
     private val activeTextColor = Color.WHITE
@@ -472,7 +472,7 @@ class SketchActivity : AppCompatActivity() {
             val pill = column.getChildAt(0) as LinearLayout
             val fill = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(14f)
+                cornerRadius = dp(11f)
                 setColor(activeAccentColor)
                 alpha = 0
             }

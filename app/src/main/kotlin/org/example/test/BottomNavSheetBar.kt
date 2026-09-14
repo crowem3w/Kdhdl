@@ -47,9 +47,9 @@ class BottomNavSheetBar @JvmOverloads constructor(
     private val edgeThicknessPx = dp(6f)
     private val hugeCornerPx = dp(999f)
 
-    private val dipDepthPx = dp(13f)
-    private val dipHalfWidthFallbackPx = dp(46f)
-    private val dipHalfWidthPaddingPx = dp(10f) // the dimple is a bit wider than the pill it cradles
+    private val dipDepthPx = dp(10f)
+    private val dipHalfWidthFallbackPx = dp(38f)
+    private val dipHalfWidthPaddingPx = dp(8f) // the dimple is a bit wider than the pill it cradles
 
     private var activeIndex = 0
     private var dipCenterX = 0f

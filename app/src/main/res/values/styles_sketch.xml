@@ -14,13 +14,13 @@
         <item name="android:layout_height">wrap_content</item>
         <item name="android:orientation">vertical</item>
         <item name="android:gravity">center</item>
-        <item name="android:paddingHorizontal">14dp</item>
-        <item name="android:paddingVertical">8dp</item>
+        <item name="android:paddingHorizontal">10dp</item>
+        <item name="android:paddingVertical">6dp</item>
     </style>
 
     <style name="SketchTabIcon">
-        <item name="android:layout_width">20dp</item>
-        <item name="android:layout_height">20dp</item>
+        <item name="android:layout_width">18dp</item>
+        <item name="android:layout_height">18dp</item>
     </style>
 
     <style name="SketchTabLabel">
