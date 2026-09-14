@@ -89,6 +89,7 @@ class BottomNavSheetBar @JvmOverloads constructor(
     }
 
     private val facePath = Path()
+    private val edgePath = Path()
     private val dipCurvePath = Path() 
     private val edgeRect = RectF()
     private val faceRect = RectF()
@@ -219,13 +220,17 @@ class BottomNavSheetBar @JvmOverloads constructor(
         
         edgeRect.set(0f, edgeThicknessPx, w, h)
         val edgeRadius = min(hugeCornerPx, edgeRect.height() / 2f)
-        canvas.drawRoundRect(edgeRect, edgeRadius, edgeRadius, edgePaint)
+        
+        
+        
+        buildOutlinePath(edgePath, edgeRect, edgeRadius, cutDip = true, dipCurveOut = null)
+        canvas.drawPath(edgePath, edgePaint)
 
         
         val faceBottom = h - edgeThicknessPx
         faceRect.set(0f, 0f, w, faceBottom)
         val r = min(hugeCornerPx, faceRect.height() / 2f)
-        buildFacePath(faceRect, r)
+        buildOutlinePath(facePath, faceRect, r, cutDip = true, dipCurveOut = dipCurvePath)
         canvas.drawPath(facePath, facePaint)
         canvas.drawPath(facePath, faceStroke)
 
@@ -241,69 +246,74 @@ class BottomNavSheetBar @JvmOverloads constructor(
         }
     }
 
-    private fun buildFacePath(rect: RectF, r: Float) {
-        facePath.reset()
-        dipCurvePath.reset()
+    private fun buildOutlinePath(out: Path, rect: RectF, r: Float, cutDip: Boolean, dipCurveOut: Path?) {
+        out.reset()
+        dipCurveOut?.reset()
 
         val left = rect.left
         val top = rect.top
         val right = rect.right
         val bottom = rect.bottom
 
+        
+        
+        
+        val localDipDepth = (dipDepthPx - top).coerceAtLeast(0f)
+
         val dipLeft = max(left + r, dipCenterX - dipHalfWidth)
         val dipRight = min(right - r, dipCenterX + dipHalfWidth)
-        val dipUsable = geometryReady && dipRight - dipLeft > dp(4f)
+        val dipUsable = cutDip && geometryReady && dipRight - dipLeft > dp(4f) && localDipDepth > dp(1f)
 
-        facePath.moveTo(left + r, top)
+        out.moveTo(left + r, top)
 
         if (dipUsable) {
-            facePath.lineTo(dipLeft, top)
-            dipCurvePath.moveTo(dipLeft, top)
+            out.lineTo(dipLeft, top)
+            dipCurveOut?.moveTo(dipLeft, top)
 
-            val bottomY = top + dipDepthPx
+            val bottomY = top + localDipDepth
             val leftCtrlSpan = (dipCenterX - dipLeft) * 0.55f
             val rightCtrlSpan = (dipRight - dipCenterX) * 0.55f
 
             
             
-            facePath.cubicTo(
+            out.cubicTo(
                 dipLeft + leftCtrlSpan, top,
                 dipCenterX - leftCtrlSpan, bottomY,
                 dipCenterX, bottomY,
             )
-            dipCurvePath.cubicTo(
+            dipCurveOut?.cubicTo(
                 dipLeft + leftCtrlSpan, top,
                 dipCenterX - leftCtrlSpan, bottomY,
                 dipCenterX, bottomY,
             )
             
-            facePath.cubicTo(
+            out.cubicTo(
                 dipCenterX + rightCtrlSpan, bottomY,
                 dipRight - rightCtrlSpan, top,
                 dipRight, top,
             )
-            dipCurvePath.cubicTo(
+            dipCurveOut?.cubicTo(
                 dipCenterX + rightCtrlSpan, bottomY,
                 dipRight - rightCtrlSpan, top,
                 dipRight, top,
             )
-            facePath.lineTo(right - r, top)
+            out.lineTo(right - r, top)
         } else {
-            facePath.lineTo(right - r, top)
+            out.lineTo(right - r, top)
         }
 
         cornerOval.set(right - 2 * r, top, right, top + 2 * r)
-        facePath.arcTo(cornerOval, -90f, 90f, false)
-        facePath.lineTo(right, bottom - r)
+        out.arcTo(cornerOval, -90f, 90f, false)
+        out.lineTo(right, bottom - r)
         cornerOval.set(right - 2 * r, bottom - 2 * r, right, bottom)
-        facePath.arcTo(cornerOval, 0f, 90f, false)
-        facePath.lineTo(left + r, bottom)
+        out.arcTo(cornerOval, 0f, 90f, false)
+        out.lineTo(left + r, bottom)
         cornerOval.set(left, bottom - 2 * r, left + 2 * r, bottom)
-        facePath.arcTo(cornerOval, 90f, 90f, false)
-        facePath.lineTo(left, top + r)
+        out.arcTo(cornerOval, 90f, 90f, false)
+        out.lineTo(left, top + r)
         cornerOval.set(left, top, left + 2 * r, top + 2 * r)
-        facePath.arcTo(cornerOval, 180f, 90f, false)
-        facePath.close()
+        out.arcTo(cornerOval, 180f, 90f, false)
+        out.close()
     }
 
     
