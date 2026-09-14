@@ -295,7 +295,9 @@ class SketchCanvasView @JvmOverloads constructor(
                 marqueeLive.clear()
                 panCandidate = false
                 canvasPanning = false
-                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                if (HapticSettings.isEnabled(context)) {
+                    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                }
                 invalidate()
             }
         }

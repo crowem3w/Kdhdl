@@ -562,25 +562,48 @@ class SketchActivity : AppCompatActivity() {
             }
         })
 
-        tabShapes.setOnClickListener {
-            openPartPickerFromTab(tabShapes, "Shapes", listOf(PartKind.CARD, PartKind.IMAGE, PartKind.CHIP))
+        tabShapes.setOnClickListener { selectShapesTab() }
+        tabText.setOnClickListener { selectTextTab() }
+        tabMedia.setOnClickListener { selectMediaTab() }
+        tabComponents.setOnClickListener { selectComponentsTab() }
+        tabSelect.setOnClickListener { selectSelectTab() }
+
+        
+        
+        bottomNavBar.onTabDragSelect = { index ->
+            when (allTabs.getOrNull(index)) {
+                tabShapes -> selectShapesTab()
+                tabText -> selectTextTab()
+                tabMedia -> selectMediaTab()
+                tabComponents -> selectComponentsTab()
+                tabSelect -> selectSelectTab()
+                else -> {}
+            }
         }
-        tabText.setOnClickListener {
-            openTextInputModal()
-        }
-        tabMedia.setOnClickListener {
-            openPartPickerFromTab(tabMedia, "Upload", listOf(PartKind.IMAGE))
-        }
-        tabComponents.setOnClickListener {
-            setTabActive(tabComponents)
-            showComponentsContent()
-        }
-        tabSelect.setOnClickListener {
-            
-            
-            if (showingComponents) closeComponentsContent()
-            setTabActive(tabSelect)
-        }
+    }
+
+    private fun selectShapesTab() {
+        openPartPickerFromTab(tabShapes, "Shapes", listOf(PartKind.CARD, PartKind.IMAGE, PartKind.CHIP))
+    }
+
+    private fun selectTextTab() {
+        openTextInputModal()
+    }
+
+    private fun selectMediaTab() {
+        openPartPickerFromTab(tabMedia, "Upload", listOf(PartKind.IMAGE))
+    }
+
+    private fun selectComponentsTab() {
+        setTabActive(tabComponents)
+        showComponentsContent()
+    }
+
+    private fun selectSelectTab() {
+        
+        
+        if (showingComponents) closeComponentsContent()
+        setTabActive(tabSelect)
     }
 
 

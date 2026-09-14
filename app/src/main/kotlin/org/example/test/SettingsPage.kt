@@ -91,6 +91,51 @@ fun buildSettingsPage(activity: MainActivity): FrameLayout {
     row.addView(textColumn)
     row.addView(darkModeSwitch)
     column.addView(row)
+
+    val hapticRow = LinearLayout(activity).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = dp(12) }
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(14).toFloat()
+            setColor(palette.surface)
+        }
+        setPadding(dp(16), dp(16), dp(16), dp(16))
+    }
+
+    val hapticTextColumn = LinearLayout(activity).apply {
+        orientation = LinearLayout.VERTICAL
+        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+    }
+
+    hapticTextColumn.addView(TextView(activity).apply {
+        text = "Haptic Feedback"
+        textSize = 16f
+        setTextColor(palette.onSurface)
+    })
+
+    hapticTextColumn.addView(TextView(activity).apply {
+        text = "Vibrate on tab drag and other interactions"
+        textSize = 13f
+        setTextColor(palette.onSurfaceMuted)
+        setPadding(0, dp(4), 0, 0)
+    })
+
+    val hapticSwitch = MaterialSwitch(activity).apply {
+        isChecked = HapticSettings.isEnabled(activity)
+        setOnCheckedChangeListener { _, isChecked ->
+            HapticSettings.setEnabled(activity, isChecked)
+        }
+    }
+
+    hapticRow.addView(hapticTextColumn)
+    hapticRow.addView(hapticSwitch)
+    column.addView(hapticRow)
+
     root.addView(column)
     return root
 }

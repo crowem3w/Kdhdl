@@ -11,8 +11,12 @@ import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
 import android.util.AttributeSet
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.animation.OvershootInterpolator
 import android.widget.LinearLayout
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -69,6 +73,17 @@ class BottomNavSheetBar @JvmOverloads constructor(
 
 
     var onSelectionProgress: ((oldIndex: Int, newIndex: Int, t: Float) -> Unit)? = null
+
+    
+    
+    
+    var onTabDragSelect: ((index: Int) -> Unit)? = null
+
+    private val touchSlopPx = ViewConfiguration.get(context).scaledTouchSlop
+    private var downX = 0f
+    private var downY = 0f
+    private var isDragSelecting = false
+    private var lastDragIndex = -1
 
     
 
@@ -162,6 +177,64 @@ class BottomNavSheetBar @JvmOverloads constructor(
 
 
 
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.x
+                downY = ev.y
+                isDragSelecting = false
+                lastDragIndex = indexForX(ev.x) ?: activeIndex
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = ev.x - downX
+                val dy = ev.y - downY
+                if (!isDragSelecting && abs(dx) > touchSlopPx && abs(dx) > abs(dy)) {
+                    isDragSelecting = true
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                isDragSelecting = false
+            }
+        }
+        return false
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!isDragSelecting) return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                val idx = indexForX(event.x)
+                if (idx != null && idx != lastDragIndex) {
+                    lastDragIndex = idx
+                    if (HapticSettings.isEnabled(context)) {
+                        performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    }
+                    onTabDragSelect?.invoke(idx)
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                isDragSelecting = false
+            }
+        }
+        return true
+    }
+
+    private fun indexForX(x: Float): Int? {
+        if (childCount == 0) return null
+        for (i in 0 until childCount) {
+            val child = getChildAt(i)
+            if (x >= child.left && x <= child.right) return i
+        }
+        val first = getChildAt(0)
+        val last = getChildAt(childCount - 1)
+        return when {
+            x < first.left -> 0
+            x > last.right -> childCount - 1
+            else -> null
+        }
+    }
 
     fun setActiveTabIndex(index: Int, animate: Boolean = true) {
         if (index == activeIndex && geometryReady) return
