@@ -19,6 +19,14 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 
+// Elements panel palette (light mode): soft-gray surface with a lime-green secondary/accent color.
+private val PANEL_BG = Color.parseColor("#F3F4F6")
+private val PANEL_PRIMARY_TEXT = Color.parseColor("#1A1B24")
+private val PANEL_SECONDARY_TEXT = Color.parseColor("#6B7280")
+private val PANEL_NEUTRAL_TEXT = Color.parseColor("#9CA3AF")
+private val PANEL_DIVIDER = Color.parseColor("#D1D5DB")
+private val PANEL_ACCENT = Color.parseColor("#A3E635")
+
 private data class ComponentCategory(val id: String, val label: String, val iconRes: Int)
 
 private data class GeometrySubCategory(val label: String, val iconRes: Int, val children: List<String>)
@@ -69,11 +77,11 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
 
 
 
-    val primaryText = Color.WHITE
-    val secondaryText = Color.parseColor("#C7C7CF")
-    val neutralText = Color.parseColor("#9A9AA5")
-    val activeBlue = Color.parseColor("#3D7EFF")
-    val guideLineColor = Color.parseColor("#3A3A42")
+    val primaryText = PANEL_PRIMARY_TEXT
+    val secondaryText = PANEL_SECONDARY_TEXT
+    val neutralText = PANEL_NEUTRAL_TEXT
+    val activeBlue = PANEL_ACCENT
+    val guideLineColor = PANEL_DIVIDER
 
     val rowHeightL2 = dp(48)
     val rowHeightL3 = dp(42)
@@ -494,7 +502,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         contentDescription = "Back"
         addView(ImageView(context).apply {
             setImageResource(R.drawable.ic_back_return)
-            setColorFilter(Color.parseColor("#9A9AA5"))
+            setColorFilter(PANEL_SECONDARY_TEXT)
             layoutParams = FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER)
         })
         setOnClickListener { onClose() }
@@ -503,8 +511,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
     val searchInput = EditText(context).apply {
         hint = "Search components"
-        setHintTextColor(Color.parseColor("#6F707A"))
-        setTextColor(Color.WHITE)
+        setHintTextColor(PANEL_NEUTRAL_TEXT)
+        setTextColor(PANEL_PRIMARY_TEXT)
         textSize = 14f
         setSingleLine(true)
         background = null
@@ -519,7 +527,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         addView(ImageView(context).apply {
             setImageResource(R.drawable.ic_search)
-            setColorFilter(Color.parseColor("#6F707A"))
+            setColorFilter(PANEL_SECONDARY_TEXT)
             layoutParams = LinearLayout.LayoutParams(dp(18), dp(18))
         })
         addView(searchInput)
@@ -529,7 +537,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(10) }
         addView(ImageView(context).apply {
             setImageResource(R.drawable.ic_filter)
-            setColorFilter(Color.parseColor("#D8D8DE"))
+            setColorFilter(PANEL_SECONDARY_TEXT)
             layoutParams = FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER)
         })
         setOnClickListener { Toast.makeText(context, "Filters aren't available yet", Toast.LENGTH_SHORT).show() }
@@ -579,7 +587,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
 
             entry.frameBg.visibility = if (active) View.VISIBLE else View.GONE
-            val color = Color.parseColor(if (active) "#FFFFFF" else "#9A9AA5")
+            val color = if (active) PANEL_ACCENT else PANEL_SECONDARY_TEXT
             entry.icon.setColorFilter(color)
 
 
@@ -648,14 +656,14 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             }
             addView(TextView(context).apply {
                 text = cat.label
-                setTextColor(Color.WHITE)
+                setTextColor(PANEL_PRIMARY_TEXT)
                 textSize = 14f
                 setTypeface(typeface, Typeface.BOLD)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             })
             addView(ImageButton(context).apply {
                 setImageResource(R.drawable.ic_more_horiz)
-                setColorFilter(Color.parseColor("#6F707A"))
+                setColorFilter(PANEL_SECONDARY_TEXT)
                 layoutParams = LinearLayout.LayoutParams(dp(28), dp(28))
                 setOnClickListener {
                     Toast.makeText(context, "${cat.label} options aren't available yet", Toast.LENGTH_SHORT).show()
@@ -787,7 +795,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
                     label = TextView(context).apply {
                         text = itemNames.getOrElse(i) { "Component ${i + 1}" }
-                        setTextColor(Color.parseColor("#9A9AA5"))
+                        setTextColor(PANEL_SECONDARY_TEXT)
                         textSize = 10.5f
                         gravity = Gravity.CENTER
                         maxLines = 1
@@ -921,7 +929,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
             chevronView = ImageView(context).apply {
                 setImageResource(R.drawable.ic_chevron_left)
-                setColorFilter(Color.WHITE)
+                setColorFilter(PANEL_ACCENT)
                 rotation = 270f
                 visibility = View.GONE
                 layoutParams = LinearLayout.LayoutParams(dp(14), dp(14))
@@ -1033,7 +1041,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     railEntries.add(RailEntry(allItem.wrapper, allItem.label))
 
     val railDivider = View(context).apply {
-        setBackgroundColor(Color.parseColor("#2A2A31"))
+        setBackgroundColor(PANEL_DIVIDER)
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
             topMargin = dp(2)
             bottomMargin = dp(8)
@@ -1128,7 +1136,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         clipToPadding = false
         addView(rail)
         addView(View(context).apply {
-            setBackgroundColor(Color.parseColor("#2A2A31"))
+            setBackgroundColor(PANEL_DIVIDER)
             layoutParams = LinearLayout.LayoutParams(dp(1), ViewGroup.LayoutParams.MATCH_PARENT).apply {
                 marginEnd = dp(10)
             }
