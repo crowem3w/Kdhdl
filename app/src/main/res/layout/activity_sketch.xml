@@ -164,15 +164,51 @@
         </LinearLayout>
     </LinearLayout>
 
+    <!-- Elements panel: a separate bottom sheet, independent of bottomNavBar, that shows the
+         Components browser once the Elements tab is tapped. Its bottom margin is padded out at
+         runtime to bottomNavBar's measured height (see setupBottomNavBar in SketchActivity) so
+         it sits above the nav bar rather than sliding underneath it. Skips the collapsed state -
+         it only ever toggles between hidden and fully expanded. Declared (and thus drawn)
+         BEFORE bottomNavBar below, and at a lower elevation than it, so that while it's
+         sliding in/out - and even briefly full-height mid-drag - it always renders and
+         receives touches behind the nav bar rather than overshadowing it. Any other popup
+         panel added to this layout should follow the same rule: declare it above (before)
+         bottomNavBar in this file, and keep its android:elevation below bottomNavBar's. -->
+    <FrameLayout
+        android:id="@+id/elementsPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_bottom_panel"
+        android:clipChildren="false"
+        android:elevation="8dp"
+        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
+        app:behavior_hideable="true"
+        app:behavior_draggable="true"
+        app:behavior_skipCollapsed="true"
+        app:behavior_peekHeight="0dp">
+
+        <!-- Components browser content, built and attached at runtime by
+             buildComponentsContent() in ComponentsPanel.kt. -->
+        <FrameLayout
+            android:id="@+id/componentsContentContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipChildren="false" />
+    </FrameLayout>
+
     <!-- Bottom navigation bar: a plain, always-visible tab bar floating just above the bottom
          edge of the screen as a pill-shaped 3D sheet (NOT a BottomSheetBehavior sheet - it
          never drags, collapses, or hides). Tapping Shapes/Text/Upload opens its own modal
-         picker/dialog; tapping Elements opens elementsPanel below, a separate sheet that
-         floats above this bar (see setupBottomNavBar / setupElementsPanel in SketchActivity).
-         The extruded ~6dp "sheet thickness" is drawn along the TOP edge (dark sliver peeking
-         above the lighter face, with its own catch-light) rather than the bottom, so
-         paddingTop covers just the tab row's own spacing - it does not need the extra bump
-         that paddingBottom needed when the thickness lived down there. -->
+         picker/dialog; tapping Elements opens elementsPanel above, a separate sheet that
+         floats over the canvas but always stays visually and interactively behind this bar
+         (see setupBottomNavBar / setupElementsPanel in SketchActivity). Declared LAST in this
+         file, and given the highest android:elevation of any popup/panel here, so it always
+         draws on top of - and always wins touch priority over - selectionActionsPanel,
+         elementsPanel, and any future panel added above it, instead of getting overshadowed
+         by them while they pop up. The extruded ~6dp "sheet thickness" is drawn along the TOP
+         edge (dark sliver peeking above the lighter face, with its own catch-light) rather
+         than the bottom, so paddingTop covers just the tab row's own spacing - it does not
+         need the extra bump that paddingBottom needed when the thickness lived down there. -->
     <org.example.test.BottomNavSheetBar
         android:id="@+id/bottomNavBar"
         android:layout_width="match_parent"
@@ -184,7 +220,7 @@
         android:paddingHorizontal="24dp"
         android:paddingTop="9dp"
         android:paddingBottom="5dp"
-        android:elevation="12dp"
+        android:elevation="16dp"
         android:clipChildren="false"
         android:clipToPadding="false">
 
@@ -238,30 +274,4 @@
             <TextView style="@style/SketchTabLabel" android:text="Elements" android:textColor="#8A8A94" />
         </LinearLayout>
     </org.example.test.BottomNavSheetBar>
-
-    <!-- Elements panel: a separate bottom sheet, independent of bottomNavBar, that shows the
-         Components browser once the Elements tab is tapped. Its bottom margin is padded out at
-         runtime to bottomNavBar's measured height (see setupBottomNavBar in SketchActivity) so
-         it sits above the nav bar rather than sliding underneath it. Skips the collapsed state -
-         it only ever toggles between hidden and fully expanded. -->
-    <FrameLayout
-        android:id="@+id/elementsPanel"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="@drawable/bg_bottom_panel"
-        android:clipChildren="false"
-        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
-        app:behavior_hideable="true"
-        app:behavior_draggable="true"
-        app:behavior_skipCollapsed="true"
-        app:behavior_peekHeight="0dp">
-
-        <!-- Components browser content, built and attached at runtime by
-             buildComponentsContent() in ComponentsPanel.kt. -->
-        <FrameLayout
-            android:id="@+id/componentsContentContainer"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:clipChildren="false" />
-    </FrameLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
