@@ -73,6 +73,12 @@ class BottomNavSheetBar @JvmOverloads constructor(
     
 
     private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#0A0A10") }
+    private val edgeTopHighlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp(1f)
+        color = Color.parseColor("#3E3F4C")
+        strokeCap = Paint.Cap.ROUND
+    }
     private val facePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val faceStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -87,10 +93,20 @@ class BottomNavSheetBar @JvmOverloads constructor(
         color = Color.parseColor("#4A4B58")
         strokeCap = Paint.Cap.ROUND
     }
+    
+    
+    private val dipCreaseShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp(2.5f)
+        color = Color.parseColor("#66000000")
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val dipBounceLightPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     private val facePath = Path()
     private val edgePath = Path()
     private val dipCurvePath = Path() 
+    private val creaseShadowPath = Path()
     private val edgeRect = RectF()
     private val faceRect = RectF()
     private val cornerOval = RectF()
@@ -104,9 +120,10 @@ class BottomNavSheetBar @JvmOverloads constructor(
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w <= 0 || h <= 0) return
-        val faceBottom = h - edgeThicknessPx
+        
+        
         facePaint.shader = LinearGradient(
-            0f, 0f, 0f, faceBottom,
+            0f, edgeThicknessPx, 0f, h.toFloat(),
             intArrayOf(Color.parseColor("#24252F"), Color.parseColor("#1A1B24"), Color.parseColor("#131319")),
             floatArrayOf(0f, 0.4f, 1f),
             Shader.TileMode.CLAMP,
@@ -218,7 +235,7 @@ class BottomNavSheetBar @JvmOverloads constructor(
 
         
         
-        edgeRect.set(0f, edgeThicknessPx, w, h)
+        edgeRect.set(0f, 0f, w, h - edgeThicknessPx)
         val edgeRadius = min(hugeCornerPx, edgeRect.height() / 2f)
         
         
@@ -227,8 +244,14 @@ class BottomNavSheetBar @JvmOverloads constructor(
         canvas.drawPath(edgePath, edgePaint)
 
         
-        val faceBottom = h - edgeThicknessPx
-        faceRect.set(0f, 0f, w, faceBottom)
+        
+        canvas.save()
+        canvas.clipRect(0f, 0f, w, edgeThicknessPx + dp(1.5f))
+        canvas.drawPath(edgePath, edgeTopHighlightPaint)
+        canvas.restore()
+
+        
+        faceRect.set(0f, edgeThicknessPx, w, h)
         val r = min(hugeCornerPx, faceRect.height() / 2f)
         buildOutlinePath(facePath, faceRect, r, cutDip = true, dipCurveOut = dipCurvePath)
         canvas.drawPath(facePath, facePaint)
@@ -239,6 +262,7 @@ class BottomNavSheetBar @JvmOverloads constructor(
             canvas.clipPath(facePath)
             drawDimpleShading(canvas)
             drawContactShadow(canvas)
+            drawDipTrompeLoeil(canvas)
             canvas.restore()
             
             
@@ -343,5 +367,46 @@ class BottomNavSheetBar @JvmOverloads constructor(
             Shader.TileMode.CLAMP,
         )
         canvas.drawCircle(dipCenterX, cy, radius, contactShadowPaint)
+    }
+
+    
+    
+    
+    
+    
+    
+    private fun drawDipTrompeLoeil(canvas: Canvas) {
+        
+        
+        val creaseTop = dipDepthPx * 0.14f
+        val creaseHalfWidth = dipHalfWidth * 0.86f
+        val creaseDepth = dipDepthPx * 0.55f
+        buildSymmetricDipCurve(creaseShadowPath, dipCenterX, creaseHalfWidth, creaseTop, creaseDepth)
+        canvas.drawPath(creaseShadowPath, dipCreaseShadowPaint)
+
+        
+        
+        val bounceCy = dipDepthPx * 0.92f
+        val bounceRadius = dipHalfWidth * 0.5f
+        dipBounceLightPaint.shader = RadialGradient(
+            dipCenterX, bounceCy, bounceRadius,
+            intArrayOf(0x33FFFFFF, 0x00FFFFFF),
+            floatArrayOf(0f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        canvas.drawCircle(dipCenterX, bounceCy, bounceRadius, dipBounceLightPaint)
+    }
+
+    
+    
+    private fun buildSymmetricDipCurve(path: Path, centerX: Float, halfWidth: Float, top: Float, depth: Float) {
+        path.reset()
+        val left = centerX - halfWidth
+        val right = centerX + halfWidth
+        val bottomY = top + depth
+        val ctrlSpan = halfWidth * 0.55f
+        path.moveTo(left, top)
+        path.cubicTo(left + ctrlSpan, top, centerX - ctrlSpan, bottomY, centerX, bottomY)
+        path.cubicTo(centerX + ctrlSpan, bottomY, right - ctrlSpan, top, right, top)
     }
 }
