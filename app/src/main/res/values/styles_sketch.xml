@@ -20,21 +20,21 @@
         <item name="android:layout_height">wrap_content</item>
         <item name="android:orientation">vertical</item>
         <item name="android:gravity">center</item>
-        <item name="android:padding">13dp</item>
+        <item name="android:padding">16dp</item>
     </style>
 
     <style name="SketchTabIcon">
-        <item name="android:layout_width">18dp</item>
-        <item name="android:layout_height">18dp</item>
+        <item name="android:layout_width">22dp</item>
+        <item name="android:layout_height">22dp</item>
     </style>
 
-    <!-- Kept small/tight so the pill stays the dominant shape (visual hierarchy: big icon
-         frame, small supporting label). -->
+    <!-- Base/inactive gap between icon and label is tight (1dp); the selected tab's gap is
+         bumped up at runtime (see applySelectionProgress in SketchActivity). -->
     <style name="SketchTabLabel">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_gravity">center_horizontal</item>
-        <item name="android:layout_marginTop">3dp</item>
+        <item name="android:layout_marginTop">1dp</item>
         <item name="android:textSize">10sp</item>
     </style>
 
