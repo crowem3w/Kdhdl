@@ -92,6 +92,8 @@ class SketchActivity : AppCompatActivity() {
     
     private val pillFillColor = Color.WHITE
     private val pillGlowColor = Color.parseColor("#C6FF00")
+    // How much larger the selected tab's rounded-square frame grows vs. its resting size.
+    private val pillSelectedScaleBoost = 0.25f
     private val inactiveTextColor = Color.parseColor("#8A8A94")
     private val activeTextColor = Color.parseColor("#1A1B24")
 
@@ -101,12 +103,14 @@ class SketchActivity : AppCompatActivity() {
     
     
     
-    // Selected-tab fill: a plain white rounded-square (no stroke/border, 0px) with a soft
-    // lime glow bleeding outward underneath it. Built as two translucent lime layers of
-    // increasing size sitting behind a solid white top layer, all inset within the pill's
-    // own padding so the glow reads at the edge without needing to draw outside the view.
+    // Selected-tab fill: a plain white rounded-square (no stroke/border, 0px) with a subtle
+    // lime drop shadow projecting downward underneath it. Built as two translucent lime layers
+    // of increasing size sitting behind a solid white top layer; each is inset more at the top
+    // than the bottom so the visible lime peeks out mainly below the pill, reading as a soft
+    // downward shadow rather than a symmetric halo. Overall drawable alpha is driven by
+    // selection progress (see applySelectionProgress), so the shadow fades in/out with it.
     private fun buildPillFillDrawable(): LayerDrawable {
-        fun glowRing(alpha: Int, cornerDp: Float) = GradientDrawable().apply {
+        fun shadowLayer(alpha: Int, cornerDp: Float) = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = dp(cornerDp)
             setColor(pillGlowColor)
@@ -120,14 +124,17 @@ class SketchActivity : AppCompatActivity() {
             
         }
         val layers = arrayOf(
-            glowRing(alpha = 70, cornerDp = 14f),
-            glowRing(alpha = 130, cornerDp = 12.5f),
+            shadowLayer(alpha = 30, cornerDp = 14f),
+            shadowLayer(alpha = 55, cornerDp = 12.5f),
             whiteCenter,
         )
         return LayerDrawable(layers).apply {
             
             
-            setLayerInset(1, dp(2f).toInt(), dp(2f).toInt(), dp(2f).toInt(), dp(2f).toInt())
+            // Asymmetric insets: less at the bottom than the top so each lime layer extends
+            // further below the white center than above it, giving a downward drop-shadow feel.
+            setLayerInset(0, dp(1f).toInt(), dp(3f).toInt(), dp(1f).toInt(), dp(0f).toInt())
+            setLayerInset(1, dp(2.5f).toInt(), dp(4f).toInt(), dp(2.5f).toInt(), dp(1f).toInt())
             setLayerInset(2, dp(4f).toInt(), dp(4f).toInt(), dp(4f).toInt(), dp(4f).toInt())
             alpha = 0
         }
@@ -647,6 +654,12 @@ class SketchActivity : AppCompatActivity() {
             val fullRisePx = -(navBarTopPaddingPx + pillHeight / 2f)
             visual.pill.translationY = fullRisePx * localT
             visual.pill.elevation = pillBaseElevationPx + (pillRaisedElevationPx - pillBaseElevationPx) * clamped
+            // Selected pill grows 25% larger than its resting size; scaling the whole view
+            // (rather than resizing padding) enlarges the rounded-square frame and its corner
+            // radius together, proportionally, without disturbing sibling tab layout.
+            val pillScale = 1f + pillSelectedScaleBoost * clamped
+            visual.pill.scaleX = pillScale
+            visual.pill.scaleY = pillScale
             val color = evaluator.evaluate(clamped, inactiveTextColor, activeTextColor) as Int
             visual.icon.setColorFilter(color)
             visual.label.setTextColor(color)

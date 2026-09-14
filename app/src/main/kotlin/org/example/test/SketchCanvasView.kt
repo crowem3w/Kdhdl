@@ -119,7 +119,7 @@ class SketchCanvasView @JvmOverloads constructor(
     
     private val minPageHeight: Float get() = height.toFloat()
     private val maxPageHeight: Float get() = height.toFloat() * 10f
-    private val pagePaint = Paint().apply { color = Color.WHITE }
+    private val pagePaint = Paint().apply { color = Color.parseColor("#F3F4F6") }
     private val pagePath = Path()
     private val pageCornerRadius = 12f * density
     private val pageRadii = FloatArray(8)
@@ -827,7 +827,7 @@ class SketchCanvasView @JvmOverloads constructor(
         
         
         
-        canvas.drawColor(Color.BLACK)
+        canvas.drawColor(Color.parseColor("#F3F4F6"))
         val saveCount = canvas.save()
         
         
