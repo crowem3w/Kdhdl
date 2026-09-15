@@ -782,7 +782,7 @@ class SketchActivity : AppCompatActivity() {
     private fun applyStarterTemplate(created: SketchCanvasView, type: ScreenPageType) {
         val refWidth = canvas.width.takeIf { it > 0 } ?: canvasArea.width
         val refPageHeight = canvas.pageHeight.takeIf { it > 0f } ?: canvasArea.height.toFloat()
-        if (created.pageHeight <= 0f) created.pageHeight = refPageHeight
+        created.ensurePageHeight(refPageHeight)
         val h = created.pageHeight
 
         fun place(kind: PartKind, x: Float, y: Float, label: String = "") =

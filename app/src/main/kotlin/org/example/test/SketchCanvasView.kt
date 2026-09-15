@@ -115,6 +115,13 @@ class SketchCanvasView @JvmOverloads constructor(
     var pageHeight: Float = 0f
         private set
 
+    /** Seeds pageHeight from outside the class for a canvas that hasn't been laid out yet (so it
+     *  has no intrinsic height of its own) - used by SketchActivity.applyStarterTemplate() to
+     *  size a newly created screen before its first layout pass. No-op once pageHeight is set. */
+    fun ensurePageHeight(value: Float) {
+        if (pageHeight <= 0f) pageHeight = value
+    }
+
     
     
     val isDraggingPageHandle: Boolean get() = draggingPageHandle
