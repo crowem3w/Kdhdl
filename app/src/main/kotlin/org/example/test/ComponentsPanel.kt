@@ -1041,34 +1041,26 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
 
 
-    // Only the topmost rail row (the "All" row) sits against the sidebar's rounded top-right
-    // corner - every other edge of the sidebar (top-left, both bottom corners) is square, so
-    // every row below stays flat. Rounding just that one corner, by the same cornerRadiusPx used
-    // for the sidebar itself, keeps the selection highlight from poking a square edge out past
-    // the sidebar's rounded corner.
+    // Selection is now indicated by a thin accent line running along the bottom edge of the
+    // active rail row (instead of a full-row background wash). The line bleeds edge-to-edge
+    // the same way the old frame did, and casts a small drop shadow via elevation so it reads
+    // as a raised accent rather than a flat divider.
+    val railSelectionLineHeight = dp(2)
+    val railSelectionLineElevation = dp(2).toFloat()
+
     fun buildRailRow(iconRes: Int, label: String, topRounded: Boolean = false, onClick: () -> Unit): RailRowViews {
         lateinit var iconView: ImageView
         lateinit var labelView: TextView
         lateinit var chevronView: ImageView
 
         val frameBg = View(context).apply {
-            background = if (topRounded) {
-                GradientDrawable().apply {
-                    setColor(Color.parseColor("#33355E3B"))
-                    cornerRadii = floatArrayOf(
-                        0f, 0f,                                 // top-left
-                        cornerRadiusPx, cornerRadiusPx,         // top-right
-                        0f, 0f,                                 // bottom-right
-                        0f, 0f                                  // bottom-left
-                    )
-                }
-            } else {
-                context.getDrawable(R.drawable.bg_rail_row_selected)
-            }
+            background = GradientDrawable().apply { setColor(PANEL_ACCENT) }
+            elevation = railSelectionLineElevation
             visibility = View.GONE
             layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+                ViewGroup.LayoutParams.MATCH_PARENT, railSelectionLineHeight
             ).apply {
+                gravity = Gravity.BOTTOM
                 marginStart = -frameBleedToScreenEdge
                 marginEnd = -frameBleedToDivider
             }
