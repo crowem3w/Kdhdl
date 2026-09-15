@@ -969,7 +969,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     var railCurrentWidthPx = railWidthPx
     var railIsCompact = false
 
-    fun applyRailWidth(widthPx: Float) {
+    fun applyRailWidth(widthPx: Float, updateShadow: Boolean = true) {
         val w = widthPx.toInt()
         (rail.layoutParams as FrameLayout.LayoutParams).width = w
         rail.requestLayout()
@@ -977,15 +977,34 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         (railWrapper.layoutParams as LinearLayout.LayoutParams).width = wrapperWidth
         railWrapper.requestLayout()
         (sidebarEdgeShadow.layoutParams as FrameLayout.LayoutParams).width = wrapperWidth
-        sidebarEdgeShadow.edgeWidthPx = widthPx
         sidebarEdgeShadow.requestLayout()
+        // sidebarEdgeShadow is a software-layer view (Paint.setShadowLayer only renders on
+        // software layers), so every edgeWidthPx write below triggers a CPU-rasterized blurred
+        // redraw - the single most expensive part of this whole resize. Callers doing a live,
+        // continuous drag pass updateShadow = false and sync it separately at a throttled rate
+        // (see the touch listener) so the visible rail/content resize stays smooth even though
+        // the shadow can't afford to repaint on every frame.
+        if (updateShadow) {
+            sidebarEdgeShadow.edgeWidthPx = widthPx
+        }
     }
 
     val dividerHandle = View(context).apply {
         isClickable = true
         isFocusable = true
         contentDescription = "Resize sidebar"
-        layoutParams = LinearLayout.LayoutParams(dividerGapPx, ViewGroup.LayoutParams.MATCH_PARENT)
+        // sidebarEdgeShadow draws the visible divider line at the rail's true right edge, but
+        // railWrapper (this view's left neighbor) is edgeShadowBleedPx wider than that so the
+        // blurred shadow has room to bleed without clipping. Left at its default position, this
+        // handle's touchable bounds would start edgeShadowBleedPx to the right of the line
+        // itself, leaving a dead gap where tapping directly on the line does nothing. Pull the
+        // handle's bounds left by that same amount (and widen it to match) so the touchable area
+        // actually starts at the line's own position.
+        layoutParams = LinearLayout.LayoutParams(
+            dividerGapPx + edgeShadowBleedPx, ViewGroup.LayoutParams.MATCH_PARENT
+        ).apply {
+            marginStart = -edgeShadowBleedPx
+        }
     }
 
 
@@ -1009,7 +1028,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
 
     val targetIconFromScreenEdge = dp(14)
-    val contentPaddingStart = targetIconFromScreenEdge - frameBleedToScreenEdge
+    val contentPaddingStart = targetIconFromScreenEdge
 
 
 
@@ -1293,6 +1312,12 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
     var dragStartRawX = 0f
     var dragStartWidthPx = 0f
+    var lastAppliedWidthInt = railCurrentWidthPx.toInt()
+    var lastShadowSyncWidthPx = railCurrentWidthPx
+    // How far the width has to move before the (expensive, software-rasterized) shadow line
+    // redraws. Small enough that the lag between the rail's edge and its shadow is never
+    // noticeable, large enough to cut the blur-redraw rate substantially during a fast drag.
+    val shadowSyncThresholdPx = dp(3)
     dividerHandle.setOnTouchListener { view, event ->
         when (event.actionMasked) {
             android.view.MotionEvent.ACTION_DOWN -> {
@@ -1311,8 +1336,17 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 val deltaX = event.rawX - dragStartRawX
                 val newWidth = (dragStartWidthPx + deltaX).coerceIn(railMinWidthPx, railMaxWidthPx)
                 railCurrentWidthPx = newWidth
-                applyRailWidth(newWidth)
-                setRailCompact(newWidth < railCompactThresholdPx)
+                // Skip the whole pass if it wouldn't move anything by a visible pixel - touch
+                // panels commonly deliver several ACTION_MOVE events per displayed frame, and at
+                // rest (finger not actually moving) that's otherwise pure wasted layout work.
+                val newWidthInt = newWidth.toInt()
+                if (newWidthInt != lastAppliedWidthInt) {
+                    lastAppliedWidthInt = newWidthInt
+                    val syncShadow = kotlin.math.abs(newWidth - lastShadowSyncWidthPx) >= shadowSyncThresholdPx
+                    applyRailWidth(newWidth, updateShadow = syncShadow)
+                    if (syncShadow) lastShadowSyncWidthPx = newWidth
+                    setRailCompact(newWidth < railCompactThresholdPx)
+                }
                 // Re-anchor once clamped so a reversal responds immediately instead of requiring
                 // the finger to travel back through the overshoot distance first.
                 if (newWidth == railMinWidthPx || newWidth == railMaxWidthPx) {
@@ -1322,6 +1356,10 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 true
             }
             android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                // Guarantee the shadow ends up exactly aligned even though it was throttled
+                // during the drag.
+                applyRailWidth(railCurrentWidthPx, updateShadow = true)
+                lastShadowSyncWidthPx = railCurrentWidthPx
                 view.parent?.requestDisallowInterceptTouchEvent(false)
                 true
             }
