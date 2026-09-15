@@ -219,7 +219,10 @@
     </FrameLayout>
 
     <!-- Screens panel: a separate bottom sheet, independent of bottomNavBar, that shows the
-         Screens picker (Card/Image/Chip) once the Screens tab is tapped. Unlike elementsPanel,
+         Screens picker (Card/Image/Chip) once the Screens tab is tapped. The page-thumbnails
+         row/chevron/(+) tile that used to live at the top of this sheet's content now lives
+         outside it, in screenThumbnailsRow below, floating over the canvas instead. Unlike
+         elementsPanel,
          its default resting state is a fixed peek height (app:behavior_peekHeight below)
          approximating an on-screen keyboard's height, rather than jumping straight to full
          height - it can still be dragged further up toward full height. Its bottom
@@ -263,6 +266,31 @@
             android:layout_height="match_parent"
             android:clipChildren="false" />
     </FrameLayout>
+
+    <!-- Page thumbnails row: the thumbnails strip, its show/hide chevron, and the trailing (+)
+         add-page tile, for the Screens tab. Lives OUTSIDE screensPanel, floating directly above
+         it over the canvas - intentionally with no card/frame background of its own, so the
+         sketch canvas shows through behind it instead of the panel's white sheet surface.
+         Empty here; built at runtime by buildScreenThumbnailsRow() in ScreensPanel.kt (see
+         openScreensPanel() in SketchActivity), which also keeps screenThumbnailsContainer
+         updated for later refreshes (see refreshScreenThumbnails()). Hidden by default and only
+         shown alongside screensPanel; its vertical position is pinned just above screensPanel's
+         current top edge - including while the sheet is dragged - by
+         positionScreenThumbnailsRow() in SketchActivity. Declared here (before bottomNavBar) so
+         it stays behind the nav bar, but given a higher elevation than screensPanel so it draws
+         above the sheet it floats over. -->
+    <LinearLayout
+        android:id="@+id/screenThumbnailsRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:paddingHorizontal="20dp"
+        android:paddingBottom="14dp"
+        android:visibility="gone"
+        android:clipChildren="false"
+        android:clipToPadding="false"
+        android:elevation="9dp" />
 
     <!-- Bottom navigation bar: a plain, always-visible tab bar floating just above the bottom
          edge of the screen as a pill-shaped 3D sheet (NOT a BottomSheetBehavior sheet - it

@@ -37,25 +37,19 @@ private val SCREEN_PICK_ITEMS = listOf(
     ScreenPickItem(PartKind.CHIP, R.drawable.ic_cat_actions),
 )
 
-/** Handles returned by buildScreensPanelContent() so SketchActivity can re-render the
- *  thumbnails row later (e.g. after a page is added) without rebuilding the whole panel. */
-class ScreensPanelViews(val root: View, val thumbnailsContainer: LinearLayout)
-
 /**
- * Builds the Screens tab's panel content: a page-thumbnails row (one tile per created screen,
- * plus a trailing add-page tile) above a light-mode Card/Image/Chip picker that replaces the old
- * showPartPickerSheet() dialog. Lives inside screensContentContainer (see setupScreensPanel() in
- * SketchActivity), which sits inside the screensPanel bottom sheet.
+ * Builds the Screens tab's panel content: a light-mode Card/Image/Chip picker that replaces the
+ * old showPartPickerSheet() dialog. Lives inside screensContentContainer (see
+ * setupScreensPanel() in SketchActivity), which sits inside the screensPanel bottom sheet.
+ *
+ * The page-thumbnails row (thumbnails + chevron + add-page tile) that used to sit at the top of
+ * this content has moved out to buildScreenThumbnailsRow() below, so it isn't built here.
  */
 fun buildScreensPanelContent(
     context: Context,
-    pages: List<ScreenPage>,
-    selectedPageId: Long,
     onPick: (PartKind) -> Unit,
     onClose: () -> Unit,
-    onSelectPage: (ScreenPage) -> Unit,
-    onAddPageClick: () -> Unit,
-): ScreensPanelViews {
+): View {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
 
@@ -98,52 +92,6 @@ fun buildScreensPanelContent(
         }
         addView(closeButton)
         addView(title)
-    })
-
-    
-    
-    
-    val thumbnailsContainer = LinearLayout(context).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-    }
-    val thumbnailsScroll = HorizontalScrollView(context).apply {
-        isHorizontalScrollBarEnabled = false
-        clipToPadding = false
-        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        addView(thumbnailsContainer)
-    }
-    renderScreenThumbnails(thumbnailsContainer, context, pages, selectedPageId, onSelectPage, onAddPageClick)
-
-    
-    var thumbnailsExpanded = true
-    val chevronIcon = ImageView(context).apply {
-        setImageResource(R.drawable.ic_chevron_left)
-        setColorFilter(PANEL_SECONDARY_TEXT)
-        layoutParams = FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER)
-    }
-    val chevronButton = FrameLayout(context).apply {
-        layoutParams = LinearLayout.LayoutParams(dp(28), dp(28)).apply { marginEnd = dp(10) }
-        isClickable = true
-        isFocusable = true
-        contentDescription = "Hide page thumbnails"
-        addView(chevronIcon)
-        setOnClickListener {
-            thumbnailsExpanded = !thumbnailsExpanded
-            thumbnailsScroll.visibility = if (thumbnailsExpanded) View.VISIBLE else View.GONE
-            chevronIcon.rotation = if (thumbnailsExpanded) 0f else 180f
-            contentDescription = if (thumbnailsExpanded) "Hide page thumbnails" else "Show page thumbnails"
-        }
-    }
-
-    root.addView(LinearLayout(context).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            bottomMargin = dp(18)
-        }
-        addView(chevronButton)
-        addView(thumbnailsScroll)
     })
 
     root.addView(TextView(context).apply {
@@ -196,7 +144,73 @@ fun buildScreensPanelContent(
     }
     root.addView(row)
 
-    return ScreensPanelViews(root, thumbnailsContainer)
+    return root
+}
+
+/** Handles returned by buildScreenThumbnailsRow() so SketchActivity can re-render the
+ *  thumbnails row later (e.g. after a page is added) without rebuilding it. */
+class ScreenThumbnailsRowViews(val root: View, val thumbnailsContainer: LinearLayout)
+
+/**
+ * Builds the floating page-thumbnails row for the Screens tab: one tile per created screen, plus
+ * a trailing add-page tile, with a leading chevron that shows/hides the thumbnails strip. Lives
+ * inside screenThumbnailsRow (see openScreensPanel() in SketchActivity) - OUTSIDE screensPanel,
+ * directly above it over the canvas - so it's deliberately given no card/frame background of its
+ * own here; the sketch canvas is its backdrop.
+ */
+fun buildScreenThumbnailsRow(
+    context: Context,
+    pages: List<ScreenPage>,
+    selectedPageId: Long,
+    onSelectPage: (ScreenPage) -> Unit,
+    onAddPageClick: () -> Unit,
+): ScreenThumbnailsRowViews {
+    val d = context.resources.displayMetrics.density
+    fun dp(v: Int) = (v * d).toInt()
+
+    val thumbnailsContainer = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+    }
+    val thumbnailsScroll = HorizontalScrollView(context).apply {
+        isHorizontalScrollBarEnabled = false
+        clipToPadding = false
+        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        addView(thumbnailsContainer)
+    }
+    renderScreenThumbnails(thumbnailsContainer, context, pages, selectedPageId, onSelectPage, onAddPageClick)
+
+    var thumbnailsExpanded = true
+    val chevronIcon = ImageView(context).apply {
+        setImageResource(R.drawable.ic_chevron_left)
+        setColorFilter(PANEL_SECONDARY_TEXT)
+        layoutParams = FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER)
+    }
+    val chevronButton = FrameLayout(context).apply {
+        layoutParams = LinearLayout.LayoutParams(dp(28), dp(28)).apply { marginEnd = dp(10) }
+        isClickable = true
+        isFocusable = true
+        contentDescription = "Hide page thumbnails"
+        addView(chevronIcon)
+        setOnClickListener {
+            thumbnailsExpanded = !thumbnailsExpanded
+            thumbnailsScroll.visibility = if (thumbnailsExpanded) View.VISIBLE else View.GONE
+            chevronIcon.rotation = if (thumbnailsExpanded) 0f else 180f
+            contentDescription = if (thumbnailsExpanded) "Hide page thumbnails" else "Show page thumbnails"
+        }
+    }
+
+    val root = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        clipChildren = false
+        clipToPadding = false
+        addView(chevronButton)
+        addView(thumbnailsScroll)
+    }
+
+    return ScreenThumbnailsRowViews(root, thumbnailsContainer)
 }
 
 /**

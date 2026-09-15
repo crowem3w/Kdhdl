@@ -179,6 +179,14 @@ class SketchActivity : AppCompatActivity() {
     
     
     
+    // Floating page-thumbnails row (thumbnails + chevron + add-page tile), positioned outside
+    // screensPanel so its backdrop is the sketch canvas rather than the panel's white sheet - see
+    // screenThumbnailsRow in activity_sketch.xml and positionScreenThumbnailsRow() below.
+    private lateinit var screenThumbnailsRow: LinearLayout
+
+    
+    
+    
     
     
     private var bottomNavBarBaseMarginBottom = 0
@@ -248,6 +256,7 @@ class SketchActivity : AppCompatActivity() {
         screensPanel = findViewById(R.id.screensPanel)
         screensContentContainer = findViewById(R.id.screensContentContainer)
         screensPanelBehavior = BottomSheetBehavior.from(screensPanel)
+        screenThumbnailsRow = findViewById(R.id.screenThumbnailsRow)
         onBackPressedDispatcher.addCallback(this, panelBackPressedCallback)
 
         canvas.listener = object : SketchCanvasView.Listener {
@@ -597,6 +606,7 @@ class SketchActivity : AppCompatActivity() {
                         applyScreensPanelTopPadding(expanded = false)
                     }
                 }
+                positionScreenThumbnailsRow()
             }
 
             override fun onSlide(sheetView: View, slideOffset: Float) {
@@ -606,11 +616,29 @@ class SketchActivity : AppCompatActivity() {
                     val progress = slideOffset.coerceIn(0f, 1f)
                     applyScreensPanelTopPadding(progressToStatusBarInset = progress)
                 }
+                positionScreenThumbnailsRow()
             }
         })
 
         
         screensPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+
+        
+        
+        
+        screensPanel.viewTreeObserver.addOnGlobalLayoutListener { positionScreenThumbnailsRow() }
+    }
+
+    
+    
+    
+    
+    
+    private fun positionScreenThumbnailsRow() {
+        if (!::screenThumbnailsRow.isInitialized || screenThumbnailsRow.visibility != View.VISIBLE) return
+        val gapPx = dp(12f)
+        val targetBottom = screensPanel.top - gapPx
+        screenThumbnailsRow.translationY = targetBottom - screenThumbnailsRow.bottom.toFloat()
     }
 
     
@@ -633,26 +661,33 @@ class SketchActivity : AppCompatActivity() {
     
     private fun openScreensPanel() {
         if (!screensContentBuilt) {
-            val views = buildScreensPanelContent(
+            val panelContent = buildScreensPanelContent(
                 context = this,
-                pages = screenPages,
-                selectedPageId = selectedScreenPageId,
                 onPick = { kind ->
                     addPart(kind, canvas.width / 2f, canvas.pageHeight / 2f)
                     closeScreensPanel()
                 },
                 onClose = { closeScreensPanel() },
+            )
+            screensContentContainer.addView(panelContent)
+
+            val thumbnailsRowViews = buildScreenThumbnailsRow(
+                context = this,
+                pages = screenPages,
+                selectedPageId = selectedScreenPageId,
                 onSelectPage = { page -> selectScreenPage(page) },
                 onAddPageClick = { showScreenTypePicker(this) { type -> addScreenPage(type) } },
             )
-            screensContentContainer.addView(views.root)
-            screenThumbnailsContainer = views.thumbnailsContainer
+            screenThumbnailsRow.addView(thumbnailsRowViews.root)
+            screenThumbnailsContainer = thumbnailsRowViews.thumbnailsContainer
             screensContentBuilt = true
         }
         showingScreens = true
         panelBackPressedCallback.isEnabled = true
         
         
+        screenThumbnailsRow.visibility = View.VISIBLE
+        screenThumbnailsRow.post { positionScreenThumbnailsRow() }
         screensPanelBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
 
@@ -693,6 +728,7 @@ class SketchActivity : AppCompatActivity() {
             screensPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
         }
         showingScreens = false
+        screenThumbnailsRow.visibility = View.GONE
     }
 
 
