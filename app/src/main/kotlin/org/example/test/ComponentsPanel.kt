@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.drawable.GradientDrawable
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -626,6 +627,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
     data class RailRowViews(
         val wrapper: FrameLayout,
+        val frameBg: View,
         val icon: ImageView,
         val label: TextView,
         val chevron: ImageView
@@ -651,6 +653,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             val active = id != null && catId == id
 
 
+            entry.frameBg.visibility = if (active) View.VISIBLE else View.GONE
             val color = if (active) PANEL_ACCENT else PANEL_SECONDARY_TEXT
             entry.icon.setColorFilter(color)
 
@@ -982,13 +985,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         isClickable = true
         isFocusable = true
         contentDescription = "Resize sidebar"
-        // railWrapper is edgeShadowBleedPx wider than the visible rail (room for the divider
-        // line's shadow blur), which would otherwise push this touch strip that same distance to
-        // the right of the line you actually see - shift it back so the strip starts exactly
-        // where the line is, without changing how wide the strip itself is.
-        layoutParams = LinearLayout.LayoutParams(dividerGapPx, ViewGroup.LayoutParams.MATCH_PARENT).apply {
-            marginStart = -edgeShadowBleedPx
-        }
+        layoutParams = LinearLayout.LayoutParams(dividerGapPx, ViewGroup.LayoutParams.MATCH_PARENT)
     }
 
 
@@ -1003,12 +1000,16 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
 
 
-    // contentPaddingStart offsets each row's icon inward from the screen edge
-    // (targetIconFromScreenEdge is the icon's desired distance from the screen edge;
-    // rowInsetPx is the row's own start inset, so padding-start = target - inset).
-    val rowInsetPx = dp(16)
+    val frameBleedToScreenEdge = dp(16)
+    val frameBleedToDivider = dp(4)
+
+
+
+
+
+
     val targetIconFromScreenEdge = dp(14)
-    val contentPaddingStart = targetIconFromScreenEdge - rowInsetPx
+    val contentPaddingStart = targetIconFromScreenEdge - frameBleedToScreenEdge
 
 
 
@@ -1021,10 +1022,38 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
 
 
-    fun buildRailRow(iconRes: Int, label: String, onClick: () -> Unit): RailRowViews {
+    // Only the topmost rail row (the "All" row) sits against the sidebar's rounded top-right
+    // corner - every other edge of the sidebar (top-left, both bottom corners) is square, so
+    // every row below stays flat. Rounding just that one corner, by the same cornerRadiusPx used
+    // for the sidebar itself, keeps the selection highlight from poking a square edge out past
+    // the sidebar's rounded corner.
+    fun buildRailRow(iconRes: Int, label: String, topRounded: Boolean = false, onClick: () -> Unit): RailRowViews {
         lateinit var iconView: ImageView
         lateinit var labelView: TextView
         lateinit var chevronView: ImageView
+
+        val frameBg = View(context).apply {
+            background = if (topRounded) {
+                GradientDrawable().apply {
+                    setColor(Color.parseColor("#33355E3B"))
+                    cornerRadii = floatArrayOf(
+                        0f, 0f,                                 // top-left
+                        cornerRadiusPx, cornerRadiusPx,         // top-right
+                        0f, 0f,                                 // bottom-right
+                        0f, 0f                                  // bottom-left
+                    )
+                }
+            } else {
+                context.getDrawable(R.drawable.bg_rail_row_selected)
+            }
+            visibility = View.GONE
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            ).apply {
+                marginStart = -frameBleedToScreenEdge
+                marginEnd = -frameBleedToDivider
+            }
+        }
 
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1069,10 +1098,11 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             }
             clipChildren = false
             clipToPadding = false
+            addView(frameBg)
             addView(content)
         }
 
-        return RailRowViews(wrapper, iconView, labelView, chevronView)
+        return RailRowViews(wrapper, frameBg, iconView, labelView, chevronView)
     }
 
 
@@ -1146,7 +1176,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
 
 
-    val allItem = buildRailRow(ALL_CATEGORY.iconRes, ALL_CATEGORY.label) {
+    val allItem = buildRailRow(ALL_CATEGORY.iconRes, ALL_CATEGORY.label, topRounded = true) {
 
 
         setActiveCategory(null)
@@ -1263,11 +1293,18 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
     var dragStartRawX = 0f
     var dragStartWidthPx = 0f
-    dividerHandle.setOnTouchListener { _, event ->
+    dividerHandle.setOnTouchListener { view, event ->
         when (event.actionMasked) {
             android.view.MotionEvent.ACTION_DOWN -> {
                 dragStartRawX = event.rawX
                 dragStartWidthPx = railCurrentWidthPx
+                // The Elements panel sits in a draggable BottomSheetBehavior, whose
+                // ViewDragHelper watches every touch stream on the parent CoordinatorLayout for
+                // drag gestures. Without this, a reversal in direction mid-drag (e.g. left then
+                // right) can get intercepted by the sheet and delivered to us as ACTION_CANCEL,
+                // killing the resize gesture. Claim the touch stream for the full drag so the
+                // sheet leaves it alone.
+                view.parent?.requestDisallowInterceptTouchEvent(true)
                 true
             }
             android.view.MotionEvent.ACTION_MOVE -> {
@@ -1276,9 +1313,16 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 railCurrentWidthPx = newWidth
                 applyRailWidth(newWidth)
                 setRailCompact(newWidth < railCompactThresholdPx)
+                // Re-anchor once clamped so a reversal responds immediately instead of requiring
+                // the finger to travel back through the overshoot distance first.
+                if (newWidth == railMinWidthPx || newWidth == railMaxWidthPx) {
+                    dragStartRawX = event.rawX
+                    dragStartWidthPx = newWidth
+                }
                 true
             }
             android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                view.parent?.requestDisallowInterceptTouchEvent(false)
                 true
             }
             else -> false
