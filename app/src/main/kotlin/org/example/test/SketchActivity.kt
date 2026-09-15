@@ -34,6 +34,13 @@ import kotlin.math.roundToInt
 class SketchActivity : AppCompatActivity() {
 
     private lateinit var canvas: SketchCanvasView
+    private lateinit var canvasArea: FrameLayout
+
+    // Each screen page gets its own SketchCanvasView so their contents are fully independent.
+    // Keyed by ScreenPage.id; `canvas` above always points at whichever one is currently visible.
+    // All canvases live in canvasArea (index 0, below the top bar/name-tag editor/etc.) and share
+    // canvasListener; only the active one is View.VISIBLE at a time - see switchToScreenPage().
+    private val screenCanvases = mutableMapOf<Long, SketchCanvasView>()
 
 
 
@@ -213,6 +220,46 @@ class SketchActivity : AppCompatActivity() {
 
     private var nextId = 1L
 
+    // Shared across every screen's SketchCanvasView (see screenCanvases) - it only ever acts on
+    // whichever canvas is currently active via the `canvas` field, so one instance is enough.
+    private val canvasListener = object : SketchCanvasView.Listener {
+        override fun onLongPressEmptySpace() = openElementsPanel()
+
+        override fun onDoubleTapEmptySpace() = openElementsPanel()
+
+        override fun onTapEmptySpace() {
+            closeElementsPanel()
+            closeScreensPanel()
+            toggleBottomNavBar()
+        }
+
+        override fun onPartLongPressed(part: SketchPart) {
+            showPartOptionsDialog(
+                context = this@SketchActivity,
+                part = part,
+                onRename = { newLabel ->
+                    part.label = newLabel
+                    canvas.relayoutTextIfNeeded(part)
+                    canvas.invalidate()
+                },
+                onDelete = { canvas.removePart(part) },
+            )
+        }
+
+        override fun onSelectionChanged(part: SketchPart?) {
+            
+            if (editingNamePart != null && part !== editingNamePart) commitNameTagEdit()
+        }
+
+        override fun onPartsChanged() = Unit
+
+        override fun onNameTagTapped(part: SketchPart) = startNameTagEdit(part)
+
+        override fun onMultiSelectionFinalized(parts: List<SketchPart>) = showSelectionActionsPanel()
+
+        override fun onMultiSelectionCleared() = hideSelectionActionsPanel()
+    }
+
     companion object {
         private const val TOP_BAR_AUTO_HIDE_DELAY_MS = 5_000L
         private const val TOP_BAR_FADE_MS = 150L
@@ -259,42 +306,20 @@ class SketchActivity : AppCompatActivity() {
         screenThumbnailsRow = findViewById(R.id.screenThumbnailsRow)
         onBackPressedDispatcher.addCallback(this, panelBackPressedCallback)
 
-        canvas.listener = object : SketchCanvasView.Listener {
-            override fun onLongPressEmptySpace() = openElementsPanel()
+        canvasArea = findViewById(R.id.canvasArea)
+        screenCanvases[screenPages[0].id] = canvas
 
-            override fun onDoubleTapEmptySpace() = openElementsPanel()
+        canvas.listener = canvasListener
 
-            override fun onTapEmptySpace() {
-                closeElementsPanel()
-                closeScreensPanel()
-                toggleBottomNavBar()
+        // The initial Home screen's canvas is the static one declared in the layout, so unlike
+        // canvases created later via getOrCreateCanvas() it doesn't get its starter template
+        // applied there. Post it so it runs after the first layout pass, once canvas.width/
+        // pageHeight are populated (see applyStarterTemplate).
+        val initialCanvas = canvas
+        initialCanvas.post {
+            if (initialCanvas.parts.isEmpty()) {
+                applyStarterTemplate(initialCanvas, screenPages[0].type)
             }
-
-            override fun onPartLongPressed(part: SketchPart) {
-                showPartOptionsDialog(
-                    context = this@SketchActivity,
-                    part = part,
-                    onRename = { newLabel ->
-                        part.label = newLabel
-                        canvas.relayoutTextIfNeeded(part)
-                        canvas.invalidate()
-                    },
-                    onDelete = { canvas.removePart(part) },
-                )
-            }
-
-            override fun onSelectionChanged(part: SketchPart?) {
-                
-                if (editingNamePart != null && part !== editingNamePart) commitNameTagEdit()
-            }
-
-            override fun onPartsChanged() = Unit
-
-            override fun onNameTagTapped(part: SketchPart) = startNameTagEdit(part)
-
-            override fun onMultiSelectionFinalized(parts: List<SketchPart>) = showSelectionActionsPanel()
-
-            override fun onMultiSelectionCleared() = hideSelectionActionsPanel()
         }
 
         setupTopBar()
@@ -676,7 +701,7 @@ class SketchActivity : AppCompatActivity() {
                 pages = screenPages,
                 selectedPageId = selectedScreenPageId,
                 onSelectPage = { page -> selectScreenPage(page) },
-                onAddPageClick = { showScreenTypePicker(this) { type -> addScreenPage(type) } },
+                onAddPageClick = { showUsedTypeAwareScreenPicker() },
             )
             screenThumbnailsRow.addView(thumbnailsRowViews.root)
             screenThumbnailsContainer = thumbnailsRowViews.thumbnailsContainer
@@ -694,10 +719,19 @@ class SketchActivity : AppCompatActivity() {
     
     
     
+    private fun showUsedTypeAwareScreenPicker() {
+        val usedTypes = screenPages.map { it.type }.toSet()
+        showScreenTypePicker(this, usedTypes) { type -> addScreenPage(type) }
+    }
+
+    // Only one screen per type is allowed - showUsedTypeAwareScreenPicker() already filters the
+    // type out of the picker once it exists, this check is just a defensive backstop.
     private fun addScreenPage(type: ScreenPageType) {
+        if (screenPages.any { it.type == type }) return
         val page = ScreenPage(id = nextScreenPageId++, type = type)
         screenPages.add(page)
         selectedScreenPageId = page.id
+        switchToScreenPage(page)
         refreshScreenThumbnails()
     }
 
@@ -705,7 +739,76 @@ class SketchActivity : AppCompatActivity() {
     private fun selectScreenPage(page: ScreenPage) {
         if (selectedScreenPageId == page.id) return
         selectedScreenPageId = page.id
+        switchToScreenPage(page)
         refreshScreenThumbnails()
+    }
+
+    // Swaps the visible SketchCanvasView to the one belonging to `page`, creating and seeding it
+    // with its starter template on first visit (see getOrCreateCanvas/applyStarterTemplate).
+    // Any in-progress name-tag edit or multi-selection on the outgoing canvas is settled first,
+    // since both are read through the shared `canvas` field.
+    private fun switchToScreenPage(page: ScreenPage) {
+        val target = getOrCreateCanvas(page)
+        if (target === canvas) return
+        if (editingNamePart != null) commitNameTagEdit()
+        if (selectionActionsPanel.visibility == View.VISIBLE) dismissSelectionActionsPanel(clearSelection = true)
+        canvas.visibility = View.GONE
+        target.visibility = View.VISIBLE
+        canvas = target
+    }
+
+    // Creates and registers a page's SketchCanvasView the first time it's needed. New canvases
+    // start hidden (GONE) and sit at the bottom of canvasArea (index 0), below the top bar,
+    // name-tag editor, and other floating chrome - see activity_sketch.xml.
+    private fun getOrCreateCanvas(page: ScreenPage): SketchCanvasView {
+        screenCanvases[page.id]?.let { return it }
+        val created = SketchCanvasView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            visibility = View.GONE
+            listener = canvasListener
+        }
+        canvasArea.addView(created, 0)
+        screenCanvases[page.id] = created
+        applyStarterTemplate(created, page.type)
+        return created
+    }
+
+    // Seeds a freshly created screen with placeholder content appropriate to its type. Blank
+    // screens are left empty. Since `created` may still be GONE/unlaid-out at this point (its
+    // own width/pageHeight can be 0), sizing is borrowed from the currently active canvas -
+    // every screen's canvas fills the same canvasArea, so their dimensions always match once
+    // laid out - falling back to canvasArea's own measured size if that isn't available yet
+    // either (e.g. the very first Home screen, seeded from onCreate before any layout pass).
+    private fun applyStarterTemplate(created: SketchCanvasView, type: ScreenPageType) {
+        val refWidth = canvas.width.takeIf { it > 0 } ?: canvasArea.width
+        val refPageHeight = canvas.pageHeight.takeIf { it > 0f } ?: canvasArea.height.toFloat()
+        if (created.pageHeight <= 0f) created.pageHeight = refPageHeight
+        val h = created.pageHeight
+
+        fun place(kind: PartKind, x: Float, y: Float, label: String = "") =
+            addPartTo(created, kind, x, y, label, canvasWidth = refWidth, pageHeight = h)
+
+        when (type) {
+            ScreenPageType.HOME -> {
+                place(PartKind.TOP_APP_BAR, 0f, 0f, "Home")
+                place(PartKind.CARD, refWidth / 2f, h * 0.42f)
+                place(PartKind.NAV_BAR, 0f, 0f)
+            }
+            ScreenPageType.ONBOARDING -> {
+                place(PartKind.IMAGE, refWidth / 2f, h * 0.32f)
+                place(PartKind.TEXT, refWidth / 2f, h * 0.58f, "Welcome")
+                place(PartKind.BUTTON, refWidth / 2f, h * 0.78f, "Get started")
+            }
+            ScreenPageType.SPLASH -> {
+                place(PartKind.IMAGE, refWidth / 2f, h * 0.42f)
+                place(PartKind.TEXT, refWidth / 2f, h * 0.58f, "App name")
+            }
+            ScreenPageType.BLANK -> Unit
+        }
+        // addPart() leaves the last-placed part selected; that would make the screen look
+        // pre-selected the first time it's shown, so clear it back to a neutral empty-selection
+        // state.
+        created.clearSelection()
     }
 
     
@@ -717,7 +820,7 @@ class SketchActivity : AppCompatActivity() {
             pages = screenPages,
             selectedPageId = selectedScreenPageId,
             onSelectPage = { page -> selectScreenPage(page) },
-            onAddPageClick = { showScreenTypePicker(this) { type -> addScreenPage(type) } },
+            onAddPageClick = { showUsedTypeAwareScreenPicker() },
         )
     }
 
@@ -1093,42 +1196,72 @@ class SketchActivity : AppCompatActivity() {
         )
     }
 
-    private fun addPart(kind: PartKind, x: Float, y: Float, label: String = ""): SketchPart {
+    private fun addPart(kind: PartKind, x: Float, y: Float, label: String = ""): SketchPart =
+        addPartTo(canvas, kind, x, y, label)
+
+    // Lower-level version of addPart() that takes an explicit target canvas (and optionally
+    // explicit sizing) instead of always acting on the active `canvas`. Used by
+    // applyStarterTemplate() to place parts on a screen's canvas before it becomes active/laid
+    // out, when canvasWidth/pageHeight can't yet be read off the target itself.
+    private fun addPartTo(
+        target: SketchCanvasView,
+        kind: PartKind,
+        x: Float,
+        y: Float,
+        label: String = "",
+        canvasWidth: Int = target.width,
+        pageHeight: Float = target.pageHeight,
+    ): SketchPart {
         val density = resources.displayMetrics.density
         val fullWidth = kind == PartKind.TOP_APP_BAR || kind == PartKind.NAV_BAR
-        val w = if (fullWidth) canvas.width.toFloat() else kind.defaultW * density
+        val w = if (fullWidth) canvasWidth.toFloat() else kind.defaultW * density
         val h = kind.defaultH * density
-        val px = if (fullWidth) 0f else (x - w / 2f).coerceIn(0f, (canvas.width - w).coerceAtLeast(0f))
+        val px = if (fullWidth) 0f else (x - w / 2f).coerceIn(0f, (canvasWidth - w).coerceAtLeast(0f))
         val py = when (kind) {
             PartKind.TOP_APP_BAR -> 0f
-            PartKind.NAV_BAR -> (canvas.pageHeight - h).coerceAtLeast(0f)
-            else -> (y - h / 2f).coerceIn(0f, (canvas.pageHeight - h).coerceAtLeast(0f))
+            PartKind.NAV_BAR -> (pageHeight - h).coerceAtLeast(0f)
+            else -> (y - h / 2f).coerceIn(0f, (pageHeight - h).coerceAtLeast(0f))
         }
         val part = SketchPart(nextId++, kind, px, py, w, h, label, fontSize = 13f * density)
-        canvas.addPart(part)
+        target.addPart(part)
         return part
     }
 
 
 
+    // Bundles every ScreenPage's own parts + canvas size (not just the currently active screen)
+    // for PromptGenerator/CodeGenerator, which now describe/scaffold the whole multi-screen app -
+    // Splash/Onboarding/Home navigation flow included - rather than only whatever screen happens
+    // to be on top when the user taps Generate/Export.
+    private fun buildScreenExports(): List<ScreenExport> {
+        val fallbackWidth = canvas.width
+        val fallbackHeight = canvas.pageHeight.roundToInt()
+        return screenPages.map { page ->
+            val pageCanvas = screenCanvases[page.id] ?: canvas
+            val w = pageCanvas.width.takeIf { it > 0 } ?: fallbackWidth
+            val h = pageCanvas.pageHeight.takeIf { it > 0f }?.roundToInt() ?: fallbackHeight
+            ScreenExport(
+                type = page.type,
+                name = page.name,
+                parts = pageCanvas.parts.filterNot { it.hidden },
+                canvasWidthPx = w,
+                canvasHeightPx = h,
+            )
+        }
+    }
+
     private fun generatePrompt() {
         val density = resources.displayMetrics.density
-        
-        
-        val visibleParts = canvas.parts.filterNot { it.hidden }
-        val prompt = PromptGenerator.build(visibleParts, canvas.width, canvas.pageHeight.roundToInt(), density)
+        val prompt = PromptGenerator.build(buildScreenExports(), density)
         showPromptDialog(this, prompt)
     }
 
 
     private fun exportProject() {
         val density = resources.displayMetrics.density
-        val visibleParts = canvas.parts.filterNot { it.hidden }
         val zip = CodeGenerator.generateProjectZip(
             context = this,
-            parts = visibleParts,
-            canvasWidthPx = canvas.width,
-            canvasHeightPx = canvas.pageHeight.roundToInt(),
+            screens = buildScreenExports(),
             density = density,
         )
         val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", zip)

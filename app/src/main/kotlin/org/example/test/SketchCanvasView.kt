@@ -571,6 +571,16 @@ class SketchCanvasView @JvmOverloads constructor(
         listener?.onMultiSelectionCleared()
     }
 
+    // Clears the single-part selection (as opposed to the marquee multi-selection above).
+    // Used when a screen's starter template parts are added programmatically, so the last part
+    // placed doesn't end up looking pre-selected the first time the screen is shown.
+    fun clearSelection() {
+        if (selected == null) return
+        selected = null
+        invalidate()
+        listener?.onSelectionChanged(null)
+    }
+
     fun isSelectionGrouped(): Boolean =
         multiSelected.isNotEmpty() && multiSelected.all { it.groupId != null }
 

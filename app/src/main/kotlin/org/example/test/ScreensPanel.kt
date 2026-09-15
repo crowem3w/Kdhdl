@@ -336,7 +336,11 @@ private fun buildAddPageTile(context: Context, onClick: () -> Unit): View {
  *  app's day/night setting - matching the light-mode surface every other panel in this file uses,
  *  so it doesn't render as a dark sheet with unreadable dark-on-dark text when the app is in
  *  night mode. */
-fun showScreenTypePicker(context: Context, onPick: (ScreenPageType) -> Unit) {
+// Only one screen per type is allowed (see SketchActivity.addScreenPage), so the picker only
+// offers types that don't already have a screen - usedTypes is the set of types already present
+// in screenPages. Once every type has been added, the sheet shows a short message instead of an
+// empty list.
+fun showScreenTypePicker(context: Context, usedTypes: Set<ScreenPageType>, onPick: (ScreenPageType) -> Unit) {
     val dialog = BottomSheetDialog(context, com.google.android.material.R.style.Theme_MaterialComponents_Light_BottomSheetDialog)
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
@@ -355,7 +359,18 @@ fun showScreenTypePicker(context: Context, onPick: (ScreenPageType) -> Unit) {
         setPadding(0, 0, 0, dp(12))
     })
 
-    ScreenPageType.values().forEach { type ->
+    val availableTypes = ScreenPageType.values().filterNot { it in usedTypes }
+
+    if (availableTypes.isEmpty()) {
+        root.addView(TextView(context).apply {
+            text = "Every screen type has already been added"
+            textSize = 14f
+            setTextColor(PANEL_SECONDARY_TEXT)
+            setPadding(dp(4), dp(8), dp(4), dp(8))
+        })
+    }
+
+    availableTypes.forEach { type ->
         root.addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
