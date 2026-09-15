@@ -1,7 +1,11 @@
 package org.example.test
 
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.text.Editable
 import android.text.TextWatcher
@@ -28,6 +32,60 @@ private val PANEL_DIVIDER = Color.parseColor("#D1D5DB")
 private val PANEL_ACCENT = Color.parseColor("#355E3B")
 
 private data class ComponentCategory(val id: String, val label: String, val iconRes: Int)
+
+/**
+ * Draws a single shadowed line that traces the Elements-panel sidebar's top edge, bends through
+ * its rounded top-right corner, and continues down its right edge - so the sidebar/content
+ * divider "blends" into the sidebar's border radius instead of meeting a curved corner with an
+ * abrupt straight line, and so the drop shadow reads as one continuous shadow along the sidebar's
+ * top and right sides rather than two disconnected shadows.
+ *
+ * Sized as an overlay slightly wider than the sidebar (see edgeWidthPx vs. actual view width) so
+ * the blurred shadow has room to bleed to the right without being clipped at the view's bounds.
+ */
+private class SidebarEdgeShadowView(
+    context: Context,
+    private val edgeWidthPx: Float,
+    private val cornerRadiusPx: Float,
+    private val strokeWidthPx: Float,
+    private val lineColor: Int,
+    private val shadowRadiusPx: Float,
+    private val shadowColor: Int,
+    private val shadowDx: Float,
+    private val shadowDy: Float,
+) : View(context) {
+
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = strokeWidthPx
+        strokeCap = Paint.Cap.ROUND
+        color = lineColor
+    }
+
+    init {
+        // View elevation can't cast a shadow along an arbitrary curved path - Paint.setShadowLayer
+        // can, but it only renders on a software-rendered layer.
+        setLayerType(View.LAYER_TYPE_SOFTWARE, paint)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        // The line itself is drawn at edgeWidthPx (the sidebar's real right edge). The view is
+        // wider than that so the blurred shadow has room to bleed rightward without being
+        // clipped at the view's own bounds.
+        val top = strokeWidthPx
+        val right = edgeWidthPx
+        val r = cornerRadiusPx
+        val path = Path().apply {
+            moveTo(0f, top)
+            lineTo(right - r, top)
+            arcTo(RectF(right - 2 * r, top, right, top + 2 * r), 270f, 90f, false)
+            lineTo(right, height.toFloat())
+        }
+        paint.setShadowLayer(shadowRadiusPx, shadowDx, shadowDy, shadowColor)
+        canvas.drawPath(path, paint)
+    }
+}
 
 private data class GeometrySubCategory(val label: String, val iconRes: Int, val children: List<String>)
 
@@ -844,16 +902,53 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
 
 
+    val railWidthPx = dp(168).toFloat()
+    val cornerRadiusPx = dp(16).toFloat()
+    val edgeStrokeWidthPx = 1.5f * d
+    val edgeShadowRadiusPx = 4f * d
+    val edgeShadowDyPx = 2f * d
+    // Extra width to the right of the sidebar's real edge so the blurred shadow has room to
+    // bleed without being clipped at the overlay view's own bounds.
+    val edgeShadowBleedPx = kotlin.math.ceil(edgeShadowRadiusPx + edgeShadowDyPx).toInt()
+
     val rail = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        layoutParams = LinearLayout.LayoutParams(dp(168), ViewGroup.LayoutParams.MATCH_PARENT).apply {
-            marginEnd = dp(4)
-        }
+        layoutParams = FrameLayout.LayoutParams(dp(168), ViewGroup.LayoutParams.MATCH_PARENT)
         // Rounded only on the top-right corner, matching the edge that sits against the
         // sidebar/content divider.
         background = context.getDrawable(R.drawable.bg_elements_sidebar)
         clipChildren = false
         clipToPadding = false
+    }
+
+    // Overlay that traces the sidebar's top edge, bends around its rounded top-right corner, and
+    // continues down its right edge - this is the sidebar/content divider. It's drawn as one
+    // continuous shadowed line so the divider's top blends into the sidebar's border radius
+    // instead of meeting it as an abrupt straight line, and so the drop shadow covers the
+    // sidebar's top side as well as its right side.
+    val sidebarEdgeShadow = SidebarEdgeShadowView(
+        context = context,
+        edgeWidthPx = railWidthPx,
+        cornerRadiusPx = cornerRadiusPx,
+        strokeWidthPx = edgeStrokeWidthPx,
+        lineColor = PANEL_DIVIDER,
+        shadowRadiusPx = edgeShadowRadiusPx,
+        shadowColor = Color.parseColor("#33000000"),
+        shadowDx = 0f,
+        shadowDy = edgeShadowDyPx,
+    )
+
+    val railWrapper = FrameLayout(context).apply {
+        layoutParams = LinearLayout.LayoutParams(dp(168) + edgeShadowBleedPx, ViewGroup.LayoutParams.MATCH_PARENT).apply {
+            marginEnd = dp(10)
+        }
+        clipChildren = false
+        clipToPadding = false
+        addView(rail)
+        addView(
+            sidebarEdgeShadow,
+            FrameLayout.LayoutParams(dp(168) + edgeShadowBleedPx, ViewGroup.LayoutParams.MATCH_PARENT)
+        )
     }
 
 
@@ -1139,15 +1234,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
         clipChildren = false
         clipToPadding = false
-        addView(rail)
-        addView(View(context).apply {
-            setBackgroundColor(PANEL_DIVIDER)
-            // Drop shadow on the sidebar/content divider.
-            elevation = dp(4).toFloat()
-            layoutParams = LinearLayout.LayoutParams(dp(1), ViewGroup.LayoutParams.MATCH_PARENT).apply {
-                marginEnd = dp(10)
-            }
-        })
+        addView(railWrapper)
         addView(contentContainer)
     })
 
