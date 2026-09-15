@@ -44,10 +44,10 @@ class SketchActivity : AppCompatActivity() {
     private val hideTopBarRunnable = Runnable { hideTopBar() }
 
     private lateinit var tabSelect: LinearLayout
-    private lateinit var tabShapes: LinearLayout
+    private lateinit var tabScreens: LinearLayout
     private lateinit var tabText: LinearLayout
     private lateinit var tabMedia: LinearLayout
-    private lateinit var tabComponents: LinearLayout
+    private lateinit var tabElements: LinearLayout
     private lateinit var allTabs: List<LinearLayout>
 
     
@@ -162,6 +162,24 @@ class SketchActivity : AppCompatActivity() {
     
     
     
+    private lateinit var screensPanel: FrameLayout
+    private lateinit var screensPanelBehavior: BottomSheetBehavior<FrameLayout>
+    private lateinit var screensContentContainer: FrameLayout
+    private var screensContentBuilt = false
+    private var showingScreens = false
+
+    
+    
+    
+    private var nextScreenPageId = 1L
+    private val screenPages = mutableListOf(ScreenPage(id = 0L, type = ScreenPageType.HOME))
+    private var selectedScreenPageId = 0L
+    private lateinit var screenThumbnailsContainer: LinearLayout
+
+    
+    
+    
+    
     
     private var bottomNavBarBaseMarginBottom = 0
 
@@ -177,6 +195,8 @@ class SketchActivity : AppCompatActivity() {
         override fun handleOnBackPressed() {
             if (selectionActionsPanel.visibility == View.VISIBLE) {
                 dismissSelectionActionsPanel(clearSelection = true)
+            } else if (screensPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
+                closeScreensPanel()
             } else {
                 closeElementsPanel()
             }
@@ -204,11 +224,11 @@ class SketchActivity : AppCompatActivity() {
         topBar = findViewById(R.id.topBar)
 
         tabSelect = findViewById(R.id.tabSelect)
-        tabShapes = findViewById(R.id.tabShapes)
+        tabScreens = findViewById(R.id.tabScreens)
         tabText = findViewById(R.id.tabText)
         tabMedia = findViewById(R.id.tabMedia)
-        tabComponents = findViewById(R.id.tabComponents)
-        allTabs = listOf(tabShapes, tabText, tabSelect, tabMedia, tabComponents)
+        tabElements = findViewById(R.id.tabElements)
+        allTabs = listOf(tabScreens, tabText, tabSelect, tabMedia, tabElements)
 
         selectionActionsPanel = findViewById(R.id.selectionActionsPanel)
         actionGroupToggle = findViewById(R.id.actionGroupToggle)
@@ -225,6 +245,9 @@ class SketchActivity : AppCompatActivity() {
         elementsPanel = findViewById(R.id.elementsPanel)
         componentsContentContainer = findViewById(R.id.componentsContentContainer)
         elementsPanelBehavior = BottomSheetBehavior.from(elementsPanel)
+        screensPanel = findViewById(R.id.screensPanel)
+        screensContentContainer = findViewById(R.id.screensContentContainer)
+        screensPanelBehavior = BottomSheetBehavior.from(screensPanel)
         onBackPressedDispatcher.addCallback(this, panelBackPressedCallback)
 
         canvas.listener = object : SketchCanvasView.Listener {
@@ -234,6 +257,7 @@ class SketchActivity : AppCompatActivity() {
 
             override fun onTapEmptySpace() {
                 closeElementsPanel()
+                closeScreensPanel()
                 toggleBottomNavBar()
             }
 
@@ -267,6 +291,7 @@ class SketchActivity : AppCompatActivity() {
         setupTopBar()
         setupBottomNavBar()
         setupElementsPanel()
+        setupScreensPanel()
         setupTabs()
         setupSelectionActionsPanel()
 
@@ -381,6 +406,11 @@ class SketchActivity : AppCompatActivity() {
                 lp.bottomMargin = navBarHeight
                 elementsPanel.layoutParams = lp
             }
+            val screensLp = screensPanel.layoutParams as? CoordinatorLayout.LayoutParams
+            if (screensLp != null && screensLp.bottomMargin != navBarHeight) {
+                screensLp.bottomMargin = navBarHeight
+                screensPanel.layoutParams = screensLp
+            }
         }
     }
 
@@ -446,7 +476,7 @@ class SketchActivity : AppCompatActivity() {
             override fun onStateChanged(sheetView: View, newState: Int) {
                 when (newState) {
                     BottomSheetBehavior.STATE_HIDDEN -> {
-                        panelBackPressedCallback.isEnabled = false
+                        panelBackPressedCallback.isEnabled = screensPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
                         resetPanelContent()
                     }
                     BottomSheetBehavior.STATE_EXPANDED -> {
@@ -490,7 +520,8 @@ class SketchActivity : AppCompatActivity() {
     
     
     private fun openElementsPanel() {
-        setTabActive(tabComponents)
+        if (showingScreens) closeScreensPanel()
+        setTabActive(tabElements)
         showComponentsContent()
     }
 
@@ -530,6 +561,138 @@ class SketchActivity : AppCompatActivity() {
         
         
         elementsPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+    }
+
+    
+    
+    
+    
+    
+    
+    private fun setupScreensPanel() {
+        screensPanelBehavior.isDraggable = true
+
+        ViewCompat.setOnApplyWindowInsetsListener(screensPanel) { _, insets ->
+            statusBarInsetTop = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
+            applyScreensPanelTopPadding(screensPanelBehavior.state == BottomSheetBehavior.STATE_EXPANDED)
+            insets
+        }
+
+        
+        
+        screensPanelBehavior.addBottomSheetCallback(object : BottomSheetBehavior.BottomSheetCallback() {
+            override fun onStateChanged(sheetView: View, newState: Int) {
+                when (newState) {
+                    BottomSheetBehavior.STATE_HIDDEN -> {
+                        showingScreens = false
+                        panelBackPressedCallback.isEnabled = elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
+                    }
+                    BottomSheetBehavior.STATE_EXPANDED -> {
+                        panelBackPressedCallback.isEnabled = true
+                        applyScreensPanelTopPadding(expanded = true)
+                    }
+                    BottomSheetBehavior.STATE_DRAGGING, BottomSheetBehavior.STATE_SETTLING -> Unit
+                    else -> {
+                        panelBackPressedCallback.isEnabled = true
+                        applyScreensPanelTopPadding(expanded = false)
+                    }
+                }
+            }
+
+            override fun onSlide(sheetView: View, slideOffset: Float) {
+                
+                
+                if (slideOffset > 0f) {
+                    val progress = slideOffset.coerceIn(0f, 1f)
+                    applyScreensPanelTopPadding(progressToStatusBarInset = progress)
+                }
+            }
+        })
+
+        
+        screensPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+    }
+
+    
+    
+    
+    
+    private fun applyScreensPanelTopPadding(expanded: Boolean? = null, progressToStatusBarInset: Float? = null) {
+        val extra = when {
+            progressToStatusBarInset != null -> (statusBarInsetTop * progressToStatusBarInset).roundToInt()
+            expanded == true -> statusBarInsetTop
+            else -> 0
+        }
+        screensPanel.setPadding(screensPanel.paddingLeft, extra, screensPanel.paddingRight, screensPanel.paddingBottom)
+    }
+
+    
+    
+    
+    
+    
+    private fun openScreensPanel() {
+        if (!screensContentBuilt) {
+            val views = buildScreensPanelContent(
+                context = this,
+                pages = screenPages,
+                selectedPageId = selectedScreenPageId,
+                onPick = { kind ->
+                    addPart(kind, canvas.width / 2f, canvas.pageHeight / 2f)
+                    closeScreensPanel()
+                },
+                onClose = { closeScreensPanel() },
+                onSelectPage = { page -> selectScreenPage(page) },
+                onAddPageClick = { showScreenTypePicker(this) { type -> addScreenPage(type) } },
+            )
+            screensContentContainer.addView(views.root)
+            screenThumbnailsContainer = views.thumbnailsContainer
+            screensContentBuilt = true
+        }
+        showingScreens = true
+        panelBackPressedCallback.isEnabled = true
+        
+        
+        screensPanelBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+    }
+
+    
+    
+    
+    private fun addScreenPage(type: ScreenPageType) {
+        val page = ScreenPage(id = nextScreenPageId++, type = type)
+        screenPages.add(page)
+        selectedScreenPageId = page.id
+        refreshScreenThumbnails()
+    }
+
+    
+    private fun selectScreenPage(page: ScreenPage) {
+        if (selectedScreenPageId == page.id) return
+        selectedScreenPageId = page.id
+        refreshScreenThumbnails()
+    }
+
+    
+    private fun refreshScreenThumbnails() {
+        if (!screensContentBuilt) return
+        renderScreenThumbnails(
+            container = screenThumbnailsContainer,
+            context = this,
+            pages = screenPages,
+            selectedPageId = selectedScreenPageId,
+            onSelectPage = { page -> selectScreenPage(page) },
+            onAddPageClick = { showScreenTypePicker(this) { type -> addScreenPage(type) } },
+        )
+    }
+
+    
+    
+    private fun closeScreensPanel() {
+        if (screensPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
+            screensPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+        }
+        showingScreens = false
     }
 
 
@@ -579,10 +742,10 @@ class SketchActivity : AppCompatActivity() {
             }
         })
 
-        tabShapes.setOnClickListener { selectShapesTab() }
+        tabScreens.setOnClickListener { selectShapesTab() }
         tabText.setOnClickListener { selectTextTab() }
         tabMedia.setOnClickListener { selectMediaTab() }
-        tabComponents.setOnClickListener { selectComponentsTab() }
+        tabElements.setOnClickListener { selectComponentsTab() }
         tabSelect.setOnClickListener { selectSelectTab() }
 
         
@@ -597,10 +760,10 @@ class SketchActivity : AppCompatActivity() {
         
         bottomNavBar.onTabDragSelect = { index ->
             when (allTabs.getOrNull(index)) {
-                tabShapes -> selectShapesTab()
+                tabScreens -> selectShapesTab()
                 tabText -> selectTextTab()
                 tabMedia -> selectMediaTab()
-                tabComponents -> selectComponentsTab()
+                tabElements -> selectComponentsTab()
                 tabSelect -> selectSelectTab()
                 else -> {}
             }
@@ -608,7 +771,9 @@ class SketchActivity : AppCompatActivity() {
     }
 
     private fun selectShapesTab() {
-        openPartPickerFromTab(tabShapes, "Shapes", listOf(PartKind.CARD, PartKind.IMAGE, PartKind.CHIP))
+        if (showingComponents) closeComponentsContent()
+        setTabActive(tabScreens)
+        openScreensPanel()
     }
 
     private fun selectTextTab() {
@@ -620,7 +785,8 @@ class SketchActivity : AppCompatActivity() {
     }
 
     private fun selectComponentsTab() {
-        setTabActive(tabComponents)
+        if (showingScreens) closeScreensPanel()
+        setTabActive(tabElements)
         showComponentsContent()
     }
 
@@ -628,6 +794,7 @@ class SketchActivity : AppCompatActivity() {
         
         
         if (showingComponents) closeComponentsContent()
+        if (showingScreens) closeScreensPanel()
         setTabActive(tabSelect)
     }
 
@@ -635,6 +802,7 @@ class SketchActivity : AppCompatActivity() {
 
     private fun openTextInputModal() {
         if (showingComponents) closeComponentsContent()
+        if (showingScreens) closeScreensPanel()
         setTabActive(tabText)
 
         showTextInputDialog(
@@ -653,6 +821,7 @@ class SketchActivity : AppCompatActivity() {
     
     private fun openPartPickerFromTab(tab: LinearLayout, title: String, kinds: List<PartKind>) {
         if (showingComponents) closeComponentsContent()
+        if (showingScreens) closeScreensPanel()
         setTabActive(tab)
         openPartPicker(
             title = title,

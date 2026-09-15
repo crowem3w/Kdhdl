@@ -27,13 +27,13 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="top|start"
-            android:background="@drawable/bg_name_tag_editor"
+            android:background="@null"
             android:paddingHorizontal="8dp"
             android:paddingVertical="4dp"
             android:minWidth="40dp"
             android:minHeight="0dp"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#CCFFFFFF"
+            android:textColor="#1D1B20"
+            android:textColorHint="#801D1B20"
             android:textCursorDrawable="@null"
             android:singleLine="true"
             android:imeOptions="actionDone"
@@ -218,16 +218,63 @@
             android:clipChildren="false" />
     </FrameLayout>
 
+    <!-- Screens panel: a separate bottom sheet, independent of bottomNavBar, that shows the
+         Screens picker (Card/Image/Chip) once the Screens tab is tapped. Unlike elementsPanel,
+         its default resting state is a fixed peek height (app:behavior_peekHeight below)
+         approximating an on-screen keyboard's height, rather than jumping straight to full
+         height - it can still be dragged further up toward full height. Its bottom
+         margin is padded out at runtime to bottomNavBar's measured height (see setupScreensPanel
+         in SketchActivity) so it sits above the nav bar rather than sliding underneath it.
+         Declared (and thus drawn) BEFORE bottomNavBar below, and at a lower elevation than it,
+         so that while it's sliding in/out - and even briefly full-height mid-drag - it always
+         renders and receives touches behind the nav bar rather than overshadowing it (same rule
+         elementsPanel follows above). Light-mode surface (bg_bottom_panel) regardless of the
+         app's dark canvas chrome. Carries a BottomSheetDragHandleView so the sheet is draggable
+         and accessible (e.g. TalkBack expand/collapse actions) without a visible grab affordance -
+         it's kept present but invisible rather than removed, since removing it would also drop
+         its touch/accessibility hookup. -->
+    <FrameLayout
+        android:id="@+id/screensPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_bottom_panel"
+        android:clipChildren="false"
+        android:elevation="8dp"
+        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
+        app:behavior_hideable="true"
+        app:behavior_draggable="true"
+        app:behavior_skipCollapsed="false"
+        app:behavior_peekHeight="280dp">
+
+        <!-- Present but not shown: keeps the sheet's drag/accessibility affordance functional
+             without drawing the usual visible grab pill. -->
+        <com.google.android.material.bottomsheet.BottomSheetDragHandleView
+            android:id="@+id/screensPanelDragHandle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:visibility="invisible" />
+
+        <!-- Screens picker content, built and attached at runtime by
+             buildScreensPanelContent() in ScreensPanel.kt. -->
+        <FrameLayout
+            android:id="@+id/screensContentContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipChildren="false" />
+    </FrameLayout>
+
     <!-- Bottom navigation bar: a plain, always-visible tab bar floating just above the bottom
          edge of the screen as a pill-shaped 3D sheet (NOT a BottomSheetBehavior sheet - it
-         never drags, collapses, or hides). Tapping Shapes/Text/Upload opens its own modal
-         picker/dialog; tapping Elements opens elementsPanel above, a separate sheet that
-         floats over the canvas but always stays visually and interactively behind this bar
-         (see setupBottomNavBar / setupElementsPanel in SketchActivity). Declared LAST in this
-         file, and given the highest android:elevation of any popup/panel here, so it always
-         draws on top of - and always wins touch priority over - selectionActionsPanel,
-         elementsPanel, and any future panel added above it, instead of getting overshadowed
-         by them while they pop up. The extruded ~6dp "sheet thickness" is drawn along the TOP
+         never drags, collapses, or hides). Tapping Text/Upload opens its own modal picker/dialog;
+         tapping Screens or Elements opens screensPanel/elementsPanel above, separate sheets that
+         float over the canvas but always stay visually and interactively behind this bar
+         (see setupBottomNavBar / setupElementsPanel / setupScreensPanel in SketchActivity).
+         Declared LAST in this file, and given the highest android:elevation of any popup/panel
+         here, so it always draws on top of - and always wins touch priority over -
+         selectionActionsPanel, elementsPanel, screensPanel, and any future panel added above it,
+         instead of getting overshadowed by them while they pop up. The extruded ~6dp "sheet
+         thickness" is drawn along the TOP
          edge (dark sliver peeking above the lighter face, with its own catch-light) rather
          than the bottom, so paddingTop covers just the tab row's own spacing - it does not
          need the extra bump that paddingBottom needed when the thickness lived down there. -->
@@ -247,13 +294,13 @@
         android:clipToPadding="false">
 
         <LinearLayout
-            android:id="@+id/tabShapes"
+            android:id="@+id/tabScreens"
             style="@style/SketchTabColumn">
 
             <LinearLayout style="@style/SketchTabPill">
                 <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_pages" app:tint="#8A8A94" />
             </LinearLayout>
-            <TextView style="@style/SketchTabLabel" android:text="Pages" android:textColor="#8A8A94" />
+            <TextView style="@style/SketchTabLabel" android:text="Screens" android:textColor="#8A8A94" />
         </LinearLayout>
 
         <LinearLayout
@@ -287,7 +334,7 @@
         </LinearLayout>
 
         <LinearLayout
-            android:id="@+id/tabComponents"
+            android:id="@+id/tabElements"
             style="@style/SketchTabColumn">
 
             <LinearLayout style="@style/SketchTabPill">

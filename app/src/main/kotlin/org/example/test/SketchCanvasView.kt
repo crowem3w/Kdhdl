@@ -233,18 +233,13 @@ class SketchCanvasView @JvmOverloads constructor(
     
     
     
-    private val nameTagBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = Color.parseColor("#6750A4")
-    }
     private val nameTagTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = Color.parseColor("#1D1B20")
         textSize = 12f * density
     }
     private val nameTagHorizontalPad = 8f * density
     private val nameTagVerticalPad = 4f * density
     private val nameTagGap = 6f * density
-    private val nameTagCornerRadius = 6f * density
     private val nameTagRect = RectF()
 
     private var selected: SketchPart? = null
@@ -1037,7 +1032,7 @@ class SketchCanvasView @JvmOverloads constructor(
 
     private fun drawNameTag(canvas: Canvas, part: SketchPart) {
         nameTagRect.set(nameTagContentRect(part))
-        canvas.drawRoundRect(nameTagRect, nameTagCornerRadius, nameTagCornerRadius, nameTagBgPaint)
+        
         val text = part.name.ifBlank { part.kind.displayLabel }
         val baseline = nameTagRect.top + nameTagVerticalPad - nameTagTextPaint.ascent()
         canvas.drawText(text, nameTagRect.left + nameTagHorizontalPad, baseline, nameTagTextPaint)
