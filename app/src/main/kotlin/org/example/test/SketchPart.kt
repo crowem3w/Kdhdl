@@ -18,4 +18,8 @@ data class SketchPart(
     
     
     var hidden: Boolean = false,
+    
+    
+    
+    var name: String = "",
 )

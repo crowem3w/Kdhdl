@@ -19,6 +19,28 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
+        <!-- Inline editor for the auto-generated object name tag shown above the top-left of
+             a selected part's frame. Positioned programmatically over the tag; see
+             startNameTagEdit()/commitNameTagEdit() in SketchActivity. -->
+        <EditText
+            android:id="@+id/nameTagEditor"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|start"
+            android:background="@drawable/bg_name_tag_editor"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="4dp"
+            android:minWidth="40dp"
+            android:minHeight="0dp"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#CCFFFFFF"
+            android:textCursorDrawable="@null"
+            android:singleLine="true"
+            android:imeOptions="actionDone"
+            android:inputType="text"
+            android:visibility="gone"
+            android:elevation="12dp" />
+
         <!-- Top bar. Auto-hides after a few seconds to maximize canvas space for sketching;
              see setupTopBarAutoHide() in SketchActivity. -->
         <LinearLayout

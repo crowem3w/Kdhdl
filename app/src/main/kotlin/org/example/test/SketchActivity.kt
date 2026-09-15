@@ -13,6 +13,9 @@ import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -68,6 +71,13 @@ class SketchActivity : AppCompatActivity() {
     
     
     private lateinit var bottomNavBar: BottomNavSheetBar
+
+    
+    
+    
+    
+    private lateinit var nameTagEditor: EditText
+    private var editingNamePart: SketchPart? = null
 
     
     
@@ -210,6 +220,8 @@ class SketchActivity : AppCompatActivity() {
         actionDeleteSel = findViewById(R.id.actionDeleteSel)
 
         bottomNavBar = findViewById(R.id.bottomNavBar)
+        nameTagEditor = findViewById(R.id.nameTagEditor)
+        setupNameTagEditor()
         elementsPanel = findViewById(R.id.elementsPanel)
         componentsContentContainer = findViewById(R.id.componentsContentContainer)
         elementsPanelBehavior = BottomSheetBehavior.from(elementsPanel)
@@ -238,9 +250,14 @@ class SketchActivity : AppCompatActivity() {
                 )
             }
 
-            override fun onSelectionChanged(part: SketchPart?) = Unit
+            override fun onSelectionChanged(part: SketchPart?) {
+                
+                if (editingNamePart != null && part !== editingNamePart) commitNameTagEdit()
+            }
 
             override fun onPartsChanged() = Unit
+
+            override fun onNameTagTapped(part: SketchPart) = startNameTagEdit(part)
 
             override fun onMultiSelectionFinalized(parts: List<SketchPart>) = showSelectionActionsPanel()
 
@@ -783,6 +800,72 @@ class SketchActivity : AppCompatActivity() {
 
     private fun notAvailableYet(feature: String) {
         Toast.makeText(this, "$feature isn't available yet", Toast.LENGTH_SHORT).show()
+    }
+
+    
+    
+    
+    
+    private fun setupNameTagEditor() {
+        nameTagEditor.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                commitNameTagEdit()
+                true
+            } else {
+                false
+            }
+        }
+        nameTagEditor.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) commitNameTagEdit()
+        }
+    }
+
+    
+    
+    
+    private fun startNameTagEdit(part: SketchPart) {
+        editingNamePart = part
+        val rect = canvas.nameTagScreenRect(part)
+        val lp = nameTagEditor.layoutParams as FrameLayout.LayoutParams
+        lp.width = FrameLayout.LayoutParams.WRAP_CONTENT
+        lp.leftMargin = rect.left.roundToInt()
+        lp.topMargin = rect.top.roundToInt()
+        nameTagEditor.layoutParams = lp
+        nameTagEditor.setTextSize(
+            android.util.TypedValue.COMPLEX_UNIT_PX,
+            canvas.nameTagBaseTextSizePx() * canvas.currentScale(),
+        )
+        nameTagEditor.setText(part.name)
+        nameTagEditor.visibility = View.VISIBLE
+        nameTagEditor.requestFocus()
+        nameTagEditor.setSelection(nameTagEditor.text?.length ?: 0)
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+        imm?.showSoftInput(nameTagEditor, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    
+    
+    private fun commitNameTagEdit() {
+        val part = editingNamePart ?: return
+        editingNamePart = null
+        val newName = nameTagEditor.text?.toString().orEmpty()
+        canvas.renamePart(part, newName)
+        nameTagEditor.visibility = View.GONE
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+        imm?.hideSoftInputFromWindow(nameTagEditor.windowToken, 0)
+    }
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        
+        
+        if (editingNamePart != null && ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+            val rect = android.graphics.Rect()
+            nameTagEditor.getGlobalVisibleRect(rect)
+            if (!rect.contains(ev.rawX.roundToInt(), ev.rawY.roundToInt())) {
+                commitNameTagEdit()
+            }
+        }
+        return super.dispatchTouchEvent(ev)
     }
 
 

@@ -52,6 +52,10 @@ class SketchCanvasView @JvmOverloads constructor(
         
         
         fun onTapEmptySpace()
+        
+        
+        
+        fun onNameTagTapped(part: SketchPart) {}
     }
 
     var listener: Listener? = null
@@ -225,6 +229,24 @@ class SketchCanvasView @JvmOverloads constructor(
         color = Color.parseColor("#6750A4")
     }
     private val handleCornerOval = RectF()
+
+    
+    
+    
+    private val nameTagBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#6750A4")
+    }
+    private val nameTagTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 12f * density
+    }
+    private val nameTagHorizontalPad = 8f * density
+    private val nameTagVerticalPad = 4f * density
+    private val nameTagGap = 6f * density
+    private val nameTagCornerRadius = 6f * density
+    private val nameTagRect = RectF()
+
     private var selected: SketchPart? = null
     private var draggingPart: SketchPart? = null
     private var dragOffsetX = 0f
@@ -260,7 +282,12 @@ class SketchCanvasView @JvmOverloads constructor(
 
     private fun toContentX(screenX: Float) = zoomPivotX + (screenX - zoomPivotX) / scaleFactor
     private fun toContentY(screenY: Float) = zoomPivotY + (screenY + panOffsetY - zoomPivotY) / scaleFactor
+    private fun toScreenX(contentX: Float) = zoomPivotX + (contentX - zoomPivotX) * scaleFactor
     private fun toScreenY(contentY: Float) = zoomPivotY + (contentY - zoomPivotY) * scaleFactor - panOffsetY
+
+    
+    
+    fun currentScale(): Float = scaleFactor
 
     private val scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
@@ -303,7 +330,16 @@ class SketchCanvasView @JvmOverloads constructor(
         }
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-            val hit = hitTest(toContentX(e.x), toContentY(e.y))
+            val cx = toContentX(e.x)
+            val cy = toContentY(e.y)
+            
+            
+            val sel = selected
+            if (sel != null && !sel.hidden && nameTagContentRect(sel).contains(cx, cy)) {
+                listener?.onNameTagTapped(sel)
+                return true
+            }
+            val hit = hitTest(cx, cy)
             if (multiSelected.isNotEmpty()) {
                 if (hit == null || hit !in multiSelected) {
                     clearMultiSelection()
@@ -559,12 +595,18 @@ class SketchCanvasView @JvmOverloads constructor(
         if (multiSelected.isEmpty()) return
         var newId = (parts.maxOfOrNull { it.id } ?: 0L) + 1
         val offset = 24f * density
+        
+        
+        val usedNames = parts.mapNotNullTo(HashSet()) { it.name.ifBlank { null } }
         val duplicates = multiSelected.map { p ->
+            val newName = generateUniqueName(p.kind, usedNames)
+            usedNames.add(newName)
             p.copy(
                 id = newId++,
                 x = (p.x + offset).coerceIn(0f, max(0f, width - p.w)),
                 y = (p.y + offset).coerceIn(0f, max(0f, pageHeight - p.h)),
                 groupId = null,
+                name = newName,
             )
         }
         parts.addAll(duplicates)
@@ -793,11 +835,39 @@ class SketchCanvasView @JvmOverloads constructor(
         parts.lastOrNull { p -> !p.hidden && x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h }
 
     fun addPart(part: SketchPart) {
+        if (part.name.isBlank()) part.name = generatePartName(part.kind)
         if (part.kind == PartKind.TEXT) applyTextAutoHeight(part)
         parts.add(part)
         selected = part
         invalidate()
         listener?.onSelectionChanged(part)
+        listener?.onPartsChanged()
+    }
+
+    
+    
+    
+    
+    
+    fun generatePartName(kind: PartKind): String {
+        val usedNames = parts.mapNotNullTo(HashSet()) { it.name.ifBlank { null } }
+        return generateUniqueName(kind, usedNames)
+    }
+
+    private fun generateUniqueName(kind: PartKind, usedNames: Set<String>): String {
+        val base = kind.displayLabel
+        var n = 1
+        while ("$base $n" in usedNames) n++
+        return "$base $n"
+    }
+
+    
+    
+    
+    fun renamePart(part: SketchPart, newName: String) {
+        val trimmed = newName.trim()
+        part.name = if (trimmed.isEmpty()) generatePartName(part.kind) else trimmed
+        invalidate()
         listener?.onPartsChanged()
     }
 
@@ -844,7 +914,10 @@ class SketchCanvasView @JvmOverloads constructor(
             drawPart(canvas, part)
         }
         
-        selected?.let { drawSelectionHandles(canvas, it) }
+        selected?.let {
+            drawSelectionHandles(canvas, it)
+            if (!it.hidden) drawNameTag(canvas, it)
+        }
 
         
         
@@ -941,6 +1014,45 @@ class SketchCanvasView @JvmOverloads constructor(
         val pad = selectionPad
         return RectF(part.x - pad, part.y - pad, part.x + part.w + pad, part.y + part.h + pad)
     }
+
+    
+    
+    
+    private fun nameTagContentRect(part: SketchPart): RectF {
+        val text = part.name.ifBlank { part.kind.displayLabel }
+        val textWidth = nameTagTextPaint.measureText(text)
+        val rect = selectionRect(part)
+        val tagHeight = nameTagTextPaint.textSize + nameTagVerticalPad * 2f
+        val tagWidth = textWidth + nameTagHorizontalPad * 2f
+        val left = rect.left
+        var bottom = rect.top - nameTagGap
+        var top = bottom - tagHeight
+        if (top < 0f) {
+            
+            top = rect.top + nameTagGap
+            bottom = top + tagHeight
+        }
+        return RectF(left, top, left + tagWidth, bottom)
+    }
+
+    private fun drawNameTag(canvas: Canvas, part: SketchPart) {
+        nameTagRect.set(nameTagContentRect(part))
+        canvas.drawRoundRect(nameTagRect, nameTagCornerRadius, nameTagCornerRadius, nameTagBgPaint)
+        val text = part.name.ifBlank { part.kind.displayLabel }
+        val baseline = nameTagRect.top + nameTagVerticalPad - nameTagTextPaint.ascent()
+        canvas.drawText(text, nameTagRect.left + nameTagHorizontalPad, baseline, nameTagTextPaint)
+    }
+
+    
+    
+    
+    fun nameTagScreenRect(part: SketchPart): RectF {
+        val c = nameTagContentRect(part)
+        return RectF(toScreenX(c.left), toScreenY(c.top), toScreenX(c.right), toScreenY(c.bottom))
+    }
+
+    
+    fun nameTagBaseTextSizePx(): Float = nameTagTextPaint.textSize
 
     private fun drawSelectionFrame(canvas: Canvas, part: SketchPart) {
         val rect = selectionRect(part)
