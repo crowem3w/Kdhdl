@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.drawable.GradientDrawable
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -45,7 +46,7 @@ private data class ComponentCategory(val id: String, val label: String, val icon
  */
 private class SidebarEdgeShadowView(
     context: Context,
-    private val edgeWidthPx: Float,
+    edgeWidthPx: Float,
     private val cornerRadiusPx: Float,
     private val strokeWidthPx: Float,
     private val lineColor: Int,
@@ -54,6 +55,14 @@ private class SidebarEdgeShadowView(
     private val shadowDx: Float,
     private val shadowDy: Float,
 ) : View(context) {
+
+    // Mutable so the drag handle can move the line as the rail is resized, without having to
+    // rebuild this view.
+    var edgeWidthPx: Float = edgeWidthPx
+        set(value) {
+            field = value
+            invalidate()
+        }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -100,7 +109,7 @@ private val GEOMETRY_SUBCATEGORIES = listOf(
 private val ALL_CATEGORY = ComponentCategory("all", "All", R.drawable.ic_components)
 
 private val COMPONENT_CATEGORIES = listOf(
-    ComponentCategory("structure", "Structure", R.drawable.ic_cat_structure),
+    ComponentCategory("structure", "Buttons", R.drawable.ic_cat_buttons),
     ComponentCategory("layout", "Layout", R.drawable.ic_cat_layout),
     ComponentCategory("typography", "Typography", R.drawable.ic_cat_typography),
     ComponentCategory("shapes", "Geometry", R.drawable.ic_cat_geometry),
@@ -903,6 +912,10 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
 
     val railWidthPx = dp(168).toFloat()
+    val railMinWidthPx = dp(64).toFloat()
+    val railMaxWidthPx = dp(240).toFloat()
+    // Below this width the row labels fade out and rows show icon-only.
+    val railCompactThresholdPx = dp(96).toFloat()
     val cornerRadiusPx = dp(16).toFloat()
     val edgeStrokeWidthPx = 1.5f * d
     val edgeShadowRadiusPx = 4f * d
@@ -910,6 +923,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     // Extra width to the right of the sidebar's real edge so the blurred shadow has room to
     // bleed without being clipped at the overlay view's own bounds.
     val edgeShadowBleedPx = kotlin.math.ceil(edgeShadowRadiusPx + edgeShadowDyPx).toInt()
+    val dividerGapPx = dp(16)
 
     val rail = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -939,9 +953,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     )
 
     val railWrapper = FrameLayout(context).apply {
-        layoutParams = LinearLayout.LayoutParams(dp(168) + edgeShadowBleedPx, ViewGroup.LayoutParams.MATCH_PARENT).apply {
-            marginEnd = dp(10)
-        }
+        layoutParams = LinearLayout.LayoutParams(dp(168) + edgeShadowBleedPx, ViewGroup.LayoutParams.MATCH_PARENT)
         clipChildren = false
         clipToPadding = false
         addView(rail)
@@ -949,6 +961,31 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
             sidebarEdgeShadow,
             FrameLayout.LayoutParams(dp(168) + edgeShadowBleedPx, ViewGroup.LayoutParams.MATCH_PARENT)
         )
+    }
+
+    // Draggable divider: a plain, wide-enough-to-grab touch target dropped into the gap between
+    // the rail and the content column. It doesn't draw anything itself - the rounded-corner
+    // divider line is still sidebarEdgeShadow above - it just resizes the rail as it's dragged.
+    var railCurrentWidthPx = railWidthPx
+    var railIsCompact = false
+
+    fun applyRailWidth(widthPx: Float) {
+        val w = widthPx.toInt()
+        (rail.layoutParams as FrameLayout.LayoutParams).width = w
+        rail.requestLayout()
+        val wrapperWidth = w + edgeShadowBleedPx
+        (railWrapper.layoutParams as LinearLayout.LayoutParams).width = wrapperWidth
+        railWrapper.requestLayout()
+        (sidebarEdgeShadow.layoutParams as FrameLayout.LayoutParams).width = wrapperWidth
+        sidebarEdgeShadow.edgeWidthPx = widthPx
+        sidebarEdgeShadow.requestLayout()
+    }
+
+    val dividerHandle = View(context).apply {
+        isClickable = true
+        isFocusable = true
+        contentDescription = "Resize sidebar"
+        layoutParams = LinearLayout.LayoutParams(dividerGapPx, ViewGroup.LayoutParams.MATCH_PARENT)
     }
 
 
@@ -985,13 +1022,30 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
 
 
-    fun buildRailRow(iconRes: Int, label: String, onClick: () -> Unit): RailRowViews {
+    // Only the topmost rail row (the "All" row) sits against the sidebar's rounded top-right
+    // corner - every other edge of the sidebar (top-left, both bottom corners) is square, so
+    // every row below stays flat. Rounding just that one corner, by the same cornerRadiusPx used
+    // for the sidebar itself, keeps the selection highlight from poking a square edge out past
+    // the sidebar's rounded corner.
+    fun buildRailRow(iconRes: Int, label: String, topRounded: Boolean = false, onClick: () -> Unit): RailRowViews {
         lateinit var iconView: ImageView
         lateinit var labelView: TextView
         lateinit var chevronView: ImageView
 
         val frameBg = View(context).apply {
-            setBackgroundResource(R.drawable.bg_rail_row_selected)
+            background = if (topRounded) {
+                GradientDrawable().apply {
+                    setColor(Color.parseColor("#33355E3B"))
+                    cornerRadii = floatArrayOf(
+                        0f, 0f,                                 // top-left
+                        cornerRadiusPx, cornerRadiusPx,         // top-right
+                        0f, 0f,                                 // bottom-right
+                        0f, 0f                                  // bottom-left
+                    )
+                }
+            } else {
+                context.getDrawable(R.drawable.bg_rail_row_selected)
+            }
             visibility = View.GONE
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
@@ -1122,7 +1176,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
 
 
-    val allItem = buildRailRow(ALL_CATEGORY.iconRes, ALL_CATEGORY.label) {
+    val allItem = buildRailRow(ALL_CATEGORY.iconRes, ALL_CATEGORY.label, topRounded = true) {
 
 
         setActiveCategory(null)
@@ -1212,6 +1266,55 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
     setActiveCategory(null)
 
+    // Icon-only mode: below railCompactThresholdPx, fade out every row's label so only icons
+    // remain. Toggled from the drag handle below; also driven off railIcons/allItem so both the
+    // "All" row and every category row respond together.
+    fun setRailCompact(compact: Boolean) {
+        if (compact == railIsCompact) return
+        railIsCompact = compact
+        val labels = railIcons.values.map { it.label } + allItem.label
+        labels.forEach { label ->
+            label.animate().cancel()
+            if (compact) {
+                label.animate()
+                    .alpha(0f)
+                    .setDuration(120L)
+                    .withEndAction { if (label.alpha == 0f) label.visibility = View.GONE }
+                    .start()
+            } else {
+                label.visibility = View.VISIBLE
+                label.animate()
+                    .alpha(1f)
+                    .setDuration(120L)
+                    .start()
+            }
+        }
+    }
+
+    var dragStartRawX = 0f
+    var dragStartWidthPx = 0f
+    dividerHandle.setOnTouchListener { _, event ->
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                dragStartRawX = event.rawX
+                dragStartWidthPx = railCurrentWidthPx
+                true
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val deltaX = event.rawX - dragStartRawX
+                val newWidth = (dragStartWidthPx + deltaX).coerceIn(railMinWidthPx, railMaxWidthPx)
+                railCurrentWidthPx = newWidth
+                applyRailWidth(newWidth)
+                setRailCompact(newWidth < railCompactThresholdPx)
+                true
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                true
+            }
+            else -> false
+        }
+    }
+
     searchInput.addTextChangedListener(object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
         override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -1235,6 +1338,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         clipChildren = false
         clipToPadding = false
         addView(railWrapper)
+        addView(dividerHandle)
         addView(contentContainer)
     })
 
