@@ -1020,7 +1020,6 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
 
     val frameBleedToScreenEdge = dp(16)
-    val frameBleedToDivider = dp(4)
 
 
 
@@ -1041,12 +1040,12 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
 
 
-    // Selection is now indicated by a thin accent line running along the bottom edge of the
-    // active rail row (instead of a full-row background wash). The line bleeds edge-to-edge
-    // the same way the old frame did, and casts a small drop shadow via elevation so it reads
-    // as a raised accent rather than a flat divider.
-    val railSelectionLineHeight = dp(2)
-    val railSelectionLineElevation = dp(2).toFloat()
+    // Selection is now indicated by a thin, flat accent line running along the bottom edge of
+    // the active rail row (instead of a full-row background wash). It still bleeds flush to the
+    // screen edge on the left, but stops short of the sidebar/content divider on the right by
+    // railSelectionLineEndGap, and carries no elevation/shadow.
+    val railSelectionLineHeight = dp(1)
+    val railSelectionLineEndGap = dp(2)
 
     fun buildRailRow(iconRes: Int, label: String, topRounded: Boolean = false, onClick: () -> Unit): RailRowViews {
         lateinit var iconView: ImageView
@@ -1055,14 +1054,13 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
 
         val frameBg = View(context).apply {
             background = GradientDrawable().apply { setColor(PANEL_ACCENT) }
-            elevation = railSelectionLineElevation
             visibility = View.GONE
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, railSelectionLineHeight
             ).apply {
                 gravity = Gravity.BOTTOM
                 marginStart = -frameBleedToScreenEdge
-                marginEnd = -frameBleedToDivider
+                marginEnd = railSelectionLineEndGap
             }
         }
 
