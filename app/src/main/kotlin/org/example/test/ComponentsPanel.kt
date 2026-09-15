@@ -849,6 +849,9 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         layoutParams = LinearLayout.LayoutParams(dp(168), ViewGroup.LayoutParams.MATCH_PARENT).apply {
             marginEnd = dp(4)
         }
+        // Rounded only on the top-right corner, matching the edge that sits against the
+        // sidebar/content divider.
+        background = context.getDrawable(R.drawable.bg_elements_sidebar)
         clipChildren = false
         clipToPadding = false
     }
@@ -1139,6 +1142,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         addView(rail)
         addView(View(context).apply {
             setBackgroundColor(PANEL_DIVIDER)
+            // Drop shadow on the sidebar/content divider.
+            elevation = dp(4).toFloat()
             layoutParams = LinearLayout.LayoutParams(dp(1), ViewGroup.LayoutParams.MATCH_PARENT).apply {
                 marginEnd = dp(10)
             }
