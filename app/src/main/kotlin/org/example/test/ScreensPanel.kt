@@ -331,14 +331,19 @@ private fun buildAddPageTile(context: Context, onClick: () -> Unit): View {
     return tile
 }
 
-/** Small bottom sheet listing the screen types the (+) tile can create. */
+/** Small bottom sheet listing the screen types the (+) tile can create. Forced to light mode via
+ *  an explicit Light BottomSheetDialog theme + bg_bottom_panel background, independent of the
+ *  app's day/night setting - matching the light-mode surface every other panel in this file uses,
+ *  so it doesn't render as a dark sheet with unreadable dark-on-dark text when the app is in
+ *  night mode. */
 fun showScreenTypePicker(context: Context, onPick: (ScreenPageType) -> Unit) {
-    val dialog = BottomSheetDialog(context)
+    val dialog = BottomSheetDialog(context, com.google.android.material.R.style.Theme_MaterialComponents_Light_BottomSheetDialog)
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
 
     val root = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
+        background = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.bg_bottom_panel)
         setPadding(dp(20), dp(20), dp(20), dp(20))
     }
 
