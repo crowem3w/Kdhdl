@@ -117,6 +117,46 @@
                 android:elevation="3dp" />
         </LinearLayout>
 
+        <!-- Design/Prototype mode switch: docked top-left, directly below btnBack. Sits in its
+             own row rather than inside topBar's horizontal LinearLayout since it's positioned
+             one row down, not inline with the back/undo/redo/more/play buttons. Margins are
+             kept in step with topBar's own paddingTop (16dp) and btnBack's height (40dp) so it
+             sits flush beneath the back button with a small gap; see setupTopBar() in
+             SketchActivity for the click wiring and selected-state styling. -->
+        <LinearLayout
+            android:id="@+id/modeSwitch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|start"
+            android:layout_marginStart="16dp"
+            android:layout_marginTop="64dp"
+            android:orientation="horizontal"
+            android:background="@drawable/bg_bottom_nav_pill"
+            android:elevation="3dp">
+
+            <LinearLayout android:id="@+id/modeSwitchDesign" style="@style/SketchModeSwitchSegment">
+                <ImageView
+                    android:id="@+id/modeSwitchDesignIcon"
+                    style="@style/SketchModeSwitchIcon"
+                    android:src="@drawable/ic_mode_design" />
+                <TextView
+                    android:id="@+id/modeSwitchDesignLabel"
+                    style="@style/SketchModeSwitchLabel"
+                    android:text="Design" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/modeSwitchPrototype" style="@style/SketchModeSwitchSegment">
+                <ImageView
+                    android:id="@+id/modeSwitchPrototypeIcon"
+                    style="@style/SketchModeSwitchIcon"
+                    android:src="@drawable/ic_mode_prototype" />
+                <TextView
+                    android:id="@+id/modeSwitchPrototypeLabel"
+                    style="@style/SketchModeSwitchLabel"
+                    android:text="Prototype" />
+            </LinearLayout>
+        </LinearLayout>
+
         <!-- The bottom-edge "page height" drag handle previously lived here as a static View
              pinned to the screen bottom. It's now drawn directly inside SketchCanvasView instead
              (see drawPageHandle()/handlePageHandleTouch() there), since it has to track the

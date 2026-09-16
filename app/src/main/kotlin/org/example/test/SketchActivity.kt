@@ -23,6 +23,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.marginBottom
@@ -56,6 +57,16 @@ class SketchActivity : AppCompatActivity() {
     private lateinit var tabMedia: LinearLayout
     private lateinit var tabElements: LinearLayout
     private lateinit var allTabs: List<LinearLayout>
+
+    // Design/Prototype mode switch pill docked top-left, below btnBack (see modeSwitch in
+    // activity_sketch.xml). Purely a visual toggle for now - see setupModeSwitch() below.
+    private lateinit var modeSwitchDesign: LinearLayout
+    private lateinit var modeSwitchPrototype: LinearLayout
+    private lateinit var modeSwitchDesignIcon: ImageView
+    private lateinit var modeSwitchPrototypeIcon: ImageView
+    private lateinit var modeSwitchDesignLabel: TextView
+    private lateinit var modeSwitchPrototypeLabel: TextView
+    private var isPrototypeMode = false
 
     
     
@@ -285,6 +296,13 @@ class SketchActivity : AppCompatActivity() {
         tabElements = findViewById(R.id.tabElements)
         allTabs = listOf(tabScreens, tabText, tabSelect, tabMedia, tabElements)
 
+        modeSwitchDesign = findViewById(R.id.modeSwitchDesign)
+        modeSwitchPrototype = findViewById(R.id.modeSwitchPrototype)
+        modeSwitchDesignIcon = findViewById(R.id.modeSwitchDesignIcon)
+        modeSwitchPrototypeIcon = findViewById(R.id.modeSwitchPrototypeIcon)
+        modeSwitchDesignLabel = findViewById(R.id.modeSwitchDesignLabel)
+        modeSwitchPrototypeLabel = findViewById(R.id.modeSwitchPrototypeLabel)
+
         selectionActionsPanel = findViewById(R.id.selectionActionsPanel)
         actionGroupToggle = findViewById(R.id.actionGroupToggle)
         actionGroupToggleLabel = findViewById(R.id.actionGroupToggleLabel)
@@ -323,6 +341,7 @@ class SketchActivity : AppCompatActivity() {
         }
 
         setupTopBar()
+        setupModeSwitch()
         setupBottomNavBar()
         setupElementsPanel()
         setupScreensPanel()
@@ -397,6 +416,36 @@ class SketchActivity : AppCompatActivity() {
                 onClear = { canvas.clearAll() },
             )
         }
+    }
+
+    // Design/Prototype pill: purely a visual toggle for now - no canvas behavior is wired to
+    // it yet. Selected segment gets the white chip background + dark icon/label; the other
+    // segment falls back to a transparent background + muted icon/label so it reads against
+    // the dark 3D pill shell (see bg_mode_switch_segment_selected / bg_bottom_nav_pill).
+    private fun setupModeSwitch() {
+        modeSwitchDesign.setOnClickListener { setPrototypeMode(false) }
+        modeSwitchPrototype.setOnClickListener { setPrototypeMode(true) }
+        applyModeSwitchVisuals()
+    }
+
+    private fun setPrototypeMode(enabled: Boolean) {
+        if (isPrototypeMode == enabled) return
+        isPrototypeMode = enabled
+        applyModeSwitchVisuals()
+    }
+
+    private fun applyModeSwitchVisuals() {
+        modeSwitchDesign.background =
+            if (isPrototypeMode) null else ContextCompat.getDrawable(this, R.drawable.bg_mode_switch_segment_selected)
+        modeSwitchPrototype.background =
+            if (isPrototypeMode) ContextCompat.getDrawable(this, R.drawable.bg_mode_switch_segment_selected) else null
+
+        val designColor = if (isPrototypeMode) inactiveTextColor else activeTextColor
+        val prototypeColor = if (isPrototypeMode) activeTextColor else inactiveTextColor
+        modeSwitchDesignIcon.setColorFilter(designColor)
+        modeSwitchPrototypeIcon.setColorFilter(prototypeColor)
+        modeSwitchDesignLabel.setTextColor(designColor)
+        modeSwitchPrototypeLabel.setTextColor(prototypeColor)
     }
 
 

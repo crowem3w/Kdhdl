@@ -114,6 +114,34 @@
     </style>
 
 
+    <!-- Design/Prototype mode switch: a dark 3D pill (see bg_bottom_nav_pill) docked top-left
+         below the back button, holding two segments side by side. Each segment stacks its icon
+         above its label, mirroring the icon-over-label rhythm already used by SketchTabColumn
+         and SketchSelectionSidebarItem elsewhere in this screen. -->
+    <style name="SketchModeSwitchSegment">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingHorizontal">16dp</item>
+        <item name="android:paddingVertical">8dp</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+
+    <style name="SketchModeSwitchIcon">
+        <item name="android:layout_width">18dp</item>
+        <item name="android:layout_height">18dp</item>
+    </style>
+
+    <style name="SketchModeSwitchLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">4dp</item>
+        <item name="android:textSize">10sp</item>
+    </style>
+
     <!-- Properties card -->
     <style name="SketchPropertyLabel">
         <item name="android:layout_width">wrap_content</item>
