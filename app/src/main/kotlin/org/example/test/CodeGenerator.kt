@@ -48,6 +48,12 @@ object CodeGenerator {
         File(resRoot, "values/themes.xml").writeText(buildThemesXml())
         File(srcRoot, "MainActivity.kt").writeText(buildMainActivityKt(fragments, types))
 
+        // Diagnostic dump: the exact editor state this export was built from, alongside the code
+        // it produced. Not read by the app itself - purely so a failing build can be traced back
+        // to the sketch that caused it instead of just the generated output. Safe to delete before
+        // shipping; harmless if left in (not referenced by any Gradle task).
+        File(workDir, "debug_state.json").writeText(buildDebugStateJson(screens, density))
+
         val zipFile = File(context.cacheDir, "generated_app.zip")
         zipDirectory(workDir, zipFile)
         return zipFile
@@ -149,6 +155,11 @@ object CodeGenerator {
         val wDp = (part.w / density).roundToInt()
         val hDp = (part.h / density).roundToInt()
         val labelResRef = "@string/$labelRes"
+        // Matches SketchCanvasView.drawPart()/drawWrappedText(), which paint every part's label
+        // at part.fontSize (px). Divide by density the same way marginStart/marginTop do, so a
+        // label that looks a given size on the sketch canvas comes out that same sp in the
+        // generated layout instead of silently falling back to a fixed size.
+        val fontSp = (part.fontSize / density).roundToInt().coerceAtLeast(1)
         val fullWidth = part.kind == PartKind.TOP_APP_BAR || part.kind == PartKind.NAV_BAR
 
         val widthAttr = if (fullWidth) "match_parent" else "${wDp}dp"
@@ -170,6 +181,7 @@ object CodeGenerator {
         android:layout_height="${hDp}dp"
         android:layout_gravity="$gravity"
         $marginAttrs
+        android:textSize="${fontSp}sp"
         android:text="$labelResRef" />"""
 
             PartKind.FAB -> """
@@ -214,6 +226,7 @@ object CodeGenerator {
         android:layout_height="wrap_content"
         android:layout_gravity="$gravity"
         $marginAttrs
+        android:textSize="${fontSp}sp"
         android:text="$labelResRef" />"""
 
             PartKind.CHECKBOX -> """
@@ -223,6 +236,7 @@ object CodeGenerator {
         android:layout_height="wrap_content"
         android:layout_gravity="$gravity"
         $marginAttrs
+        android:textSize="${fontSp}sp"
         android:text="$labelResRef" />"""
 
             PartKind.SWITCH -> """
@@ -232,6 +246,7 @@ object CodeGenerator {
         android:layout_height="wrap_content"
         android:layout_gravity="$gravity"
         $marginAttrs
+        android:textSize="${fontSp}sp"
         android:text="$labelResRef" />"""
 
             PartKind.TOP_APP_BAR -> """
@@ -256,7 +271,7 @@ object CodeGenerator {
         android:layout_height="wrap_content"
         android:layout_gravity="$gravity"
         $marginAttrs
-        android:textSize="16sp"
+        android:textSize="${fontSp}sp"
         android:text="$labelResRef" />"""
 
             PartKind.IMAGE -> """
@@ -441,6 +456,54 @@ object CodeGenerator {
             sb.appendLine("""        const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"""")
             sb.appendLine("    }")
         }
+        sb.appendLine("}")
+        return sb.toString()
+    }
+
+    // ---- diagnostics ----------------------------------------------------------------------------
+
+    /**
+     * Dumps every field of every SketchPart on every screen - including ones this generator
+     * currently ignores (name, locked, groupId) - plus the density used for the dp/sp conversion.
+     * When a generated project fails to build, diff this against the emitted layout XML for the
+     * same screen to see whether the generator mis-translated real editor state or the state
+     * itself was unexpected (e.g. NaN/negative size from a bad gesture).
+     */
+    private fun buildDebugStateJson(screens: List<ScreenExport>, density: Float): String {
+        fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"")
+            .replace("\n", "\\n").replace("\r", "")
+
+        val sb = StringBuilder()
+        sb.appendLine("{")
+        sb.appendLine("""  "density": $density,""")
+        sb.appendLine("""  "generatedAtEpochMs": ${System.currentTimeMillis()},""")
+        sb.appendLine("""  "screens": [""")
+        screens.forEachIndexed { si, screen ->
+            sb.appendLine("    {")
+            sb.appendLine("""      "type": "${screen.type}",""")
+            sb.appendLine("""      "name": "${esc(screen.name)}",""")
+            sb.appendLine("""      "canvasWidthPx": ${screen.canvasWidthPx},""")
+            sb.appendLine("""      "canvasHeightPx": ${screen.canvasHeightPx},""")
+            sb.appendLine("""      "parts": [""")
+            screen.parts.forEachIndexed { pi, part ->
+                sb.appendLine("        {")
+                sb.appendLine("""          "id": ${part.id},""")
+                sb.appendLine("""          "kind": "${part.kind}",""")
+                sb.appendLine("""          "x": ${part.x}, "y": ${part.y}, "w": ${part.w}, "h": ${part.h},""")
+                sb.appendLine("""          "label": "${esc(part.label)}",""")
+                sb.appendLine("""          "fontSize": ${part.fontSize},""")
+                sb.appendLine("""          "name": "${esc(part.name)}",""")
+                sb.appendLine("""          "groupId": ${part.groupId ?: "null"},""")
+                sb.appendLine("""          "locked": ${part.locked},""")
+                sb.appendLine("""          "hidden": ${part.hidden}""")
+                sb.append("        }")
+                sb.appendLine(if (pi < screen.parts.lastIndex) "," else "")
+            }
+            sb.appendLine("      ]")
+            sb.append("    }")
+            sb.appendLine(if (si < screens.lastIndex) "," else "")
+        }
+        sb.appendLine("  ]")
         sb.appendLine("}")
         return sb.toString()
     }
