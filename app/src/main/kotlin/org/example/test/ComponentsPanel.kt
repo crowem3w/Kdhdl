@@ -1,5 +1,7 @@
 package org.example.test
 
+import android.animation.ArgbEvaluator
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
@@ -31,6 +33,11 @@ private val PANEL_SECONDARY_TEXT = Color.parseColor("#6B7280")
 private val PANEL_NEUTRAL_TEXT = Color.parseColor("#9CA3AF")
 private val PANEL_DIVIDER = Color.parseColor("#D1D5DB")
 private val PANEL_ACCENT = Color.parseColor("#355E3B")
+
+// Selection-frame blue for the two Buttons-panel previews in canvasContentRow (see
+// buildButtonCategoryPanel()) - standard Material blue, distinct from the panel's own
+// hunter-green/purple accents so the "this one's selected" signal stays unambiguous.
+private val BUTTON_PREVIEW_SELECTED_BORDER = Color.parseColor("#2196F3")
 // Selected-state frame color for the Design/Prototype toggle - matches the app's existing
 // blue accent (see bg_tab_selected) rather than the sidebar's hunter-green accent.
 private val PANEL_MODE_SELECTED = Color.parseColor("#3D7EFF")
@@ -694,8 +701,9 @@ fun buildButtonCategoryPanel(
     // SketchPart.kt) so the selection maps directly onto the placed part's own styling.
     var selectedVariant: ButtonStyle = ButtonStyle.FRAMELESS
 
-    // Frameless "Button" - plain text, no background at all. ~20% larger than before (textSize
-    // 14->17, padding 10/8->12/10) per the "slightly bigger" sizing pass.
+    // Frameless "Button" - plain text, no background at all by default. ~20% larger than before
+    // (textSize 14->17, padding 10/8->12/10) per the "slightly bigger" sizing pass. Gains a blue
+    // border (see updateSelectionVisuals()) only while selected.
     val buttonNoFrame = TextView(context).apply {
         text = "Button"
         setTextColor(PANEL_PRIMARY_TEXT)
@@ -706,10 +714,19 @@ fun buildButtonCategoryPanel(
         contentDescription = "Button, no frame - tap to select or expand panel"
         setPadding(dp(12), dp(10), dp(12), dp(10))
     }
+    // Applied to buttonNoFrame only while selected (see updateSelectionVisuals()); background is
+    // null the rest of the time so it stays truly frameless when deselected.
+    val framelessSelectedBorderBg = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(12).toFloat()
+        setColor(Color.TRANSPARENT)
+        setStroke(dp(2), BUTTON_PREVIEW_SELECTED_BORDER)
+    }
 
     // "Button" with a rounded-square frame - now a solid black fill (previously transparent)
     // with white text so it stays readable, per the "black default" request. Border kept as the
-    // rounded-square frame. ~20% larger (cornerRadius 10->12, padding 16/10->19/12, textSize
+    // rounded-square frame, black by default and switching to blue while selected (see
+    // updateSelectionVisuals()). ~20% larger (cornerRadius 10->12, padding 16/10->19/12, textSize
     // 14->17).
     val framedButtonBg = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
@@ -732,11 +749,14 @@ fun buildButtonCategoryPanel(
         })
     }
 
-    // Applies the shadow to whichever preview is selected and clears it from the other one.
-    // buttonWithFrame has a solid fill, so a View elevation shadow (drawn from its rounded-rect
-    // outline) reads correctly; buttonNoFrame has no background, so its "shadow" is instead a
-    // Paint-level shadow behind the glyphs themselves (setShadowLayer), since an elevation
-    // shadow there would just draw a plain rectangle behind the text rather than hugging it.
+    // Applies the shadow AND the blue selection border to whichever preview is selected, and
+    // clears both from the other one. buttonWithFrame has a solid fill, so a View elevation
+    // shadow (drawn from its rounded-rect outline) reads correctly; buttonNoFrame has no
+    // background, so its "shadow" is instead a Paint-level shadow behind the glyphs themselves
+    // (setShadowLayer), since an elevation shadow there would just draw a plain rectangle behind
+    // the text rather than hugging it. The border: buttonNoFrame swaps in a blue-stroked
+    // background only while selected (null otherwise, staying frameless); buttonWithFrame keeps
+    // its background always but its stroke color toggles black/blue in place.
     fun updateSelectionVisuals() {
         val framelessSelected = selectedVariant == ButtonStyle.FRAMELESS
         buttonNoFrame.setShadowLayer(
@@ -746,6 +766,8 @@ fun buildButtonCategoryPanel(
             if (framelessSelected) Color.parseColor("#66000000") else Color.TRANSPARENT,
         )
         buttonWithFrame.elevation = if (!framelessSelected) dp(6).toFloat() else 0f
+        buttonNoFrame.background = if (framelessSelected) framelessSelectedBorderBg else null
+        framedButtonBg.setStroke(dp(2), if (!framelessSelected) BUTTON_PREVIEW_SELECTED_BORDER else Color.BLACK)
     }
     updateSelectionVisuals()
 
@@ -816,6 +838,52 @@ fun buildButtonCategoryPanel(
         setColor(Color.WHITE)
         setStroke(dp(2), PANEL_DIVIDER)
     }
+
+    // Draws the radial blue->black->white tap animation on top of the button, clipped to its
+    // rounded-square shape so the circle never spills past the frame's corners. Kept as a
+    // separate top child (rather than painting into addToCanvasBg itself) so it can be drawn
+    // over the label text too without touching the background drawable's own state.
+    val tapAnimationOverlay = object : View(context) {
+        var progress = 0f // 0f = idle/invisible, 1f = animation complete
+        var centerX = 0f
+        var centerY = 0f
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val clipPath = Path()
+        private var clipPathW = -1
+        private var clipPathH = -1
+
+        override fun onDraw(canvas: Canvas) {
+            if (progress <= 0f) return
+            if (clipPathW != width || clipPathH != height) {
+                clipPathW = width
+                clipPathH = height
+                clipPath.reset()
+                val r = dp(12).toFloat()
+                clipPath.addRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), r, r, Path.Direction.CW)
+            }
+            // First half: radius grows from 0 to full coverage while color eases blue->black.
+            // Second half: radius stays full while color eases black->white, so the whole frame
+            // ends up settled back to white once progress reaches 1f.
+            val maxRadius = kotlin.math.hypot(width.toFloat(), height.toFloat())
+            val growPhase = (progress / 0.5f).coerceIn(0f, 1f)
+            val colorPhase = ((progress - 0.5f) / 0.5f).coerceIn(0f, 1f)
+            val radius = maxRadius * growPhase
+            paint.color = if (progress <= 0.5f) {
+                ArgbEvaluator().evaluate(growPhase, Color.parseColor("#2196F3"), Color.BLACK) as Int
+            } else {
+                ArgbEvaluator().evaluate(colorPhase, Color.BLACK, Color.WHITE) as Int
+            }
+            val saveCount = canvas.save()
+            canvas.clipPath(clipPath)
+            canvas.drawCircle(centerX, centerY, radius, paint)
+            canvas.restoreToCount(saveCount)
+        }
+    }.apply {
+        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        isClickable = false
+        isFocusable = false
+    }
+
     val addToCanvasButton = FrameLayout(context).apply {
         background = addToCanvasBg
         isClickable = true
@@ -832,7 +900,42 @@ fun buildButtonCategoryPanel(
             setTypeface(typeface, Typeface.BOLD)
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
         })
-        setOnClickListener { onAddToCanvasRequested(selectedVariant) }
+        addView(tapAnimationOverlay)
+    }
+
+    // Captures the exact tap point (view-local coordinates) so the radial animation expands from
+    // where the finger actually touched, rather than always from the button's center. Returns
+    // false so the normal click still fires afterward.
+    var lastTapX = 0f
+    var lastTapY = 0f
+    addToCanvasButton.setOnTouchListener { _, event ->
+        if (event.action == android.view.MotionEvent.ACTION_DOWN) {
+            lastTapX = event.x
+            lastTapY = event.y
+        }
+        false
+    }
+
+    addToCanvasButton.setOnClickListener {
+        tapAnimationOverlay.centerX = lastTapX
+        tapAnimationOverlay.centerY = lastTapY
+        // Fires the actual add-to-canvas/close-panel behavior only once the quick (~180ms)
+        // round-trip animation finishes, so the person sees the tap feedback before the Elements
+        // panel goes away.
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 180L
+            addUpdateListener { animator ->
+                tapAnimationOverlay.progress = animator.animatedValue as Float
+                tapAnimationOverlay.invalidate()
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    tapAnimationOverlay.progress = 0f
+                    onAddToCanvasRequested(selectedVariant)
+                }
+            })
+            start()
+        }
     }
     root.addView(addToCanvasButton)
 
