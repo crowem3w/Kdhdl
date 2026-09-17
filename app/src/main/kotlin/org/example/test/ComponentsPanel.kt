@@ -553,6 +553,20 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
     return tree to ::reset
 }
 
+/**
+ * A FrameLayout that forces itself to be a perfect square, sized to just fit its child content -
+ * whichever of measured width/height comes out larger from a normal wrap_content pass becomes
+ * both dimensions. Used for the Buttons panel's Canvas (see buildButtonCategoryPanel()) so the
+ * canvas is exactly as big as its two button contents need, not an arbitrary fixed size.
+ */
+private class SquareWrapFrameLayout(context: Context) : FrameLayout(context) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        val size = maxOf(measuredWidth, measuredHeight)
+        setMeasuredDimension(size, size)
+    }
+}
+
 /** Handle returned by buildButtonCategoryPanel() - mirrors ScreensPanelContentViews so the
  *  rename pattern stays consistent between the Screens panel and this Button panel. */
 class ButtonCategoryPanelViews(
@@ -592,7 +606,9 @@ fun buildButtonCategoryPanel(
         orientation = LinearLayout.VERTICAL
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         setBackgroundColor(PANEL_BG)
-        setPadding(dp(20), dp(16), dp(20), dp(20))
+        // Top padding brought in closer to the panel's edge than the 20dp sides/bottom use, so
+        // the name/(x) row sits higher, near the top of the panel.
+        setPadding(dp(20), dp(6), dp(20), dp(20))
         clipChildren = false
         clipToPadding = false
     }
@@ -684,23 +700,35 @@ fun buildButtonCategoryPanel(
         addView(closeButton)
     })
 
-    val previewBg = GradientDrawable().apply {
-        shape = GradientDrawable.RECTANGLE
-        cornerRadius = dp(10).toFloat()
-        setColor(PANEL_ACCENT)
-    }
-    val buttonPreview = FrameLayout(context).apply {
-        background = previewBg
+    // Frameless "Button" - plain text, no background at all.
+    val buttonNoFrame = TextView(context).apply {
+        text = "Button"
+        setTextColor(PANEL_PRIMARY_TEXT)
+        textSize = 14f
+        setTypeface(typeface, Typeface.BOLD)
         isClickable = true
         isFocusable = true
-        contentDescription = "Button preview, tap to expand panel"
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)).apply {
-            topMargin = dp(24)
-        }
-        setPadding(dp(28), 0, dp(28), 0)
+        contentDescription = "Button, no frame - tap to expand panel"
+        setPadding(dp(10), dp(8), dp(10), dp(8))
+        setOnClickListener { onExpandRequested() }
+    }
+
+    // "Button" with a rounded-square frame (soft-gray border, transparent fill).
+    val framedButtonBg = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(10).toFloat()
+        setColor(Color.TRANSPARENT)
+        setStroke(dp(2), PANEL_DIVIDER)
+    }
+    val buttonWithFrame = FrameLayout(context).apply {
+        background = framedButtonBg
+        isClickable = true
+        isFocusable = true
+        contentDescription = "Button, with frame - tap to expand panel"
+        setPadding(dp(16), dp(10), dp(16), dp(10))
         addView(TextView(context).apply {
             text = "Button"
-            setTextColor(Color.WHITE)
+            setTextColor(PANEL_PRIMARY_TEXT)
             textSize = 14f
             setTypeface(typeface, Typeface.BOLD)
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
@@ -708,12 +736,36 @@ fun buildButtonCategoryPanel(
         setOnClickListener { onExpandRequested() }
     }
 
-    root.addView(TextView(context).apply {
-        text = "Tap the button below to preview it at full height"
-        textSize = 12.5f
-        setTextColor(PANEL_SECONDARY_TEXT)
-    })
-    root.addView(buttonPreview)
+    // The two contents, laid out side by side inside the Canvas.
+    val canvasContentRow = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+        addView(buttonNoFrame)
+        addView(buttonWithFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            marginStart = dp(20)
+        })
+    }
+
+    // The Canvas itself: a perfect square, soft-gray-framed, light-mode surface, sized to just
+    // fit canvasContentRow (see SquareWrapFrameLayout) rather than any fixed dimension.
+    val canvasBg = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        setColor(Color.WHITE)
+        setStroke(dp(1), PANEL_DIVIDER)
+    }
+    val canvas = SquareWrapFrameLayout(context).apply {
+        background = canvasBg
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(20)
+        }
+        setPadding(dp(20), dp(20), dp(20), dp(20))
+        clipChildren = false
+        clipToPadding = false
+        addView(canvasContentRow)
+    }
+
+    root.addView(canvas)
 
     return ButtonCategoryPanelViews(root, label, committedLabel)
 }
