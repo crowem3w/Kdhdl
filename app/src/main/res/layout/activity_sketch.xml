@@ -1,0 +1,389 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FFFFFF"
+    android:fitsSystemWindows="true"
+    android:clipChildren="false"
+    android:clipToPadding="false">
+
+    <!-- Canvas + floating chrome (top bar, empty state, zoom controls) -->
+    <FrameLayout
+        android:id="@+id/canvasArea"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <org.example.test.SketchCanvasView
+            android:id="@+id/sketchCanvas"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- Inline editor for the auto-generated object name tag shown above the top-left of
+             a selected part's frame. Positioned programmatically over the tag; see
+             startNameTagEdit()/commitNameTagEdit() in SketchActivity. -->
+        <EditText
+            android:id="@+id/nameTagEditor"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|start"
+            android:background="@null"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="4dp"
+            android:minWidth="40dp"
+            android:minHeight="0dp"
+            android:textColor="#1D1B20"
+            android:textColorHint="#801D1B20"
+            android:textCursorDrawable="@null"
+            android:singleLine="true"
+            android:imeOptions="actionDone"
+            android:inputType="text"
+            android:visibility="gone"
+            android:elevation="12dp" />
+
+        <!-- Top bar. Auto-hides after a few seconds to maximize canvas space for sketching;
+             see setupTopBarAutoHide() in SketchActivity. -->
+        <LinearLayout
+            android:id="@+id/topBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingTop="16dp">
+
+            <ImageButton
+                android:id="@+id/btnBack"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="10dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_chevron_left"
+                android:contentDescription="Back"
+                android:elevation="3dp" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <ImageButton
+                android:id="@+id/btnUndo"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="10dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_undo"
+                android:contentDescription="Undo"
+                android:elevation="3dp" />
+
+            <ImageButton
+                android:id="@+id/btnRedo"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="10dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_redo"
+                android:contentDescription="Redo"
+                android:elevation="3dp" />
+
+            <ImageButton
+                android:id="@+id/btnMore"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="10dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_more_horiz"
+                android:contentDescription="More"
+                android:elevation="3dp" />
+
+            <ImageButton
+                android:id="@+id/btnPlay"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="11dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_play"
+                android:contentDescription="Preview"
+                android:elevation="3dp" />
+        </LinearLayout>
+
+        <!-- The bottom-edge "page height" drag handle previously lived here as a static View
+             pinned to the screen bottom. It's now drawn directly inside SketchCanvasView instead
+             (see drawPageHandle()/handlePageHandleTouch() there), since it has to track the
+             page's actual bottom edge through pan/zoom - something a separate overlay View can't
+             do cleanly. -->
+
+    </FrameLayout>
+
+    <!-- Temporary multi-selection actions panel: appears after a long-press + drag marquee
+         selection is released over one or more parts (see SketchCanvasView -
+         onMultiSelectionFinalized / SketchActivity#showSelectionActionsPanel). It's a small
+         floating sidebar docked to the left edge of the canvas - a vertical column of icon
+         buttons, each with its label stacked directly beneath it - not a BottomSheetBehavior
+         sheet, since it's meant to slide in/out over the canvas rather than be dragged. Hidden
+         by default; slid in/out from off-screen (left edge) entirely in code. -->
+    <LinearLayout
+        android:id="@+id/selectionActionsPanel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="start|center_vertical"
+        android:layout_marginStart="16dp"
+        android:minWidth="64dp"
+        android:orientation="vertical"
+        android:background="@drawable/bg_selection_actions_panel"
+        android:paddingVertical="6dp"
+        android:visibility="invisible"
+        android:elevation="12dp">
+
+        <LinearLayout android:id="@+id/actionGroupToggle" style="@style/SketchSelectionSidebarItem">
+            <ImageView style="@style/SketchSelectionSidebarIcon" android:src="@drawable/ic_group" />
+            <TextView android:id="@+id/actionGroupToggleLabel" style="@style/SketchSelectionSidebarLabel" android:text="Group" />
+        </LinearLayout>
+
+        <View style="@style/SketchSelectionSidebarDivider" />
+
+        <LinearLayout android:id="@+id/actionDuplicateSel" style="@style/SketchSelectionSidebarItem">
+            <ImageView style="@style/SketchSelectionSidebarIcon" android:src="@drawable/ic_duplicate" />
+            <TextView style="@style/SketchSelectionSidebarLabel" android:text="Duplicate" />
+        </LinearLayout>
+
+        <View style="@style/SketchSelectionSidebarDivider" />
+
+        <LinearLayout android:id="@+id/actionMoveSel" style="@style/SketchSelectionSidebarItem">
+            <ImageView style="@style/SketchSelectionSidebarIcon" android:src="@drawable/ic_move" />
+            <TextView style="@style/SketchSelectionSidebarLabel" android:text="Move" />
+        </LinearLayout>
+
+        <View style="@style/SketchSelectionSidebarDivider" />
+
+        <LinearLayout android:id="@+id/actionLockToggleSel" style="@style/SketchSelectionSidebarItem">
+            <ImageView style="@style/SketchSelectionSidebarIcon" android:src="@drawable/ic_lock" />
+            <TextView style="@style/SketchSelectionSidebarLabel" android:text="Lock" />
+        </LinearLayout>
+
+        <View style="@style/SketchSelectionSidebarDivider" />
+
+        <LinearLayout android:id="@+id/actionHideToggleSel" style="@style/SketchSelectionSidebarItem">
+            <ImageView style="@style/SketchSelectionSidebarIcon" android:src="@drawable/ic_hide" />
+            <TextView style="@style/SketchSelectionSidebarLabel" android:text="Hide" />
+        </LinearLayout>
+
+        <View style="@style/SketchSelectionSidebarDivider" />
+
+        <LinearLayout android:id="@+id/actionDeleteSel" style="@style/SketchSelectionSidebarItem">
+            <ImageView style="@style/SketchSelectionSidebarIcon" android:src="@drawable/ic_delete" />
+            <TextView style="@style/SketchSelectionSidebarLabel" android:textColor="#F2B8B5" android:text="Delete" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Elements panel: a separate bottom sheet, independent of bottomNavBar, that shows the
+         Components browser once the Elements tab is tapped. Its bottom margin is padded out at
+         runtime to bottomNavBar's measured height (see setupBottomNavBar in SketchActivity) so
+         it sits above the nav bar rather than sliding underneath it. Toggles between hidden,
+         collapsed (its minimum/default height, matching the on-screen keyboard's height so
+         content the keyboard would otherwise cover stays reachable - see
+         updateElementsPanelPeekHeight in SketchActivity) and fully expanded (its maximum
+         height, full screen). The peekHeight below is only the initial/fallback value used
+         before a real keyboard height has been measured; it's kept in sync with the keyboard
+         at runtime. Declared (and thus drawn) BEFORE bottomNavBar below, and at a lower
+         elevation than it, so that while it's sliding in/out - and even briefly full-height
+         mid-drag - it always renders and receives touches behind the nav bar rather than
+         overshadowing it. Any other popup panel added to this layout should follow the same
+         rule: declare it above (before) bottomNavBar in this file, and keep its
+         android:elevation below bottomNavBar's. -->
+    <FrameLayout
+        android:id="@+id/elementsPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_bottom_panel"
+        android:clipChildren="false"
+        android:elevation="8dp"
+        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
+        app:behavior_hideable="true"
+        app:behavior_draggable="true"
+        app:behavior_skipCollapsed="false"
+        app:behavior_peekHeight="280dp">
+
+        <!-- Present but not shown: keeps the sheet's drag/accessibility affordance functional
+             without drawing the usual visible grab pill, same as screensPanelDragHandle below. -->
+        <com.google.android.material.bottomsheet.BottomSheetDragHandleView
+            android:id="@+id/elementsPanelDragHandle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:visibility="invisible" />
+
+        <!-- Components browser content, built and attached at runtime by
+             buildComponentsContent() in ComponentsPanel.kt. -->
+        <FrameLayout
+            android:id="@+id/componentsContentContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipChildren="false" />
+    </FrameLayout>
+
+    <!-- Screens panel: a separate bottom sheet, independent of bottomNavBar, that shows the
+         Screens picker (Card/Image/Chip) once the Screens tab is tapped. The page-thumbnails
+         row/chevron/(+) tile that used to live at the top of this sheet's content now lives
+         outside it, in screenThumbnailsRow below, floating over the canvas instead. Like
+         elementsPanel, its default resting state is a fixed peek height (app:behavior_peekHeight
+         below) approximating an on-screen keyboard's height, rather than jumping straight to
+         full height - it can still be dragged further up toward full height, though unlike
+         elementsPanel this peek height isn't kept in sync with a real measured keyboard height
+         at runtime. Its bottom
+         margin is padded out at runtime to bottomNavBar's measured height (see setupScreensPanel
+         in SketchActivity) so it sits above the nav bar rather than sliding underneath it.
+         Declared (and thus drawn) BEFORE bottomNavBar below, and at a lower elevation than it,
+         so that while it's sliding in/out - and even briefly full-height mid-drag - it always
+         renders and receives touches behind the nav bar rather than overshadowing it (same rule
+         elementsPanel follows above). Light-mode surface (bg_bottom_panel) regardless of the
+         app's dark canvas chrome. Carries a BottomSheetDragHandleView so the sheet is draggable
+         and accessible (e.g. TalkBack expand/collapse actions) without a visible grab affordance -
+         it's kept present but invisible rather than removed, since removing it would also drop
+         its touch/accessibility hookup. -->
+    <FrameLayout
+        android:id="@+id/screensPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_bottom_panel"
+        android:clipChildren="false"
+        android:elevation="8dp"
+        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
+        app:behavior_hideable="true"
+        app:behavior_draggable="true"
+        app:behavior_skipCollapsed="false"
+        app:behavior_peekHeight="280dp">
+
+        <!-- Present but not shown: keeps the sheet's drag/accessibility affordance functional
+             without drawing the usual visible grab pill. -->
+        <com.google.android.material.bottomsheet.BottomSheetDragHandleView
+            android:id="@+id/screensPanelDragHandle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:visibility="invisible" />
+
+        <!-- Screens picker content, built and attached at runtime by
+             buildScreensPanelContent() in ScreensPanel.kt. -->
+        <FrameLayout
+            android:id="@+id/screensContentContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipChildren="false" />
+    </FrameLayout>
+
+    <!-- Page thumbnails row: the thumbnails strip, its show/hide chevron, and the trailing (+)
+         add-page tile, for the Screens tab. Lives OUTSIDE screensPanel, floating directly above
+         it over the canvas - intentionally with no card/frame background of its own, so the
+         sketch canvas shows through behind it instead of the panel's white sheet surface.
+         Empty here; built at runtime by buildScreenThumbnailsRow() in ScreensPanel.kt (see
+         openScreensPanel() in SketchActivity), which also keeps screenThumbnailsContainer
+         updated for later refreshes (see refreshScreenThumbnails()). Hidden by default and only
+         shown alongside screensPanel; its vertical position is pinned just above screensPanel's
+         current top edge - including while the sheet is dragged - by
+         positionScreenThumbnailsRow() in SketchActivity. Declared here (before bottomNavBar) so
+         it stays behind the nav bar, but given a higher elevation than screensPanel so it draws
+         above the sheet it floats over. -->
+    <LinearLayout
+        android:id="@+id/screenThumbnailsRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:paddingHorizontal="20dp"
+        android:paddingBottom="14dp"
+        android:visibility="gone"
+        android:clipChildren="false"
+        android:clipToPadding="false"
+        android:elevation="9dp" />
+
+    <!-- Bottom navigation bar: a plain, always-visible tab bar floating just above the bottom
+         edge of the screen as a pill-shaped 3D sheet (NOT a BottomSheetBehavior sheet - it
+         never drags, collapses, or hides). Tapping Text/Upload opens its own modal picker/dialog;
+         tapping Screens or Elements opens screensPanel/elementsPanel above, separate sheets that
+         float over the canvas but always stay visually and interactively behind this bar
+         (see setupBottomNavBar / setupElementsPanel / setupScreensPanel in SketchActivity).
+         Declared LAST in this file, and given the highest android:elevation of any popup/panel
+         here, so it always draws on top of - and always wins touch priority over -
+         selectionActionsPanel, elementsPanel, screensPanel, and any future panel added above it,
+         instead of getting overshadowed by them while they pop up. The extruded ~6dp "sheet
+         thickness" is drawn along the TOP
+         edge (dark sliver peeking above the lighter face, with its own catch-light) rather
+         than the bottom, so paddingTop covers just the tab row's own spacing - it does not
+         need the extra bump that paddingBottom needed when the thickness lived down there. -->
+    <org.example.test.BottomNavSheetBar
+        android:id="@+id/bottomNavBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginHorizontal="20dp"
+        android:layout_marginBottom="20dp"
+        android:orientation="horizontal"
+        android:paddingHorizontal="24dp"
+        android:paddingTop="9dp"
+        android:paddingBottom="5dp"
+        android:elevation="16dp"
+        android:clipChildren="false"
+        android:clipToPadding="false">
+
+        <LinearLayout
+            android:id="@+id/tabScreens"
+            style="@style/SketchTabColumn">
+
+            <LinearLayout style="@style/SketchTabPill">
+                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_pages" app:tint="#8A8A94" />
+            </LinearLayout>
+            <TextView style="@style/SketchTabLabel" android:text="Screens" android:textColor="#8A8A94" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabText"
+            style="@style/SketchTabColumn">
+
+            <LinearLayout style="@style/SketchTabPill">
+                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_text" app:tint="#8A8A94" />
+            </LinearLayout>
+            <TextView style="@style/SketchTabLabel" android:text="Text" android:textColor="#8A8A94" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabSelect"
+            style="@style/SketchTabColumn">
+
+            <LinearLayout style="@style/SketchTabPill">
+                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_select" app:tint="#1A1B24" />
+            </LinearLayout>
+            <TextView style="@style/SketchTabLabel" android:text="Select" android:textColor="#1A1B24" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabMedia"
+            style="@style/SketchTabColumn">
+
+            <LinearLayout style="@style/SketchTabPill">
+                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_upload" app:tint="#8A8A94" />
+            </LinearLayout>
+            <TextView style="@style/SketchTabLabel" android:text="Upload" android:textColor="#8A8A94" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabElements"
+            style="@style/SketchTabColumn">
+
+            <LinearLayout style="@style/SketchTabPill">
+                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_elements" app:tint="#8A8A94" />
+            </LinearLayout>
+            <TextView style="@style/SketchTabLabel" android:text="Elements" android:textColor="#8A8A94" />
+        </LinearLayout>
+    </org.example.test.BottomNavSheetBar>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -1,0 +1,481 @@
+package org.example.test
+
+import android.content.Context
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.text.InputType
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.TextView
+import com.google.android.material.bottomsheet.BottomSheetDialog
+
+// Screens panel palette (light mode) - matches ComponentsPanel.kt's soft-gray surface so the two
+// bottom-sheet panels read as one consistent light system regardless of the app's dark canvas
+// chrome.
+private val PANEL_PRIMARY_TEXT = Color.parseColor("#1A1B24")
+private val PANEL_SECONDARY_TEXT = Color.parseColor("#6B7280")
+private val PANEL_SURFACE = Color.WHITE
+private val PANEL_BORDER = Color.parseColor("#E5E7EB")
+
+// Same accent used for the canvas page-resize handle while dragging (SketchCanvasView), reused
+// here so "selected" reads as the same accent color across the app.
+private val ACCENT = Color.parseColor("#6750A4")
+
+private const val THUMB_WIDTH_DP = 52
+private const val THUMB_HEIGHT_DP = 92
+
+private data class ScreenPickItem(val kind: PartKind, val iconRes: Int)
+
+private val SCREEN_PICK_ITEMS = listOf(
+    ScreenPickItem(PartKind.CARD, R.drawable.ic_frame),
+    ScreenPickItem(PartKind.IMAGE, R.drawable.ic_media),
+    ScreenPickItem(PartKind.CHIP, R.drawable.ic_cat_actions),
+)
+
+/** Handle returned by buildScreensPanelContent() so SketchActivity can update the header title
+ *  (e.g. when the active screen changes) without rebuilding the panel content. */
+class ScreensPanelContentViews(
+    val root: View,
+    private val titleView: EditText,
+    private var committedTitle: String,
+) {
+    /** Updates the displayed title to reflect a different active screen. No-ops while the user
+     *  is mid-edit, so an external refresh can never clobber in-progress typing. */
+    fun setDisplayedTitle(name: String) {
+        committedTitle = name
+        if (!titleView.isFocusable) titleView.setText(name)
+    }
+}
+
+/**
+ * Builds the Screens tab's panel content: a light-mode Card/Image/Chip picker that replaces the
+ * old showPartPickerSheet() dialog. Lives inside screensContentContainer (see
+ * setupScreensPanel() in SketchActivity), which sits inside the screensPanel bottom sheet.
+ *
+ * The page-thumbnails row (thumbnails + chevron + add-page tile) that used to sit at the top of
+ * this content has moved out to buildScreenThumbnailsRow() below, so it isn't built here.
+ *
+ * The header title next to the back/close button starts out showing [initialTitle] (the active
+ * screen's own name, NOT the fixed word "Screens") and doubles as a rename field: tapping it
+ * turns it into an inline EditText, and committing a non-empty, trimmed value fires
+ * [onTitleRenamed]. This only renames the active screen itself - the type label shown under each
+ * page thumbnail (Home/Onboarding/Splash/Blank) is separate and untouched by this.
+ */
+fun buildScreensPanelContent(
+    context: Context,
+    initialTitle: String,
+    onPick: (PartKind) -> Unit,
+    onClose: () -> Unit,
+    onTitleRenamed: (String) -> Unit,
+): ScreensPanelContentViews {
+    val d = context.resources.displayMetrics.density
+    fun dp(v: Int) = (v * d).toInt()
+
+    val root = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        setPadding(dp(20), dp(20), dp(20), dp(20))
+        clipChildren = false
+        clipToPadding = false
+    }
+
+    val closeButton = FrameLayout(context).apply {
+        layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
+        isClickable = true
+        isFocusable = true
+        contentDescription = "Close"
+        addView(ImageView(context).apply {
+            setImageResource(R.drawable.ic_back_return)
+            setColorFilter(PANEL_SECONDARY_TEXT)
+            layoutParams = FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER)
+        })
+        setOnClickListener { onClose() }
+    }
+
+    // Doubles as the rename field for the active screen. Not focusable/clickable-to-type by
+    // default so it reads as plain header text; tapping it (see onClick below) is what flips it
+    // into an editable state. Kept as a single EditText throughout, rather than swapping between
+    // a TextView and an EditText, so there's no view-replacement/layout churn on tap.
+    var committedTitle = initialTitle
+    val title = EditText(context).apply {
+        setText(initialTitle)
+        textSize = 18f
+        setTypeface(typeface, Typeface.BOLD)
+        setTextColor(PANEL_PRIMARY_TEXT)
+        setSingleLine(true)
+        maxLines = 1
+        background = null
+        setPadding(0, 0, 0, 0)
+        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+        imeOptions = EditorInfo.IME_ACTION_DONE
+        isFocusable = false
+        isFocusableInTouchMode = false
+        isCursorVisible = false
+        contentDescription = "Screen name, tap to rename"
+        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginStart = dp(8)
+        }
+    }
+
+    fun enterTitleEditMode() {
+        title.isFocusable = true
+        title.isFocusableInTouchMode = true
+        title.isCursorVisible = true
+        title.setSelection(title.text.length)
+        title.requestFocus()
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showSoftInput(title, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    fun exitTitleEditMode(commit: Boolean) {
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(title.windowToken, 0)
+        title.isCursorVisible = false
+        title.isFocusable = false
+        title.isFocusableInTouchMode = false
+        val typed = title.text.toString().trim()
+        if (commit && typed.isNotEmpty() && typed != committedTitle) {
+            committedTitle = typed
+            title.setText(typed)
+            onTitleRenamed(typed)
+        } else {
+            title.setText(committedTitle)
+        }
+    }
+
+    title.setOnClickListener { if (!title.isFocusable) enterTitleEditMode() }
+    title.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) exitTitleEditMode(commit = true) }
+    title.setOnEditorActionListener { _, actionId, _ ->
+        if (actionId == EditorInfo.IME_ACTION_DONE) {
+            exitTitleEditMode(commit = true)
+            true
+        } else {
+            false
+        }
+    }
+
+    root.addView(LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(14)
+        }
+        addView(closeButton)
+        addView(title)
+    })
+
+    root.addView(TextView(context).apply {
+        text = "Add a shape to the canvas"
+        textSize = 13f
+        setTextColor(PANEL_SECONDARY_TEXT)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(18)
+        }
+    })
+
+    fun buildItemCardBackground() = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(14).toFloat()
+        setColor(PANEL_SURFACE)
+    }
+
+    val row = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+    }
+    SCREEN_PICK_ITEMS.forEachIndexed { index, item ->
+        val cell = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            background = buildItemCardBackground()
+            elevation = dp(1).toFloat()
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(4), dp(18), dp(4), dp(14))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                if (index > 0) marginStart = dp(10)
+            }
+            setOnClickListener { onPick(item.kind) }
+        }
+        cell.addView(ImageView(context).apply {
+            setImageResource(item.iconRes)
+            setColorFilter(PANEL_PRIMARY_TEXT)
+            layoutParams = LinearLayout.LayoutParams(dp(28), dp(28)).apply {
+                bottomMargin = dp(10)
+            }
+        })
+        cell.addView(TextView(context).apply {
+            text = item.kind.displayLabel
+            textSize = 12.5f
+            setTextColor(PANEL_PRIMARY_TEXT)
+            gravity = Gravity.CENTER_HORIZONTAL
+        })
+        row.addView(cell)
+    }
+    root.addView(row)
+
+    return ScreensPanelContentViews(root = root, titleView = title, committedTitle = initialTitle)
+}
+
+/** Handles returned by buildScreenThumbnailsRow() so SketchActivity can re-render the
+ *  thumbnails row later (e.g. after a page is added) without rebuilding it. */
+class ScreenThumbnailsRowViews(val root: View, val thumbnailsContainer: LinearLayout)
+
+/**
+ * Builds the floating page-thumbnails row for the Screens tab: one tile per created screen, plus
+ * a trailing add-page tile, with a leading chevron that shows/hides the thumbnails strip. Lives
+ * inside screenThumbnailsRow (see openScreensPanel() in SketchActivity) - OUTSIDE screensPanel,
+ * directly above it over the canvas - so it's deliberately given no card/frame background of its
+ * own here; the sketch canvas is its backdrop.
+ */
+fun buildScreenThumbnailsRow(
+    context: Context,
+    pages: List<ScreenPage>,
+    selectedPageId: Long,
+    onSelectPage: (ScreenPage) -> Unit,
+    onAddPageClick: () -> Unit,
+): ScreenThumbnailsRowViews {
+    val d = context.resources.displayMetrics.density
+    fun dp(v: Int) = (v * d).toInt()
+
+    val thumbnailsContainer = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+    }
+    val thumbnailsScroll = HorizontalScrollView(context).apply {
+        isHorizontalScrollBarEnabled = false
+        clipToPadding = false
+        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        addView(thumbnailsContainer)
+    }
+    renderScreenThumbnails(thumbnailsContainer, context, pages, selectedPageId, onSelectPage, onAddPageClick)
+
+    var thumbnailsExpanded = true
+    val chevronIcon = ImageView(context).apply {
+        setImageResource(R.drawable.ic_chevron_left)
+        setColorFilter(PANEL_SECONDARY_TEXT)
+        layoutParams = FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER)
+    }
+    val chevronButton = FrameLayout(context).apply {
+        layoutParams = LinearLayout.LayoutParams(dp(28), dp(28)).apply { marginEnd = dp(10) }
+        isClickable = true
+        isFocusable = true
+        contentDescription = "Hide page thumbnails"
+        addView(chevronIcon)
+        setOnClickListener {
+            thumbnailsExpanded = !thumbnailsExpanded
+            thumbnailsScroll.visibility = if (thumbnailsExpanded) View.VISIBLE else View.GONE
+            chevronIcon.rotation = if (thumbnailsExpanded) 0f else 180f
+            contentDescription = if (thumbnailsExpanded) "Hide page thumbnails" else "Show page thumbnails"
+        }
+    }
+
+    val root = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        clipChildren = false
+        clipToPadding = false
+        addView(chevronButton)
+        addView(thumbnailsScroll)
+    }
+
+    return ScreenThumbnailsRowViews(root, thumbnailsContainer)
+}
+
+/**
+ * Repopulates the page-thumbnails row: one tile per entry in [pages] (in creation order), the
+ * tile matching [selectedPageId] highlighted, followed by a trailing add-page tile. Called both
+ * when the panel content is first built and again by SketchActivity whenever the page list or
+ * selection changes (see refreshScreenThumbnails() in SketchActivity).
+ */
+fun renderScreenThumbnails(
+    container: LinearLayout,
+    context: Context,
+    pages: List<ScreenPage>,
+    selectedPageId: Long,
+    onSelectPage: (ScreenPage) -> Unit,
+    onAddPageClick: () -> Unit,
+) {
+    val d = context.resources.displayMetrics.density
+    fun dp(v: Int) = (v * d).toInt()
+
+    container.removeAllViews()
+    pages.forEachIndexed { index, page ->
+        container.addView(
+            buildScreenThumbnailTile(context, page, page.id == selectedPageId) { onSelectPage(page) }.apply {
+                (layoutParams as LinearLayout.LayoutParams).marginStart = if (index == 0) 0 else dp(10)
+            }
+        )
+    }
+    container.addView(
+        buildAddPageTile(context, onAddPageClick).apply {
+            (layoutParams as LinearLayout.LayoutParams).marginStart = if (pages.isEmpty()) 0 else dp(10)
+        }
+    )
+}
+
+private fun buildScreenThumbnailTile(context: Context, page: ScreenPage, selected: Boolean, onClick: () -> Unit): View {
+    val d = context.resources.displayMetrics.density
+    fun dp(v: Int) = (v * d).toInt()
+
+    val tile = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_HORIZONTAL
+        isClickable = true
+        isFocusable = true
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        setOnClickListener { onClick() }
+    }
+
+    tile.addView(FrameLayout(context).apply {
+        layoutParams = LinearLayout.LayoutParams(dp(THUMB_WIDTH_DP), dp(THUMB_HEIGHT_DP)).apply {
+            bottomMargin = dp(6)
+        }
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(8).toFloat()
+            setColor(PANEL_SURFACE)
+            setStroke(if (selected) dp(2) else dp(1), if (selected) ACCENT else PANEL_BORDER)
+        }
+        elevation = dp(1).toFloat()
+        addView(ImageView(context).apply {
+            setImageResource(page.type.iconRes)
+            setColorFilter(if (selected) ACCENT else PANEL_SECONDARY_TEXT)
+            layoutParams = FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER)
+        })
+    })
+
+    tile.addView(TextView(context).apply {
+        // Always the screen's *type* (Home/Onboarding/Splash/Blank), independent of any custom
+        // name given via the panel header's rename-on-tap - see buildScreensPanelContent().
+        text = page.type.label
+        textSize = 11f
+        maxLines = 1
+        setTextColor(if (selected) ACCENT else PANEL_SECONDARY_TEXT)
+        layoutParams = LinearLayout.LayoutParams(dp(THUMB_WIDTH_DP + 12), ViewGroup.LayoutParams.WRAP_CONTENT)
+        gravity = Gravity.CENTER_HORIZONTAL
+        ellipsize = android.text.TextUtils.TruncateAt.END
+    })
+
+    return tile
+}
+
+private fun buildAddPageTile(context: Context, onClick: () -> Unit): View {
+    val d = context.resources.displayMetrics.density
+    fun dp(v: Int) = (v * d).toInt()
+
+    val tile = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_HORIZONTAL
+        isClickable = true
+        isFocusable = true
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        contentDescription = "Add screen"
+        setOnClickListener { onClick() }
+    }
+
+    tile.addView(FrameLayout(context).apply {
+        layoutParams = LinearLayout.LayoutParams(dp(THUMB_WIDTH_DP), dp(THUMB_HEIGHT_DP)).apply {
+            bottomMargin = dp(6)
+        }
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(8).toFloat()
+            setColor(Color.TRANSPARENT)
+            setStroke(dp(1), PANEL_BORDER)
+            
+        }
+        addView(ImageView(context).apply {
+            setImageResource(R.drawable.ic_add)
+            setColorFilter(PANEL_SECONDARY_TEXT)
+            layoutParams = FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER)
+        })
+    })
+
+    
+    tile.addView(TextView(context).apply {
+        text = " "
+        textSize = 11f
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+    })
+
+    return tile
+}
+
+/** Small bottom sheet listing the screen types the (+) tile can create. Forced to light mode via
+ *  an explicit Light BottomSheetDialog theme + bg_bottom_panel background, independent of the
+ *  app's day/night setting - matching the light-mode surface every other panel in this file uses,
+ *  so it doesn't render as a dark sheet with unreadable dark-on-dark text when the app is in
+ *  night mode. */
+// Only one screen per type is allowed (see SketchActivity.addScreenPage), so the picker only
+// offers types that don't already have a screen - usedTypes is the set of types already present
+// in screenPages. Once every type has been added, the sheet shows a short message instead of an
+// empty list.
+fun showScreenTypePicker(context: Context, usedTypes: Set<ScreenPageType>, onPick: (ScreenPageType) -> Unit) {
+    val dialog = BottomSheetDialog(context, com.google.android.material.R.style.Theme_MaterialComponents_Light_BottomSheetDialog)
+    val d = context.resources.displayMetrics.density
+    fun dp(v: Int) = (v * d).toInt()
+
+    val root = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        background = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.bg_bottom_panel)
+        setPadding(dp(20), dp(20), dp(20), dp(20))
+    }
+
+    root.addView(TextView(context).apply {
+        text = "Add screen"
+        textSize = 18f
+        setTypeface(typeface, Typeface.BOLD)
+        setTextColor(PANEL_PRIMARY_TEXT)
+        setPadding(0, 0, 0, dp(12))
+    })
+
+    val availableTypes = ScreenPageType.values().filterNot { it in usedTypes }
+
+    if (availableTypes.isEmpty()) {
+        root.addView(TextView(context).apply {
+            text = "Every screen type has already been added"
+            textSize = 14f
+            setTextColor(PANEL_SECONDARY_TEXT)
+            setPadding(dp(4), dp(8), dp(4), dp(8))
+        })
+    }
+
+    availableTypes.forEach { type ->
+        root.addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(4), dp(12), dp(4), dp(12))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setOnClickListener {
+                onPick(type)
+                dialog.dismiss()
+            }
+            addView(ImageView(context).apply {
+                setImageResource(type.iconRes)
+                setColorFilter(PANEL_PRIMARY_TEXT)
+                layoutParams = LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(16) }
+            })
+            addView(TextView(context).apply {
+                text = "${type.label} screen"
+                textSize = 15f
+                setTextColor(PANEL_PRIMARY_TEXT)
+            })
+        })
+    }
+
+    dialog.setContentView(root)
+    dialog.show()
+}
