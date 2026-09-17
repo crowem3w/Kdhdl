@@ -567,9 +567,17 @@ class SketchActivity : AppCompatActivity() {
     }
 
     private fun applyElementsPanelTopPadding(expanded: Boolean? = null, progressToStatusBarInset: Float? = null) {
+        // Content built inside componentsContentContainer (e.g. buildButtonCategoryPanel()'s
+        // root) already carries its own small top padding (dp(8) for the Buttons panel). That
+        // stacks on top of statusBarInsetTop below, pushing the label/(x) row farther from the
+        // top than necessary at max height. Subtracting it here cancels the double-counting so
+        // the row ends up exactly statusBarInsetTop from the true top edge - as close as
+        // possible without sitting under the status bar - rather than statusBarInsetTop + 8dp.
+        val buttonPanelRootTopPaddingPx = (8 * resources.displayMetrics.density).roundToInt()
         val extra = when {
-            progressToStatusBarInset != null -> (statusBarInsetTop * progressToStatusBarInset).roundToInt()
-            expanded == true -> statusBarInsetTop
+            progressToStatusBarInset != null ->
+                ((statusBarInsetTop - buttonPanelRootTopPaddingPx) * progressToStatusBarInset).roundToInt().coerceAtLeast(0)
+            expanded == true -> (statusBarInsetTop - buttonPanelRootTopPaddingPx).coerceAtLeast(0)
             else -> 0
         }
         elementsPanel.setPadding(elementsPanel.paddingLeft, extra, elementsPanel.paddingRight, elementsPanel.paddingBottom)
