@@ -603,7 +603,7 @@ fun buildButtonCategoryPanel(
         // Top padding kept small so the name/(x) row sits right up near the panel's top edge,
         // but not 0 - the panel's bg (bg_bottom_panel.xml) has a 24dp top corner radius, so a
         // little clearance keeps the row clear of that curve instead of clipping into it.
-        setPadding(dp(20), dp(8), dp(20), dp(20))
+        setPadding(dp(20), dp(1), dp(20), dp(20))
         clipChildren = false
         clipToPadding = false
     }
