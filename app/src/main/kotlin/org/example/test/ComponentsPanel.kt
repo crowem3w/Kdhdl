@@ -127,7 +127,11 @@ private val COMPONENT_CATEGORIES = listOf(
 )
 
 private val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
-    "structure" to listOf("Frame", "Section", "Container", "Group"),
+    // "structure" is the "Buttons" category (see COMPONENT_CATEGORIES below). It now opens a
+    // dedicated full-panel Button experience (see buildButtonCategoryPanel()) instead of the
+    // generic item grid, so it carries a single real item rather than the placeholder
+    // Frame/Section/Container/Group set it used to have.
+    "structure" to listOf("Button"),
     "layout" to listOf("Row", "Column", "Grid", "Stack"),
     "typography" to listOf("Heading", "Body Text", "Caption", "Label"),
     "shapes" to listOf("Rectangle", "Ellipse", "Line", "Polygon"),
@@ -549,7 +553,176 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
     return tree to ::reset
 }
 
-fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
+/** Handle returned by buildButtonCategoryPanel() - mirrors ScreensPanelContentViews so the
+ *  rename pattern stays consistent between the Screens panel and this Button panel. */
+class ButtonCategoryPanelViews(
+    val root: View,
+    private val labelView: EditText,
+    private var committedLabel: String,
+) {
+    fun setDisplayedLabel(name: String) {
+        committedLabel = name
+        if (!labelView.isFocusable) labelView.setText(name)
+    }
+}
+
+/**
+ * Builds the dedicated, Button-only panel that replaces the normal category rail + content grid
+ * when "Buttons" is selected from the Elements panel's sidebar (see buildComponentsContent()'s
+ * "structure" rail entry). Light-mode, matches the rest of the Elements panel's palette.
+ *
+ * - Top-left: the Button instance's name ("Button {N}"), renamable inline exactly like the
+ *   Screens panel's header title (see buildScreensPanelContent() in ScreensPanel.kt) - tapping it
+ *   turns it into an editable field, committing a non-empty trimmed value fires [onLabelRenamed].
+ * - Top-right: a frameless (x) that closes the whole Elements panel via [onClose].
+ * - Body: a single Button preview; tapping it fires [onExpandRequested] to max out the Elements
+ *   panel's height. This is presentation-only for now - it doesn't place anything on the canvas.
+ */
+fun buildButtonCategoryPanel(
+    context: Context,
+    initialLabel: String,
+    onClose: () -> Unit,
+    onExpandRequested: () -> Unit,
+    onLabelRenamed: (String) -> Unit = {},
+): ButtonCategoryPanelViews {
+    val d = context.resources.displayMetrics.density
+    fun dp(v: Int) = (v * d).toInt()
+
+    val root = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        setBackgroundColor(PANEL_BG)
+        setPadding(dp(20), dp(16), dp(20), dp(20))
+        clipChildren = false
+        clipToPadding = false
+    }
+
+    // Doubles as the rename field, same non-focusable-until-tapped approach as
+    // buildScreensPanelContent()'s title EditText.
+    var committedLabel = initialLabel
+    val label = EditText(context).apply {
+        setText(initialLabel)
+        textSize = 16f
+        setTypeface(typeface, Typeface.BOLD)
+        setTextColor(PANEL_PRIMARY_TEXT)
+        setSingleLine(true)
+        maxLines = 1
+        background = null
+        setPadding(0, 0, 0, 0)
+        inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+        isFocusable = false
+        isFocusableInTouchMode = false
+        isCursorVisible = false
+        importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+        contentDescription = "Button name, tap to rename"
+        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+    }
+
+    fun enterLabelEditMode() {
+        label.isFocusable = true
+        label.isFocusableInTouchMode = true
+        label.isCursorVisible = true
+        label.setSelection(label.text.length)
+        label.requestFocus()
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        imm.showSoftInput(label, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    fun exitLabelEditMode(commit: Boolean) {
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        imm.hideSoftInputFromWindow(label.windowToken, 0)
+        label.isCursorVisible = false
+        label.isFocusable = false
+        label.isFocusableInTouchMode = false
+        val typed = label.text.toString().trim()
+        if (commit && typed.isNotEmpty() && typed != committedLabel) {
+            committedLabel = typed
+            label.setText(typed)
+            onLabelRenamed(typed)
+        } else {
+            if (commit && typed.isEmpty()) {
+                Toast.makeText(context, "Name can't be empty", Toast.LENGTH_SHORT).show()
+            }
+            label.setText(committedLabel)
+        }
+    }
+
+    label.setOnClickListener { if (!label.isFocusable) enterLabelEditMode() }
+    label.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) exitLabelEditMode(commit = true) }
+    label.setOnEditorActionListener { _, actionId, _ ->
+        if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+            exitLabelEditMode(commit = true)
+            true
+        } else {
+            false
+        }
+    }
+
+    // Frameless (x): no background/frame behind the icon, unlike e.g. filterButton above which
+    // has bg_quick_action_item_pressed.
+    val closeButton = FrameLayout(context).apply {
+        layoutParams = LinearLayout.LayoutParams(dp(32), dp(32))
+        isClickable = true
+        isFocusable = true
+        contentDescription = "Close"
+        addView(ImageView(context).apply {
+            setImageResource(R.drawable.ic_close)
+            setColorFilter(PANEL_SECONDARY_TEXT)
+            layoutParams = FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER)
+        })
+        setOnClickListener { onClose() }
+    }
+
+    root.addView(LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(20)
+        }
+        addView(label)
+        addView(closeButton)
+    })
+
+    val previewBg = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(10).toFloat()
+        setColor(PANEL_ACCENT)
+    }
+    val buttonPreview = FrameLayout(context).apply {
+        background = previewBg
+        isClickable = true
+        isFocusable = true
+        contentDescription = "Button preview, tap to expand panel"
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)).apply {
+            topMargin = dp(24)
+        }
+        setPadding(dp(28), 0, dp(28), 0)
+        addView(TextView(context).apply {
+            text = "Button"
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            setTypeface(typeface, Typeface.BOLD)
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+        })
+        setOnClickListener { onExpandRequested() }
+    }
+
+    root.addView(TextView(context).apply {
+        text = "Tap the button below to preview it at full height"
+        textSize = 12.5f
+        setTextColor(PANEL_SECONDARY_TEXT)
+    })
+    root.addView(buttonPreview)
+
+    return ButtonCategoryPanelViews(root, label, committedLabel)
+}
+
+fun buildComponentsContent(
+    context: Context,
+    onClose: () -> Unit = {},
+    onButtonPanelExpandRequested: () -> Unit = {},
+): View {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
 
@@ -614,7 +787,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         })
         setOnClickListener { Toast.makeText(context, "Filters aren't available yet", Toast.LENGTH_SHORT).show() }
     }
-    root.addView(LinearLayout(context).apply {
+    val headerRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -623,7 +796,8 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         addView(closeButton)
         addView(searchField)
         addView(filterButton)
-    })
+    }
+    root.addView(headerRow)
 
 
 
@@ -924,7 +1098,10 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                 iconBoxViews[index].setBackgroundResource(R.drawable.bg_component_placeholder)
             }
 
-            for (i in 0 until 4) {
+            // Was hardcoded to 4 - every category used to carry exactly 4 items. "structure"
+            // (Buttons) now carries just 1, so this renders however many items the category
+            // actually has instead of padding out to 4 with placeholder "Component N" labels.
+            for (i in itemNames.indices) {
                 lateinit var label: TextView
                 lateinit var iconBox: View
                 val itemContainer = LinearLayout(context).apply {
@@ -1297,6 +1474,12 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
     rail.addView(railDivider)
     railEntries.add(RailEntry(railDivider, null))
 
+    // "structure" (Buttons) is set below, once showButtonCategoryPanel() exists - it takes over
+    // the whole panel rather than using the generic showEmptyCategoryContent() content area, so
+    // it's dispatched through this forward reference instead (Kotlin closures capture the var
+    // itself, so it's fine that this is assigned after the rail is built).
+    var onButtonsCategorySelected: (() -> Unit)? = null
+
     for (cat in COMPONENT_CATEGORIES) {
         val index = railEntries.size
         val item: RailRowViews
@@ -1324,7 +1507,11 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     railAnimateSelect(index)
                     activeRailIndex = index
                     activeCategoryId = cat.id
-                    showEmptyCategoryContent()
+                    if (cat.id == "structure") {
+                        onButtonsCategorySelected?.invoke()
+                    } else {
+                        showEmptyCategoryContent()
+                    }
                     if (cat.id == "shapes") geometryAccordion.visibility = View.VISIBLE
                 }
                 else -> {
@@ -1339,7 +1526,11 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
                     railAnimateSelect(index)
                     activeRailIndex = index
                     activeCategoryId = cat.id
-                    showEmptyCategoryContent()
+                    if (cat.id == "structure") {
+                        onButtonsCategorySelected?.invoke()
+                    } else {
+                        showEmptyCategoryContent()
+                    }
                     if (cat.id == "shapes") geometryAccordion.visibility = View.VISIBLE
                 }
             }
@@ -1456,7 +1647,7 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         }
     })
 
-    root.addView(LinearLayout(context).apply {
+    val bodyRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
 
@@ -1466,7 +1657,55 @@ fun buildComponentsContent(context: Context, onClose: () -> Unit = {}): View {
         addView(railWrapper)
         addView(dividerHandle)
         addView(contentContainer)
-    })
+    }
+    root.addView(bodyRow)
+
+    // Host for the dedicated Button-only panel (see buildButtonCategoryPanel()). It takes over
+    // the whole panel - header row and rail/content row both hidden - rather than sitting inside
+    // contentBody, since "Buttons" gets a full replacement panel rather than just a new content
+    // section. Built lazily so the instance counter only advances when "Buttons" is actually
+    // opened, and torn down on close so the next open gets a fresh instance number.
+    val buttonPanelHost = FrameLayout(context).apply {
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        visibility = View.GONE
+    }
+    root.addView(buttonPanelHost)
+
+    fun showNormalContent() {
+        buttonPanelHost.visibility = View.GONE
+        buttonPanelHost.removeAllViews()
+        headerRow.visibility = View.VISIBLE
+        bodyRow.visibility = View.VISIBLE
+    }
+
+    fun showButtonCategoryPanel() {
+        headerRow.visibility = View.GONE
+        bodyRow.visibility = View.GONE
+        buttonPanelHost.removeAllViews()
+        val instanceNumber = ButtonInstanceCounter.nextInstanceNumber(context)
+        val panel = buildButtonCategoryPanel(
+            context = context,
+            initialLabel = "Button $instanceNumber",
+            onClose = {
+                // Closing the Button panel closes the whole Elements panel (same as the normal
+                // header's back/close button), and resets back to the rail's neutral ("All")
+                // state so the next time "Buttons" is opened it starts fresh (and the counter
+                // advances again).
+                showNormalContent()
+                setActiveCategory(null)
+                railResetAllImmediate()
+                activeRailIndex = null
+                activeCategoryId = null
+                showAllContent()
+                onClose()
+            },
+            onExpandRequested = onButtonPanelExpandRequested,
+        )
+        buttonPanelHost.addView(panel.root)
+        buttonPanelHost.visibility = View.VISIBLE
+    }
+
+    onButtonsCategorySelected = { showButtonCategoryPanel() }
 
     return root
 }

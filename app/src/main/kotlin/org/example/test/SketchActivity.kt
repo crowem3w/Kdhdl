@@ -605,7 +605,16 @@ class SketchActivity : AppCompatActivity() {
     private fun showComponentsContent(expanded: Boolean = false) {
         if (!componentsContentBuilt) {
             componentsContentContainer.addView(
-                buildComponentsContent(context = this, onClose = { closeComponentsContent() })
+                buildComponentsContent(
+                    context = this,
+                    onClose = { closeComponentsContent() },
+                    // Tapping the Button preview in the dedicated Buttons panel (see
+                    // buildButtonCategoryPanel()) just maxes out the panel's height - it doesn't
+                    // place anything on the canvas.
+                    onButtonPanelExpandRequested = {
+                        elementsPanelBehavior.state = BottomSheetBehavior.STATE_EXPANDED
+                    },
+                )
             )
             componentsContentBuilt = true
         }
