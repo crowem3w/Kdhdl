@@ -16,6 +16,7 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import com.google.android.material.bottomsheet.BottomSheetDialog
 
 // Screens panel palette (light mode) - matches ComponentsPanel.kt's soft-gray surface so the two
@@ -115,11 +116,21 @@ fun buildScreensPanelContent(
         maxLines = 1
         background = null
         setPadding(0, 0, 0, 0)
-        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+        // TYPE_TEXT_FLAG_NO_SUGGESTIONS turns off both autocorrect and Android's spell-checker
+        // (the red squiggly "unrecognized word" underline), which otherwise persists under the
+        // text even after the field goes back to its non-editable, unfocused state. A screen
+        // name being rejected as a misspelling isn't a real validation rule here - non-empty is
+        // the only thing that actually matters (see exitTitleEditMode's `typed.isNotEmpty()`).
+        // No CAP_WORDS or other auto-formatting flags - typing is raw, exactly what's entered.
+        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         imeOptions = EditorInfo.IME_ACTION_DONE
         isFocusable = false
         isFocusableInTouchMode = false
         isCursorVisible = false
+        // Keeps this out of autofill's "check this field" heuristics too - autofill can draw its
+        // own underline/highlight on text fields it thinks it can fill, which isn't wanted on a
+        // plain inline rename field.
+        importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
         contentDescription = "Screen name, tap to rename"
         layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
             marginStart = dp(8)
@@ -148,6 +159,9 @@ fun buildScreensPanelContent(
             title.setText(typed)
             onTitleRenamed(typed)
         } else {
+            if (commit && typed.isEmpty()) {
+                Toast.makeText(context, "Name can't be empty", Toast.LENGTH_SHORT).show()
+            }
             title.setText(committedTitle)
         }
     }
@@ -241,6 +255,7 @@ fun buildScreenThumbnailsRow(
     context: Context,
     pages: List<ScreenPage>,
     selectedPageId: Long,
+    hasContent: (ScreenPage) -> Boolean,
     onSelectPage: (ScreenPage) -> Unit,
     onAddPageClick: () -> Unit,
 ): ScreenThumbnailsRowViews {
@@ -257,7 +272,7 @@ fun buildScreenThumbnailsRow(
         layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         addView(thumbnailsContainer)
     }
-    renderScreenThumbnails(thumbnailsContainer, context, pages, selectedPageId, onSelectPage, onAddPageClick)
+    renderScreenThumbnails(thumbnailsContainer, context, pages, selectedPageId, hasContent, onSelectPage, onAddPageClick)
 
     var thumbnailsExpanded = true
     val chevronIcon = ImageView(context).apply {
@@ -303,6 +318,7 @@ fun renderScreenThumbnails(
     context: Context,
     pages: List<ScreenPage>,
     selectedPageId: Long,
+    hasContent: (ScreenPage) -> Boolean,
     onSelectPage: (ScreenPage) -> Unit,
     onAddPageClick: () -> Unit,
 ) {
@@ -312,7 +328,7 @@ fun renderScreenThumbnails(
     container.removeAllViews()
     pages.forEachIndexed { index, page ->
         container.addView(
-            buildScreenThumbnailTile(context, page, page.id == selectedPageId) { onSelectPage(page) }.apply {
+            buildScreenThumbnailTile(context, page, page.id == selectedPageId, hasContent(page)) { onSelectPage(page) }.apply {
                 (layoutParams as LinearLayout.LayoutParams).marginStart = if (index == 0) 0 else dp(10)
             }
         )
@@ -324,7 +340,13 @@ fun renderScreenThumbnails(
     )
 }
 
-private fun buildScreenThumbnailTile(context: Context, page: ScreenPage, selected: Boolean, onClick: () -> Unit): View {
+private fun buildScreenThumbnailTile(
+    context: Context,
+    page: ScreenPage,
+    selected: Boolean,
+    hasContent: Boolean,
+    onClick: () -> Unit,
+): View {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
 
@@ -357,8 +379,11 @@ private fun buildScreenThumbnailTile(context: Context, page: ScreenPage, selecte
 
     tile.addView(TextView(context).apply {
         // Always the screen's *type* (Home/Onboarding/Splash/Blank), independent of any custom
-        // name given via the panel header's rename-on-tap - see buildScreensPanelContent().
-        text = page.type.label
+        // name given via the panel header's rename-on-tap - see buildScreensPanelContent() -
+        // EXCEPT a Blank screen relabels itself "Normal" once it actually has content on its
+        // canvas (see hasContent, threaded through from SketchActivity's screenCanvases). An
+        // empty Blank screen still reads "Blank".
+        text = if (page.type == ScreenPageType.BLANK && hasContent) "Normal" else page.type.label
         textSize = 11f
         maxLines = 1
         setTextColor(if (selected) ACCENT else PANEL_SECONDARY_TEXT)

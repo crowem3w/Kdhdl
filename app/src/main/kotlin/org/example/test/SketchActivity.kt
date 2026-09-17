@@ -252,7 +252,9 @@ class SketchActivity : AppCompatActivity() {
             if (editingNamePart != null && part !== editingNamePart) commitNameTagEdit()
         }
 
-        override fun onPartsChanged() = Unit
+        // Live-updates a Blank screen's thumbnail label (Blank -> Normal, see hasScreenContent)
+        // the moment content is added to or removed from its canvas, not just on screen switch.
+        override fun onPartsChanged() = refreshScreenThumbnails()
 
         override fun onNameTagTapped(part: SketchPart) = startNameTagEdit(part)
 
@@ -648,11 +650,20 @@ class SketchActivity : AppCompatActivity() {
                     BottomSheetBehavior.STATE_EXPANDED -> {
                         panelBackPressedCallback.isEnabled = true
                         applyScreensPanelTopPadding(expanded = true)
+                        // Normally already faded out via onSlide's progress by the time the sheet
+                        // actually reaches this state; set directly too as a safety net for a
+                        // programmatic state change that skips the drag/slide callbacks.
+                        screenThumbnailsRow.alpha = 0f
+                        screenThumbnailsRow.visibility = View.GONE
                     }
                     BottomSheetBehavior.STATE_DRAGGING, BottomSheetBehavior.STATE_SETTLING -> Unit
                     else -> {
                         panelBackPressedCallback.isEnabled = true
                         applyScreensPanelTopPadding(expanded = false)
+                        if (showingScreens) {
+                            screenThumbnailsRow.alpha = 1f
+                            screenThumbnailsRow.visibility = View.VISIBLE
+                        }
                     }
                 }
                 positionScreenThumbnailsRow()
@@ -662,8 +673,21 @@ class SketchActivity : AppCompatActivity() {
                 
                 
                 if (slideOffset > 0f) {
+                    // 0 at collapsed, 1 at fully expanded (max height) - reused both for the
+                    // status-bar top padding below and to fade the floating thumbnails row out
+                    // as the sheet is dragged up toward max height, rather than having it just
+                    // snap away the instant STATE_EXPANDED is reached.
                     val progress = slideOffset.coerceIn(0f, 1f)
                     applyScreensPanelTopPadding(progressToStatusBarInset = progress)
+                    if (showingScreens) {
+                        screenThumbnailsRow.alpha = 1f - progress
+                        screenThumbnailsRow.visibility = if (progress >= 1f) View.GONE else View.VISIBLE
+                    }
+                } else if (showingScreens) {
+                    // Below the collapsed anchor (dragging toward hidden) - not part of the
+                    // max-height fade, so keep the row at full opacity.
+                    screenThumbnailsRow.alpha = 1f
+                    screenThumbnailsRow.visibility = View.VISIBLE
                 }
                 positionScreenThumbnailsRow()
             }
@@ -727,6 +751,7 @@ class SketchActivity : AppCompatActivity() {
                 context = this,
                 pages = screenPages,
                 selectedPageId = selectedScreenPageId,
+                hasContent = { page -> hasScreenContent(page) },
                 onSelectPage = { page -> selectScreenPage(page) },
                 onAddPageClick = { showUsedTypeAwareScreenPicker() },
             )
@@ -739,6 +764,7 @@ class SketchActivity : AppCompatActivity() {
         
         
         screenThumbnailsRow.visibility = View.VISIBLE
+        screenThumbnailsRow.alpha = 1f
         screenThumbnailsRow.post { positionScreenThumbnailsRow() }
         screensPanelBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
@@ -746,15 +772,19 @@ class SketchActivity : AppCompatActivity() {
     
     
     
+    // Home/Onboarding/Splash stay capped at one screen each (usedTypes below); Blank is the one
+    // exception - it's excluded from usedTypes so the picker never filters it out, and users can
+    // add as many Blank screens as they like.
     private fun showUsedTypeAwareScreenPicker() {
-        val usedTypes = screenPages.map { it.type }.toSet()
+        val usedTypes = screenPages.map { it.type }.filter { it != ScreenPageType.BLANK }.toSet()
         showScreenTypePicker(this, usedTypes) { type -> addScreenPage(type) }
     }
 
-    // Only one screen per type is allowed - showUsedTypeAwareScreenPicker() already filters the
-    // type out of the picker once it exists, this check is just a defensive backstop.
+    // Home/Onboarding/Splash: one screen per type - showUsedTypeAwareScreenPicker() already
+    // filters the type out of the picker once it exists, this check is just a defensive
+    // backstop. Blank is exempt from that cap entirely, so it's excluded from the check.
     private fun addScreenPage(type: ScreenPageType) {
-        if (screenPages.any { it.type == type }) return
+        if (type != ScreenPageType.BLANK && screenPages.any { it.type == type }) return
         val page = ScreenPage(id = nextScreenPageId++, type = type)
         screenPages.add(page)
         selectedScreenPageId = page.id
@@ -762,6 +792,12 @@ class SketchActivity : AppCompatActivity() {
         refreshScreenThumbnails()
         if (screensContentBuilt) screensPanelContentViews.setDisplayedTitle(page.name)
     }
+
+    // A Blank screen's thumbnail label switches from "Blank" to "Normal" once it actually has
+    // content (see hasContent in buildScreenThumbnailsRow/renderScreenThumbnails). Other types
+    // keep their fixed label regardless, so this only needs to answer the question for Blank.
+    private fun hasScreenContent(page: ScreenPage): Boolean =
+        screenCanvases[page.id]?.parts?.isNotEmpty() == true
 
     
     private fun selectScreenPage(page: ScreenPage) {
@@ -857,6 +893,7 @@ class SketchActivity : AppCompatActivity() {
             context = this,
             pages = screenPages,
             selectedPageId = selectedScreenPageId,
+            hasContent = { page -> hasScreenContent(page) },
             onSelectPage = { page -> selectScreenPage(page) },
             onAddPageClick = { showUsedTypeAwareScreenPicker() },
         )
