@@ -725,6 +725,11 @@ fun buildButtonCategoryPanel(
     // SketchPart.kt) so the selection maps directly onto the placed part's own styling.
     var selectedVariant: ButtonStyle = ButtonStyle.FRAMELESS
 
+    // Assigned once the settings panel (Align/Label, further below) is built, so
+    // updateSelectionVisuals() can also refresh which settings rows are visible and keep the
+    // Label input in sync with whichever preview just became selected. A no-op until then.
+    var onSelectedVariantChanged: () -> Unit = {}
+
     // Frameless "Button" - plain text, no background at all by default. ~20% larger than before
     // (textSize 14->17, padding 10/8->12/10) per the earlier "slightly bigger" sizing pass, plus
     // a further ~17% horizontal-only bump (12->14dp) so the preview itself reads a bit wider
@@ -759,19 +764,22 @@ fun buildButtonCategoryPanel(
         setColor(Color.BLACK)
         setStroke(dp(2), Color.BLACK)
     }
+    // Kept as a named reference (rather than inline in addView) so the Align/Label settings
+    // below (see settings panel further down) can read and update its text and gravity.
+    val buttonWithFrameLabel = TextView(context).apply {
+        text = "Button"
+        setTextColor(Color.WHITE)
+        textSize = 17f
+        setTypeface(typeface, Typeface.BOLD)
+        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+    }
     val buttonWithFrame = FrameLayout(context).apply {
         background = framedButtonBg
         isClickable = true
         isFocusable = true
         contentDescription = "Button, with frame - tap to select or expand panel"
         setPadding(dp(22), dp(12), dp(22), dp(12))
-        addView(TextView(context).apply {
-            text = "Button"
-            setTextColor(Color.WHITE)
-            textSize = 17f
-            setTypeface(typeface, Typeface.BOLD)
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
-        })
+        addView(buttonWithFrameLabel)
     }
 
     // Applies the shadow AND the blue selection border to whichever preview is selected, and
@@ -793,6 +801,7 @@ fun buildButtonCategoryPanel(
         buttonWithFrame.elevation = if (!framelessSelected) dp(6).toFloat() else 0f
         buttonNoFrame.background = if (framelessSelected) framelessSelectedBorderBg else null
         framedButtonBg.setStroke(dp(2), if (!framelessSelected) BUTTON_PREVIEW_SELECTED_BORDER else Color.BLACK)
+        onSelectedVariantChanged()
     }
     updateSelectionVisuals()
 
@@ -903,6 +912,201 @@ fun buildButtonCategoryPanel(
         onAddToCanvasRequested(selectedVariant)
     }
     root.addView(addToCanvasButton)
+
+    // Settings panel: rounded-square frame with a drop shadow, sitting below the "Insert
+    // instance" button, holding one row per setting ("Align", "Label"). Each row reuses the
+    // original 30%-gray / 70%-white split (gray matches the Canvas surface's own color, see
+    // canvasBg above) divided by a vertical line, with a thin horizontal divider between rows.
+    // Align only appears for the framed button variant; Label always appears (see
+    // updateSettingsRowsVisibility() below).
+    val settingsLeftBg = Color.parseColor("#E6E7E9")
+    val settingsRowHeight = dp(72)
+    val settingsCornerRadius = dp(16).toFloat()
+    val settingsFrameBg = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = settingsCornerRadius
+        setColor(Color.WHITE)
+    }
+    val settingsFrame = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        background = settingsFrameBg
+        clipToOutline = true
+        elevation = dp(6).toFloat()
+        layoutParams = LinearLayout.LayoutParams(dp(200), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(16)
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+    }
+
+    // Left cell shared by every row: setting icon above setting name, on the gray fill.
+    fun buildSettingsLeftCell(iconRes: Int, labelText: String): View = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER
+        setBackgroundColor(settingsLeftBg)
+        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.3f)
+        addView(ImageView(context).apply {
+            setImageResource(iconRes)
+            setColorFilter(PANEL_SECONDARY_TEXT)
+            layoutParams = LinearLayout.LayoutParams(dp(18), dp(18)).apply { bottomMargin = dp(4) }
+        })
+        addView(TextView(context).apply {
+            text = labelText
+            setTextColor(PANEL_SECONDARY_TEXT)
+            textSize = 11f
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+        })
+    }
+
+    fun buildVerticalDivider(): View = View(context).apply {
+        setBackgroundColor(PANEL_DIVIDER)
+        layoutParams = LinearLayout.LayoutParams(dp(1), ViewGroup.LayoutParams.MATCH_PARENT)
+    }
+
+    fun buildHorizontalDivider(): View = View(context).apply {
+        setBackgroundColor(PANEL_DIVIDER)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))
+    }
+
+    // --- Align row: right cell holds a 5-option segmented control (Justify/Start/End/
+    // Centered/Stack), each option divided by a vertical line, one selected at a time. Applied
+    // directly to buttonWithFrame's label - the only preview Align is shown for.
+    val alignOptions = listOf("Justify", "Start", "End", "Centered", "Stack")
+    var selectedAlign = "Centered"
+    val alignOptionViews = LinkedHashMap<String, TextView>()
+
+    fun applyAlignToFramedPreview() {
+        val gravity = when (selectedAlign) {
+            "Start" -> Gravity.START or Gravity.CENTER_VERTICAL
+            "End" -> Gravity.END or Gravity.CENTER_VERTICAL
+            "Justify" -> Gravity.FILL_HORIZONTAL or Gravity.CENTER_VERTICAL
+            // "Stack" has no direct single-line equivalent for a button label - approximated
+            // as centered, same as "Centered", until multi-line stacking is supported.
+            else -> Gravity.CENTER
+        }
+        buttonWithFrameLabel.gravity = if (selectedAlign == "Justify") Gravity.CENTER else gravity
+        (buttonWithFrameLabel.layoutParams as FrameLayout.LayoutParams).apply {
+            width = if (selectedAlign == "Justify") ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT
+            this.gravity = gravity
+        }
+        buttonWithFrameLabel.requestLayout()
+    }
+
+    fun updateAlignVisuals() {
+        alignOptionViews.forEach { (opt, tv) ->
+            val selected = opt == selectedAlign
+            tv.setTextColor(if (selected) Color.WHITE else PANEL_PRIMARY_TEXT)
+            tv.setBackgroundColor(if (selected) BUTTON_PREVIEW_SELECTED_BORDER else Color.TRANSPARENT)
+        }
+    }
+
+    val alignSegmentedBg = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(10).toFloat()
+        setStroke(dp(1), PANEL_DIVIDER)
+        setColor(Color.WHITE)
+    }
+    val alignSegmentedControl = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        background = alignSegmentedBg
+        clipToOutline = true
+        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36), Gravity.CENTER_VERTICAL)
+    }
+    alignOptions.forEachIndexed { index, option ->
+        val optionView = TextView(context).apply {
+            text = option
+            textSize = 10f
+            gravity = Gravity.CENTER
+            setTypeface(typeface, Typeface.BOLD)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Align: $option"
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+            setOnClickListener {
+                selectedAlign = option
+                updateAlignVisuals()
+                applyAlignToFramedPreview()
+            }
+        }
+        alignOptionViews[option] = optionView
+        alignSegmentedControl.addView(optionView)
+        if (index != alignOptions.lastIndex) alignSegmentedControl.addView(buildVerticalDivider())
+    }
+    updateAlignVisuals()
+
+    val alignRow = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, settingsRowHeight)
+        addView(buildSettingsLeftCell(R.drawable.ic_align, "Align"))
+        addView(buildVerticalDivider())
+        addView(FrameLayout(context).apply {
+            setBackgroundColor(Color.WHITE)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.7f)
+            addView(alignSegmentedControl)
+        })
+    }
+
+    // --- Label row: right cell holds a full-width rounded-square text input, editing whichever
+    // preview is currently selected (buttonNoFrame's text, or buttonWithFrameLabel's text).
+    val labelInputBg = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(10).toFloat()
+        setColor(PANEL_BG)
+        setStroke(dp(1), PANEL_DIVIDER)
+    }
+    val labelInput = EditText(context).apply {
+        setText(buttonNoFrame.text)
+        textSize = 13f
+        setTextColor(PANEL_PRIMARY_TEXT)
+        setSingleLine(true)
+        maxLines = 1
+        background = labelInputBg
+        setPadding(dp(12), dp(6), dp(12), dp(6))
+        imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+        importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+        contentDescription = "Button label text"
+        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36), Gravity.CENTER_VERTICAL)
+    }
+    labelInput.addTextChangedListener(object : TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+        override fun afterTextChanged(s: Editable?) {
+            val text = s?.toString().orEmpty()
+            if (selectedVariant == ButtonStyle.FRAMELESS) buttonNoFrame.text = text else buttonWithFrameLabel.text = text
+        }
+    })
+
+    val labelRow = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, settingsRowHeight)
+        addView(buildSettingsLeftCell(R.drawable.ic_cat_typography, "Label"))
+        addView(buildVerticalDivider())
+        addView(FrameLayout(context).apply {
+            setBackgroundColor(Color.WHITE)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.7f)
+            addView(labelInput)
+        })
+    }
+
+    val alignRowDivider = buildHorizontalDivider()
+    settingsFrame.addView(alignRow)
+    settingsFrame.addView(alignRowDivider)
+    settingsFrame.addView(labelRow)
+    root.addView(settingsFrame)
+
+    // Align only shows for the framed variant; Label always shows. Also keeps the Label input
+    // synced to whichever preview's text is now active, so it always reflects the current value
+    // instead of stale text left over from the other variant.
+    fun updateSettingsRowsVisibility() {
+        val framedSelected = selectedVariant == ButtonStyle.FRAMED
+        alignRow.visibility = if (framedSelected) View.VISIBLE else View.GONE
+        alignRowDivider.visibility = if (framedSelected) View.VISIBLE else View.GONE
+        labelInput.setText(if (framedSelected) buttonWithFrameLabel.text else buttonNoFrame.text)
+    }
+    onSelectedVariantChanged = { updateSettingsRowsVisibility() }
+    updateSettingsRowsVisibility()
 
     return ButtonCategoryPanelViews(root, label, committedLabel)
 }
