@@ -553,20 +553,6 @@ private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
     return tree to ::reset
 }
 
-/**
- * A FrameLayout that forces itself to be a perfect square, sized to just fit its child content -
- * whichever of measured width/height comes out larger from a normal wrap_content pass becomes
- * both dimensions. Used for the Buttons panel's Canvas (see buildButtonCategoryPanel()) so the
- * canvas is exactly as big as its two button contents need, not an arbitrary fixed size.
- */
-private class SquareWrapFrameLayout(context: Context) : FrameLayout(context) {
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-        val size = maxOf(measuredWidth, measuredHeight)
-        setMeasuredDimension(size, size)
-    }
-}
-
 /** Handle returned by buildButtonCategoryPanel() - mirrors ScreensPanelContentViews so the
  *  rename pattern stays consistent between the Screens panel and this Button panel. */
 class ButtonCategoryPanelViews(
@@ -608,7 +594,7 @@ fun buildButtonCategoryPanel(
         setBackgroundColor(PANEL_BG)
         // Top padding brought in closer to the panel's edge than the 20dp sides/bottom use, so
         // the name/(x) row sits higher, near the top of the panel.
-        setPadding(dp(20), dp(6), dp(20), dp(20))
+        setPadding(dp(20), dp(3), dp(20), dp(20))
         clipChildren = false
         clipToPadding = false
     }
@@ -747,17 +733,23 @@ fun buildButtonCategoryPanel(
         })
     }
 
-    // The Canvas itself: a perfect square, soft-gray-framed, light-mode surface, sized to just
-    // fit canvasContentRow (see SquareWrapFrameLayout) rather than any fixed dimension.
+    // The Canvas itself: a full-width, soft-gray-framed, light-mode surface - height stays
+    // content-sized to fit canvasContentRow (see below), width bleeds edge-to-edge.
     val canvasBg = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
         setColor(Color.WHITE)
         setStroke(dp(1), PANEL_DIVIDER)
     }
-    val canvas = SquareWrapFrameLayout(context).apply {
+    val canvas = FrameLayout(context).apply {
         background = canvasBg
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        // Full width, true edge-to-edge - counteracts root's 20dp side padding with matching
+        // negative margins (root has clipToPadding/clipChildren = false so this is allowed to
+        // draw into that padding). Height stays content-sized (wrap_content) rather than being
+        // forced to match the width, so this is a rectangle now, not a square.
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dp(20)
+            marginStart = -dp(20)
+            marginEnd = -dp(20)
         }
         setPadding(dp(20), dp(20), dp(20), dp(20))
         clipChildren = false
