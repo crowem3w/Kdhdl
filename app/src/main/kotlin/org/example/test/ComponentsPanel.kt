@@ -592,9 +592,9 @@ fun buildButtonCategoryPanel(
         orientation = LinearLayout.VERTICAL
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         setBackgroundColor(PANEL_BG)
-        // Top padding brought in closer to the panel's edge than the 20dp sides/bottom use, so
-        // the name/(x) row sits higher, near the top of the panel.
-        setPadding(dp(20), dp(3), dp(20), dp(20))
+        // Top padding matches the Screens panel's top padding (see buildScreensPanelContent()
+        // in ScreensPanel.kt), so the name/(x) row sits the same distance from the panel's edge.
+        setPadding(dp(20), dp(20), dp(20), dp(20))
         clipChildren = false
         clipToPadding = false
     }
