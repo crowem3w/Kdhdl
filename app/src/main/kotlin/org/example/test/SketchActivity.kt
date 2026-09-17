@@ -573,7 +573,7 @@ class SketchActivity : AppCompatActivity() {
         // top than necessary at max height. Subtracting it here cancels the double-counting so
         // the row ends up exactly statusBarInsetTop from the true top edge - as close as
         // possible without sitting under the status bar - rather than statusBarInsetTop + 8dp.
-        val buttonPanelRootTopPaddingPx = (1 * resources.displayMetrics.density).roundToInt()
+        val buttonPanelRootTopPaddingPx = (8 * resources.displayMetrics.density).roundToInt()
         val extra = when {
             progressToStatusBarInset != null ->
                 ((statusBarInsetTop - buttonPanelRootTopPaddingPx) * progressToStatusBarInset).roundToInt().coerceAtLeast(0)

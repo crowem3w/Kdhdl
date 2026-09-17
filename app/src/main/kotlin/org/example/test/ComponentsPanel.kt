@@ -592,6 +592,7 @@ fun buildButtonCategoryPanel(
     onExpandRequested: () -> Unit,
     onLabelRenamed: (String) -> Unit = {},
     onAddToCanvasRequested: (ButtonStyle) -> Unit = {},
+    onBack: () -> Unit = {},
 ): ButtonCategoryPanelViews {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
@@ -603,7 +604,7 @@ fun buildButtonCategoryPanel(
         // Top padding kept small so the name/(x) row sits right up near the panel's top edge,
         // but not 0 - the panel's bg (bg_bottom_panel.xml) has a 24dp top corner radius, so a
         // little clearance keeps the row clear of that curve instead of clipping into it.
-        setPadding(dp(20), dp(1), dp(20), dp(20))
+        setPadding(dp(20), dp(8), dp(20), dp(20))
         clipChildren = false
         clipToPadding = false
     }
@@ -670,6 +671,22 @@ fun buildButtonCategoryPanel(
         }
     }
 
+    // Frameless back arrow, sits to the left of the label - navigates back to the Elements
+    // panel's normal category rail/content without dismissing the whole panel (unlike the (x)
+    // close button below, which closes everything).
+    val backButton = FrameLayout(context).apply {
+        layoutParams = LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(4) }
+        isClickable = true
+        isFocusable = true
+        contentDescription = "Back"
+        addView(ImageView(context).apply {
+            setImageResource(R.drawable.ic_back_return)
+            setColorFilter(PANEL_SECONDARY_TEXT)
+            layoutParams = FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER)
+        })
+        setOnClickListener { onBack() }
+    }
+
     // Frameless (x): no background/frame behind the icon, unlike e.g. filterButton above which
     // has bg_quick_action_item_pressed.
     val closeButton = FrameLayout(context).apply {
@@ -691,6 +708,7 @@ fun buildButtonCategoryPanel(
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             bottomMargin = dp(20)
         }
+        addView(backButton)
         addView(label)
         addView(closeButton)
     })
@@ -826,59 +844,18 @@ fun buildButtonCategoryPanel(
 
     root.addView(canvas)
 
-    // Rounded-square-framed action button that actually places the currently-selected preview's
-    // style onto the real sketch canvas (the two previews above stay presentation-only/expand
-    // the panel, same as before).
+    // Compact, rounded-rectangle action button that actually places the currently-selected
+    // preview's style onto the real sketch canvas (the two previews above stay presentation-only/
+    // expand the panel, same as before). Sized to its label rather than stretching the full panel
+    // width, so it no longer eats the whole row below the canvas and leaves room for further
+    // content there.
+    val addToCanvasIdleColor = Color.WHITE
+    val addToCanvasPressedColor = Color.parseColor("#E9EAEC") // soft-gray press feedback
     val addToCanvasBg = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
         cornerRadius = dp(12).toFloat()
-        setColor(Color.WHITE)
+        setColor(addToCanvasIdleColor)
         setStroke(dp(2), PANEL_DIVIDER)
-    }
-
-    // Draws the radial blue->black->white tap animation on top of the button, clipped to its
-    // rounded-square shape so the circle never spills past the frame's corners. Kept as a
-    // separate top child (rather than painting into addToCanvasBg itself) so it can be drawn
-    // over the label text too without touching the background drawable's own state.
-    val tapAnimationOverlay = object : View(context) {
-        var progress = 0f // 0f = idle/invisible, 1f = animation complete
-        var centerX = 0f
-        var centerY = 0f
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val clipPath = Path()
-        private var clipPathW = -1
-        private var clipPathH = -1
-
-        override fun onDraw(canvas: Canvas) {
-            if (progress <= 0f) return
-            if (clipPathW != width || clipPathH != height) {
-                clipPathW = width
-                clipPathH = height
-                clipPath.reset()
-                val r = dp(12).toFloat()
-                clipPath.addRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), r, r, Path.Direction.CW)
-            }
-            // First half: radius grows from 0 to full coverage while color eases blue->black.
-            // Second half: radius stays full while color eases black->white, so the whole frame
-            // ends up settled back to white once progress reaches 1f.
-            val maxRadius = kotlin.math.hypot(width.toFloat(), height.toFloat())
-            val growPhase = (progress / 0.5f).coerceIn(0f, 1f)
-            val colorPhase = ((progress - 0.5f) / 0.5f).coerceIn(0f, 1f)
-            val radius = maxRadius * growPhase
-            paint.color = if (progress <= 0.5f) {
-                ArgbEvaluator().evaluate(growPhase, Color.parseColor("#2196F3"), Color.BLACK) as Int
-            } else {
-                ArgbEvaluator().evaluate(colorPhase, Color.BLACK, Color.WHITE) as Int
-            }
-            val saveCount = canvas.save()
-            canvas.clipPath(clipPath)
-            canvas.drawCircle(centerX, centerY, radius, paint)
-            canvas.restoreToCount(saveCount)
-        }
-    }.apply {
-        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        isClickable = false
-        isFocusable = false
     }
 
     val addToCanvasButton = FrameLayout(context).apply {
@@ -886,35 +863,31 @@ fun buildButtonCategoryPanel(
         isClickable = true
         isFocusable = true
         contentDescription = "Add the selected Button style to the canvas"
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dp(16)
+            gravity = Gravity.CENTER_HORIZONTAL
         }
-        setPadding(dp(16), dp(14), dp(16), dp(14))
+        setPadding(dp(20), dp(10), dp(20), dp(10))
         addView(TextView(context).apply {
-            text = "+ Add to Canvas"
+            text = "Insert instance"
             setTextColor(PANEL_PRIMARY_TEXT)
             textSize = 15f
             setTypeface(typeface, Typeface.BOLD)
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
         })
-        addView(tapAnimationOverlay)
     }
 
-    // Captures the exact tap point (view-local coordinates) so the radial animation expands from
-    // where the finger actually touched, rather than always from the button's center. Also drives
-    // a quick press-down scale: shrinks to 96% on ACTION_DOWN, springs back to 100% on
-    // ACTION_UP/CANCEL, independent of whether the click actually fires (e.g. a drag-off cancel
-    // still restores full size). Returns false so the normal click still fires afterward.
-    var lastTapX = 0f
-    var lastTapY = 0f
+    // Simple soft-gray press state: tint the background on ACTION_DOWN, revert on ACTION_UP/
+    // CANCEL. No ripple/radial animation - just a plain color swap, plus a quick press-down scale
+    // (96% -> 100%) for a bit of tactile feedback. Returns false so the normal click still fires.
     addToCanvasButton.setOnTouchListener { view, event ->
         when (event.action) {
             android.view.MotionEvent.ACTION_DOWN -> {
-                lastTapX = event.x
-                lastTapY = event.y
+                addToCanvasBg.setColor(addToCanvasPressedColor)
                 view.animate().scaleX(0.96f).scaleY(0.96f).setDuration(100L).start()
             }
             android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                addToCanvasBg.setColor(addToCanvasIdleColor)
                 view.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
             }
         }
@@ -922,25 +895,7 @@ fun buildButtonCategoryPanel(
     }
 
     addToCanvasButton.setOnClickListener {
-        tapAnimationOverlay.centerX = lastTapX
-        tapAnimationOverlay.centerY = lastTapY
-        // Fires the actual add-to-canvas/close-panel behavior only once the quick (~180ms)
-        // round-trip animation finishes, so the person sees the tap feedback before the Elements
-        // panel goes away.
-        ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 180L
-            addUpdateListener { animator ->
-                tapAnimationOverlay.progress = animator.animatedValue as Float
-                tapAnimationOverlay.invalidate()
-            }
-            addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: android.animation.Animator) {
-                    tapAnimationOverlay.progress = 0f
-                    onAddToCanvasRequested(selectedVariant)
-                }
-            })
-            start()
-        }
+        onAddToCanvasRequested(selectedVariant)
     }
     root.addView(addToCanvasButton)
 
@@ -1931,6 +1886,17 @@ fun buildComponentsContent(
             },
             onExpandRequested = onButtonPanelExpandRequested,
             onAddToCanvasRequested = onAddButtonToCanvasRequested,
+            onBack = {
+                // Same rail/content reset as onClose above, but without dismissing the whole
+                // Elements panel - goes back to the category rail so the person can pick a
+                // different category, rather than closing out entirely.
+                showNormalContent()
+                setActiveCategory(null)
+                railResetAllImmediate()
+                activeRailIndex = null
+                activeCategoryId = null
+                showAllContent()
+            },
         )
         buttonPanelHost.addView(panel.root)
         buttonPanelHost.visibility = View.VISIBLE
