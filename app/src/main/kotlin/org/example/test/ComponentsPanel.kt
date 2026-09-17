@@ -610,11 +610,13 @@ fun buildButtonCategoryPanel(
     }
 
     // Doubles as the rename field, same non-focusable-until-tapped approach as
-    // buildScreensPanelContent()'s title EditText.
+    // buildScreensPanelContent()'s title EditText. Size/spacing matches that same title field
+    // (textSize 18f, marginStart 8dp off the back button) so the two panels' headers read
+    // consistently.
     var committedLabel = initialLabel
     val label = EditText(context).apply {
         setText(initialLabel)
-        textSize = 16f
+        textSize = 18f
         setTypeface(typeface, Typeface.BOLD)
         setTextColor(PANEL_PRIMARY_TEXT)
         setSingleLine(true)
@@ -628,7 +630,9 @@ fun buildButtonCategoryPanel(
         isCursorVisible = false
         importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
         contentDescription = "Button name, tap to rename"
-        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginStart = dp(8)
+        }
     }
 
     fun enterLabelEditMode() {
@@ -673,16 +677,18 @@ fun buildButtonCategoryPanel(
 
     // Frameless back arrow, sits to the left of the label - navigates back to the Elements
     // panel's normal category rail/content without dismissing the whole panel (unlike the (x)
-    // close button below, which closes everything).
+    // close button below, which closes everything). Sized 36dp/20dp icon, matching
+    // buildScreensPanelContent()'s own back/close button exactly (no end margin - spacing to the
+    // label comes from the label's own marginStart instead, same as that panel).
     val backButton = FrameLayout(context).apply {
-        layoutParams = LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(4) }
+        layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
         isClickable = true
         isFocusable = true
         contentDescription = "Back"
         addView(ImageView(context).apply {
             setImageResource(R.drawable.ic_back_return)
             setColorFilter(PANEL_SECONDARY_TEXT)
-            layoutParams = FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER)
+            layoutParams = FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER)
         })
         setOnClickListener { onBack() }
     }
@@ -706,7 +712,7 @@ fun buildButtonCategoryPanel(
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            bottomMargin = dp(20)
+            bottomMargin = dp(14)
         }
         addView(backButton)
         addView(label)
@@ -720,8 +726,9 @@ fun buildButtonCategoryPanel(
     var selectedVariant: ButtonStyle = ButtonStyle.FRAMELESS
 
     // Frameless "Button" - plain text, no background at all by default. ~20% larger than before
-    // (textSize 14->17, padding 10/8->12/10) per the "slightly bigger" sizing pass. Gains a blue
-    // border (see updateSelectionVisuals()) only while selected.
+    // (textSize 14->17, padding 10/8->12/10) per the earlier "slightly bigger" sizing pass, plus
+    // a further ~17% horizontal-only bump (12->14dp) so the preview itself reads a bit wider
+    // without maxing out the row.
     val buttonNoFrame = TextView(context).apply {
         text = "Button"
         setTextColor(PANEL_PRIMARY_TEXT)
@@ -730,7 +737,7 @@ fun buildButtonCategoryPanel(
         isClickable = true
         isFocusable = true
         contentDescription = "Button, no frame - tap to select or expand panel"
-        setPadding(dp(12), dp(10), dp(12), dp(10))
+        setPadding(dp(14), dp(10), dp(14), dp(10))
     }
     // Applied to buttonNoFrame only while selected (see updateSelectionVisuals()); background is
     // null the rest of the time so it stays truly frameless when deselected.
@@ -745,7 +752,7 @@ fun buildButtonCategoryPanel(
     // with white text so it stays readable, per the "black default" request. Border kept as the
     // rounded-square frame, black by default and switching to blue while selected (see
     // updateSelectionVisuals()). ~20% larger (cornerRadius 10->12, padding 16/10->19/12, textSize
-    // 14->17).
+    // 14->17), plus a further ~16% horizontal-only bump (19->22dp) so it reads a bit wider.
     val framedButtonBg = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
         cornerRadius = dp(12).toFloat()
@@ -757,7 +764,7 @@ fun buildButtonCategoryPanel(
         isClickable = true
         isFocusable = true
         contentDescription = "Button, with frame - tap to select or expand panel"
-        setPadding(dp(19), dp(12), dp(19), dp(12))
+        setPadding(dp(22), dp(12), dp(22), dp(12))
         addView(TextView(context).apply {
             text = "Button"
             setTextColor(Color.WHITE)
@@ -844,18 +851,16 @@ fun buildButtonCategoryPanel(
 
     root.addView(canvas)
 
-    // Compact, rounded-rectangle action button that actually places the currently-selected
+    // Full-width, rounded-rectangle action button that actually places the currently-selected
     // preview's style onto the real sketch canvas (the two previews above stay presentation-only/
-    // expand the panel, same as before). Sized to its label rather than stretching the full panel
-    // width, so it no longer eats the whole row below the canvas and leaves room for further
-    // content there.
-    val addToCanvasIdleColor = Color.WHITE
-    val addToCanvasPressedColor = Color.parseColor("#E9EAEC") // soft-gray press feedback
+    // expand the panel, same as before). Stretched to fill the row below the canvas rather than
+    // sizing to its label, and filled with Material blue as the primary action for this panel.
+    val addToCanvasIdleColor = Color.parseColor("#2196F3") // Material blue 500
+    val addToCanvasPressedColor = Color.parseColor("#1976D2") // Material blue 700 - darkens on press
     val addToCanvasBg = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
         cornerRadius = dp(12).toFloat()
         setColor(addToCanvasIdleColor)
-        setStroke(dp(2), PANEL_DIVIDER)
     }
 
     val addToCanvasButton = FrameLayout(context).apply {
@@ -863,23 +868,23 @@ fun buildButtonCategoryPanel(
         isClickable = true
         isFocusable = true
         contentDescription = "Add the selected Button style to the canvas"
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dp(16)
-            gravity = Gravity.CENTER_HORIZONTAL
         }
-        setPadding(dp(20), dp(10), dp(20), dp(10))
+        setPadding(dp(20), dp(12), dp(20), dp(12))
         addView(TextView(context).apply {
             text = "Insert instance"
-            setTextColor(PANEL_PRIMARY_TEXT)
+            setTextColor(Color.WHITE)
             textSize = 15f
             setTypeface(typeface, Typeface.BOLD)
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
         })
     }
 
-    // Simple soft-gray press state: tint the background on ACTION_DOWN, revert on ACTION_UP/
-    // CANCEL. No ripple/radial animation - just a plain color swap, plus a quick press-down scale
-    // (96% -> 100%) for a bit of tactile feedback. Returns false so the normal click still fires.
+    // Visual feedback: darkens to a deeper Material blue on press (standard Material "state
+    // darken" for a filled/contained button, reads clearly against the blue fill unlike the old
+    // soft-gray tint), plus the same quick press-down scale (96% -> 100%) for tactile feel.
+    // Returns false so the normal click still fires.
     addToCanvasButton.setOnTouchListener { view, event ->
         when (event.action) {
             android.view.MotionEvent.ACTION_DOWN -> {
