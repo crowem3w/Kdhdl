@@ -989,19 +989,47 @@ class SketchCanvasView @JvmOverloads constructor(
     private fun drawPart(canvas: Canvas, part: SketchPart) {
         val rect = RectF(part.x, part.y, part.x + part.w, part.y + part.h)
         val radius = part.kind.cornerRadius * density
-        if (part.kind.fillColor != Color.TRANSPARENT) {
-            fillPaint.color = part.kind.fillColor
-            canvas.drawRoundRect(rect, radius, radius, fillPaint)
-        }
-        if (part.kind.hasBorder) {
-            canvas.drawRoundRect(rect, radius, radius, strokePaint)
+        // Buttons placed via the Buttons panel's "+ Add to Canvas" button (see
+        // buildButtonCategoryPanel() in ComponentsPanel.kt) carry a buttonStyle recording which
+        // of the two panel previews was selected, and are drawn to match that preview instead of
+        // PartKind.BUTTON's generic purple-pill defaults. Buttons placed any other way (starter
+        // templates, etc.) have buttonStyle == null and keep falling through to the generic path.
+        val buttonStyle = part.buttonStyle.takeIf { part.kind == PartKind.BUTTON }
+        var textColorOverride: Int? = null
+        when (buttonStyle) {
+            ButtonStyle.FRAMELESS -> {
+                // No fill, no border - just the label, matching the frameless preview.
+            }
+            ButtonStyle.FRAMED -> {
+                // Solid black fill/border, white label, matching the framed preview's default
+                // black styling.
+                fillPaint.color = Color.BLACK
+                canvas.drawRoundRect(rect, radius, radius, fillPaint)
+                val previousStrokeColor = strokePaint.color
+                strokePaint.color = Color.BLACK
+                canvas.drawRoundRect(rect, radius, radius, strokePaint)
+                strokePaint.color = previousStrokeColor
+                textColorOverride = Color.WHITE
+            }
+            null -> {
+                if (part.kind.fillColor != Color.TRANSPARENT) {
+                    fillPaint.color = part.kind.fillColor
+                    canvas.drawRoundRect(rect, radius, radius, fillPaint)
+                }
+                if (part.kind.hasBorder) {
+                    canvas.drawRoundRect(rect, radius, radius, strokePaint)
+                }
+            }
         }
         val label = part.label.ifBlank { part.kind.displayLabel }
         if (part.kind == PartKind.TEXT) {
             drawWrappedText(canvas, part, label)
         } else {
+            val previousTextColor = textPaint.color
+            if (textColorOverride != null) textPaint.color = textColorOverride
             textPaint.textSize = part.fontSize.coerceAtLeast(minFontSize)
             canvas.drawText(label, rect.centerX(), rect.centerY() + textPaint.textSize / 3f, textPaint)
+            textPaint.color = previousTextColor
         }
     }
 

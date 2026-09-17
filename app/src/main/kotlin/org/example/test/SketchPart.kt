@@ -1,5 +1,11 @@
 package org.example.test
 
+// Which of the two Buttons-panel previews (see buildButtonCategoryPanel() in
+// ComponentsPanel.kt) a placed PartKind.BUTTON part should be drawn as. Null (the default) means
+// "not placed via that panel" - such parts keep PartKind.BUTTON's own generic fill/border/text
+// (see SketchCanvasView.drawPart()).
+enum class ButtonStyle { FRAMELESS, FRAMED }
+
 data class SketchPart(
     val id: Long,
     val kind: PartKind,
@@ -22,4 +28,5 @@ data class SketchPart(
     
     
     var name: String = "",
+    var buttonStyle: ButtonStyle? = null,
 )

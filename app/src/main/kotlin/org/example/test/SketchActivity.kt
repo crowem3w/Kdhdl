@@ -622,6 +622,17 @@ class SketchActivity : AppCompatActivity() {
                     onButtonPanelExpandRequested = {
                         elementsPanelBehavior.state = BottomSheetBehavior.STATE_EXPANDED
                     },
+                    // The Buttons panel's "+ Add to Canvas" button - places a real Button part,
+                    // styled to match whichever preview (frameless/framed) was selected (see
+                    // ButtonStyle in SketchPart.kt and buildButtonCategoryPanel()'s
+                    // selectedVariant), at the active screen's canvas center, then closes the
+                    // Elements panel - same pattern as the Screens panel's onPick.
+                    onAddButtonToCanvasRequested = { style ->
+                        addPart(PartKind.BUTTON, canvas.width / 2f, canvas.pageHeight / 2f, label = "Button")
+                            .buttonStyle = style
+                        canvas.invalidate()
+                        closeElementsPanel()
+                    },
                 )
             )
             componentsContentBuilt = true

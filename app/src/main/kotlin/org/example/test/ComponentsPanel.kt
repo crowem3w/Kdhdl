@@ -584,6 +584,7 @@ fun buildButtonCategoryPanel(
     onClose: () -> Unit,
     onExpandRequested: () -> Unit,
     onLabelRenamed: (String) -> Unit = {},
+    onAddToCanvasRequested: (ButtonStyle) -> Unit = {},
 ): ButtonCategoryPanelViews {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
@@ -687,50 +688,96 @@ fun buildButtonCategoryPanel(
         addView(closeButton)
     })
 
-    // Frameless "Button" - plain text, no background at all.
+    // Tracks which preview is selected (shadow-highlighted) - drives both the shadow visuals
+    // below and which style the "Add to Canvas" button (see below) places on the real canvas.
+    // Frameless starts selected by default. ButtonStyle is shared with SketchPart (see
+    // SketchPart.kt) so the selection maps directly onto the placed part's own styling.
+    var selectedVariant: ButtonStyle = ButtonStyle.FRAMELESS
+
+    // Frameless "Button" - plain text, no background at all. ~20% larger than before (textSize
+    // 14->17, padding 10/8->12/10) per the "slightly bigger" sizing pass.
     val buttonNoFrame = TextView(context).apply {
         text = "Button"
         setTextColor(PANEL_PRIMARY_TEXT)
-        textSize = 14f
+        textSize = 17f
         setTypeface(typeface, Typeface.BOLD)
         isClickable = true
         isFocusable = true
-        contentDescription = "Button, no frame - tap to expand panel"
-        setPadding(dp(10), dp(8), dp(10), dp(8))
-        setOnClickListener { onExpandRequested() }
+        contentDescription = "Button, no frame - tap to select or expand panel"
+        setPadding(dp(12), dp(10), dp(12), dp(10))
     }
 
-    // "Button" with a rounded-square frame (soft-gray border, transparent fill).
+    // "Button" with a rounded-square frame - now a solid black fill (previously transparent)
+    // with white text so it stays readable, per the "black default" request. Border kept as the
+    // rounded-square frame. ~20% larger (cornerRadius 10->12, padding 16/10->19/12, textSize
+    // 14->17).
     val framedButtonBg = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
-        cornerRadius = dp(10).toFloat()
-        setColor(Color.TRANSPARENT)
-        setStroke(dp(2), PANEL_DIVIDER)
+        cornerRadius = dp(12).toFloat()
+        setColor(Color.BLACK)
+        setStroke(dp(2), Color.BLACK)
     }
     val buttonWithFrame = FrameLayout(context).apply {
         background = framedButtonBg
         isClickable = true
         isFocusable = true
-        contentDescription = "Button, with frame - tap to expand panel"
-        setPadding(dp(16), dp(10), dp(16), dp(10))
+        contentDescription = "Button, with frame - tap to select or expand panel"
+        setPadding(dp(19), dp(12), dp(19), dp(12))
         addView(TextView(context).apply {
             text = "Button"
-            setTextColor(PANEL_PRIMARY_TEXT)
-            textSize = 14f
+            setTextColor(Color.WHITE)
+            textSize = 17f
             setTypeface(typeface, Typeface.BOLD)
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
         })
-        setOnClickListener { onExpandRequested() }
     }
 
-    // The two contents, laid out side by side inside the Canvas.
+    // Applies the shadow to whichever preview is selected and clears it from the other one.
+    // buttonWithFrame has a solid fill, so a View elevation shadow (drawn from its rounded-rect
+    // outline) reads correctly; buttonNoFrame has no background, so its "shadow" is instead a
+    // Paint-level shadow behind the glyphs themselves (setShadowLayer), since an elevation
+    // shadow there would just draw a plain rectangle behind the text rather than hugging it.
+    fun updateSelectionVisuals() {
+        val framelessSelected = selectedVariant == ButtonStyle.FRAMELESS
+        buttonNoFrame.setShadowLayer(
+            if (framelessSelected) dp(6).toFloat() else 0f,
+            0f,
+            if (framelessSelected) dp(2).toFloat() else 0f,
+            if (framelessSelected) Color.parseColor("#66000000") else Color.TRANSPARENT,
+        )
+        buttonWithFrame.elevation = if (!framelessSelected) dp(6).toFloat() else 0f
+    }
+    updateSelectionVisuals()
+
+    buttonNoFrame.setOnClickListener {
+        selectedVariant = ButtonStyle.FRAMELESS
+        updateSelectionVisuals()
+        onExpandRequested()
+    }
+    buttonWithFrame.setOnClickListener {
+        selectedVariant = ButtonStyle.FRAMED
+        updateSelectionVisuals()
+        onExpandRequested()
+    }
+
+    // The two contents, laid out side by side on a light-gray background inside the Canvas -
+    // distinguishes the row from the white Canvas surface behind it. clipChildren/clipToPadding
+    // false so buttonWithFrame's elevation shadow isn't cut off when selected.
     val canvasContentRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(12).toFloat()
+            setColor(PANEL_BG)
+        }
+        setPadding(dp(16), dp(14), dp(16), dp(14))
+        clipChildren = false
+        clipToPadding = false
         addView(buttonNoFrame)
         addView(buttonWithFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            marginStart = dp(20)
+            marginStart = dp(24)
         })
     }
 
@@ -760,6 +807,35 @@ fun buildButtonCategoryPanel(
 
     root.addView(canvas)
 
+    // Rounded-square-framed action button that actually places the currently-selected preview's
+    // style onto the real sketch canvas (the two previews above stay presentation-only/expand
+    // the panel, same as before).
+    val addToCanvasBg = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(12).toFloat()
+        setColor(Color.WHITE)
+        setStroke(dp(2), PANEL_DIVIDER)
+    }
+    val addToCanvasButton = FrameLayout(context).apply {
+        background = addToCanvasBg
+        isClickable = true
+        isFocusable = true
+        contentDescription = "Add the selected Button style to the canvas"
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(16)
+        }
+        setPadding(dp(16), dp(14), dp(16), dp(14))
+        addView(TextView(context).apply {
+            text = "+ Add to Canvas"
+            setTextColor(PANEL_PRIMARY_TEXT)
+            textSize = 15f
+            setTypeface(typeface, Typeface.BOLD)
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+        })
+        setOnClickListener { onAddToCanvasRequested(selectedVariant) }
+    }
+    root.addView(addToCanvasButton)
+
     return ButtonCategoryPanelViews(root, label, committedLabel)
 }
 
@@ -767,6 +843,7 @@ fun buildComponentsContent(
     context: Context,
     onClose: () -> Unit = {},
     onButtonPanelExpandRequested: () -> Unit = {},
+    onAddButtonToCanvasRequested: (ButtonStyle) -> Unit = {},
 ): View {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
@@ -1745,6 +1822,7 @@ fun buildComponentsContent(
                 onClose()
             },
             onExpandRequested = onButtonPanelExpandRequested,
+            onAddToCanvasRequested = onAddButtonToCanvasRequested,
         )
         buttonPanelHost.addView(panel.root)
         buttonPanelHost.visibility = View.VISIBLE
