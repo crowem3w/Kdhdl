@@ -782,18 +782,14 @@ fun buildButtonCategoryPanel(
         onExpandRequested()
     }
 
-    // The two contents, laid out side by side on a light-gray background inside the Canvas -
-    // distinguishes the row from the white Canvas surface behind it. clipChildren/clipToPadding
-    // false so buttonWithFrame's elevation shadow isn't cut off when selected.
+    // The two contents, laid out side by side directly on the Canvas surface (the previous
+    // light-gray content-row background has been removed - see canvasBg below for the Canvas's
+    // own color instead). clipChildren/clipToPadding false so buttonWithFrame's elevation shadow
+    // isn't cut off when selected.
     val canvasContentRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
-        background = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(12).toFloat()
-            setColor(PANEL_BG)
-        }
         setPadding(dp(16), dp(14), dp(16), dp(14))
         clipChildren = false
         clipToPadding = false
@@ -803,11 +799,12 @@ fun buildButtonCategoryPanel(
         })
     }
 
-    // The Canvas itself: a full-width, soft-gray-framed, light-mode surface - height stays
-    // content-sized to fit canvasContentRow (see below), width bleeds edge-to-edge.
+    // The Canvas itself: a full-width, soft-gray-framed surface - height stays content-sized to
+    // fit canvasContentRow (see below), width bleeds edge-to-edge. Fill color updated to #E6E7E9
+    // (previously white, with the gray content-row drawn on top of it).
     val canvasBg = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
-        setColor(Color.WHITE)
+        setColor(Color.parseColor("#E6E7E9"))
         setStroke(dp(1), PANEL_DIVIDER)
     }
     val canvas = FrameLayout(context).apply {
@@ -904,14 +901,22 @@ fun buildButtonCategoryPanel(
     }
 
     // Captures the exact tap point (view-local coordinates) so the radial animation expands from
-    // where the finger actually touched, rather than always from the button's center. Returns
-    // false so the normal click still fires afterward.
+    // where the finger actually touched, rather than always from the button's center. Also drives
+    // a quick press-down scale: shrinks to 96% on ACTION_DOWN, springs back to 100% on
+    // ACTION_UP/CANCEL, independent of whether the click actually fires (e.g. a drag-off cancel
+    // still restores full size). Returns false so the normal click still fires afterward.
     var lastTapX = 0f
     var lastTapY = 0f
-    addToCanvasButton.setOnTouchListener { _, event ->
-        if (event.action == android.view.MotionEvent.ACTION_DOWN) {
-            lastTapX = event.x
-            lastTapY = event.y
+    addToCanvasButton.setOnTouchListener { view, event ->
+        when (event.action) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                lastTapX = event.x
+                lastTapY = event.y
+                view.animate().scaleX(0.96f).scaleY(0.96f).setDuration(100L).start()
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                view.animate().scaleX(1f).scaleY(1f).setDuration(120L).start()
+            }
         }
         false
     }
