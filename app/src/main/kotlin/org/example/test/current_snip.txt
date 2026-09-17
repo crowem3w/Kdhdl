@@ -1,0 +1,37 @@
+    private lateinit var bottomPanel: LinearLayout
+    private lateinit var bottomSheetBehavior: BottomSheetBehavior<LinearLayout>
+    private lateinit var mainToolsRow: LinearLayout
+    private lateinit var panelContentContainer: FrameLayout
+    private lateinit var defaultToolsContentScroll: NestedScrollView
+    private lateinit var defaultToolsContent: LinearLayout
+    private lateinit var componentsContentContainer: FrameLayout
+    private var componentsContentBuilt = false
+    private var showingComponents = false
+
+
+
+
+
+    private var defaultPanelHeight = 0
+
+    // bottomPanel's own XML paddingTop (18dp), captured once, plus whatever the status bar
+    // inset turns out to be. When the panel is STATE_EXPANDED it grows to match_parent height,
+    // which puts its top edge (the Select/Shapes/Text/Upload/Elements row) right at the physical
+    // top of the screen, behind the status bar - so on top of the normal 18dp we add the status
+    // bar's own height while expanded, and animate that extra amount in/out as the sheet slides
+    // so the row is never drawn underneath the status bar.
+    private var bottomPanelBasePaddingTop = 0
+    private var statusBarInsetTop = 0
+
+
+
+
+    private val panelBackPressedCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            if (selectionActionsPanel.visibility == View.VISIBLE) {
+                dismissSelectionActionsPanel(clearSelection = true)
+            } else {
+                closeSketchPanel()
+            }
+        }
+    }

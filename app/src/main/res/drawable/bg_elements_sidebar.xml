@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Background for the Elements panel's category sidebar (the rail: All, Structure, Layout,
+  Geometry, ...). Rounded only on the top-right corner - the corner that sits against the
+  sidebar/content divider - so the rail reads as a soft rounded-square card there, while every
+  other edge (top-left, both bottom corners) stays flush/square against the panel edges.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FFFFFF" />
+    <corners
+        android:topLeftRadius="0dp"
+        android:topRightRadius="16dp"
+        android:bottomLeftRadius="0dp"
+        android:bottomRightRadius="0dp" />
+</shape>
