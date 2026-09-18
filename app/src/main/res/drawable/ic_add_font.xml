@@ -3,7 +3,7 @@
      stroke style as ic_add.xml) pinned to the bottom-right so it overlaps the glyph's stem -
      matching the reference icon. Tints as one flat icon since LayerDrawable applies a single
      color filter across every layer. -->
-<layer-list xmlns:android="http://schemas.android.com/res/android">
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item
         android:width="16dp"
         android:height="16dp"
