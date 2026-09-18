@@ -1,16 +1,18 @@
 package org.example.test
 
 import android.content.Context
+import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -24,9 +26,8 @@ import android.widget.TextView
 private val MODE_SELECTED_BLUE = Color.parseColor("#3D7EFF")
 private val MODE_SELECTED_BLUE_PRESSED = Color.parseColor("#2E68DB")
 
-// Unselected segment stays transparent, letting the shared white frame show through directly -
-// only two frame colors exist on this toggle now (white frame, material-blue selected segment),
-// no separate unselected fill.
+// Unselected segment stays transparent, letting the shared neomorphic frame surface show through
+// directly - it has no fill of its own, only the material-blue selected segment does.
 private val MODE_UNSELECTED_FRAME = Color.TRANSPARENT
 // A faint tap-feedback tint for the unselected segment (not a "frame" color of its own - just a
 // momentary press cue), since it has no fill to darken the way the selected segment's blue does.
@@ -34,6 +35,18 @@ private val MODE_UNSELECTED_FRAME_PRESSED = Color.parseColor("#14000000")
 
 private val MODE_TEXT_SELECTED = Color.WHITE
 private val MODE_TEXT_UNSELECTED = Color.parseColor("#6B7280")
+
+// --- Neomorphism (soft UI) for the toggle frame only -----------------------------------------
+// The frame's fill matches the panel's own background (bg_bottom_panel.xml's #F3F4F6) rather than
+// a separate white card, so it reads as carved/pressed out of the same surface rather than an
+// object floating on top of it - that shared color is what makes the light/dark shadow pair below
+// look like relief instead of a plain drop shadow.
+private val NEO_SURFACE = Color.parseColor("#F3F4F6")
+// Light "highlight" shadow - stands in for a light source from the top-left.
+private val NEO_LIGHT = Color.WHITE
+// Dark "shade" shadow - a muted slate a few steps darker than NEO_SURFACE, standard companion tone
+// for a light-gray soft-UI surface (paired with NEO_LIGHT above).
+private val NEO_DARK = Color.parseColor("#A9AFBC")
 
 /** Handle back to a built Design/Prototype/customButton row, for syncing and positioning it. */
 data class ButtonObjectPanelViews(
@@ -49,22 +62,121 @@ data class ButtonObjectPanelViews(
 )
 
 /**
+ * Draws the toggle frame's raised neomorphic shadow pair: a light blurred rounded-square nudged
+ * up-left and a dark one nudged down-right, both behind and straddling the frame's edge (this view
+ * sits underneath segmentsRow at the same bounds - see buildButtonObjectPanelContent()). Together,
+ * against the shared NEO_SURFACE fill, they read as the frame gently popping out of the panel
+ * rather than a separate card with a normal drop shadow.
+ *
+ * BlurMaskFilter (like Paint.setShadowLayer used elsewhere in this file) only renders on a
+ * software-rendered layer, hence setLayerType(LAYER_TYPE_SOFTWARE) below.
+ */
+private class NeomorphicRaisedShadowView(
+    context: Context,
+    private val cornerRadiusPx: Float,
+    private val shadowRadiusPx: Float,
+    private val offsetPx: Float,
+) : View(context) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val rect = RectF()
+
+    init {
+        setLayerType(LAYER_TYPE_SOFTWARE, null)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val w = width.toFloat()
+        val h = height.toFloat()
+        if (w <= 0f || h <= 0f) return
+
+        // Dark shade, nudged down-right: draw the rounded-square offset by +offset,+offset so its
+        // blurred edge spills out along the frame's bottom-right side.
+        paint.color = NEO_DARK
+        paint.alpha = 140
+        paint.maskFilter = BlurMaskFilter(shadowRadiusPx, BlurMaskFilter.Blur.NORMAL)
+        rect.set(offsetPx, offsetPx, w + offsetPx, h + offsetPx)
+        canvas.drawRoundRect(rect, cornerRadiusPx, cornerRadiusPx, paint)
+
+        // Light highlight, nudged up-left: same shape mirrored to the opposite corner, so the two
+        // together read as one light source from the top-left.
+        paint.color = NEO_LIGHT
+        paint.alpha = 200
+        rect.set(-offsetPx, -offsetPx, w - offsetPx, h - offsetPx)
+        canvas.drawRoundRect(rect, cornerRadiusPx, cornerRadiusPx, paint)
+    }
+}
+
+/**
+ * Draws a subtle inset/pressed shadow pair inside a single segment - shown only while that segment
+ * is the selected (blue) one, see applyState()/Segment.insetShadow below. Uses the mirror-image of
+ * the trick above: each phantom shape is nudged AWAY from the corner it's meant to darken/lighten,
+ * then the canvas is clipped to this view's own rounded-rect path (matching the segment's own
+ * corner radius) so only the sliver of blur that falls inside near that corner survives - giving a
+ * soft "recessed" edge instead of a shadow spilling outward.
+ */
+private class NeomorphicInsetShadowView(
+    context: Context,
+    private val cornerRadiusPx: Float,
+    private val shadowRadiusPx: Float,
+    private val offsetPx: Float,
+) : View(context) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val rect = RectF()
+    private val clipPath = Path()
+
+    init {
+        setLayerType(LAYER_TYPE_SOFTWARE, null)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val w = width.toFloat()
+        val h = height.toFloat()
+        if (w <= 0f || h <= 0f) return
+
+        canvas.save()
+        clipPath.reset()
+        clipPath.addRoundRect(RectF(0f, 0f, w, h), cornerRadiusPx, cornerRadiusPx, Path.Direction.CW)
+        canvas.clipPath(clipPath)
+
+        // Dark edge at the top-left: phantom shape nudged down-right leaves the top-left sliver of
+        // this view's own bounds outside it, so only that sliver's blur shows once clipped.
+        paint.color = NEO_DARK
+        paint.alpha = 90
+        paint.maskFilter = BlurMaskFilter(shadowRadiusPx, BlurMaskFilter.Blur.NORMAL)
+        rect.set(offsetPx, offsetPx, w + offsetPx, h + offsetPx)
+        canvas.drawRoundRect(rect, cornerRadiusPx, cornerRadiusPx, paint)
+
+        // Light edge at the bottom-right: mirrored the other way, kept faint ("subtle") so it
+        // doesn't wash out the segment's white label text.
+        paint.color = NEO_LIGHT
+        paint.alpha = 70
+        rect.set(-offsetPx, -offsetPx, w - offsetPx, h - offsetPx)
+        canvas.drawRoundRect(rect, cornerRadiusPx, cornerRadiusPx, paint)
+
+        canvas.restore()
+    }
+}
+
+/**
  * Builds the top row of the Button object panel (buttonObjectContentContainer - see
  * setupButtonObjectPanel()/openButtonObjectPanel() in SketchActivity): the Design/Prototype
  * segmented toggle plus customButton, a frameless icon button to its right. This row is the only
  * thing this panel shows for now; more controls are expected to be added below it later.
  *
- * The toggle's two segments share ONE outer frame: a single white, rounded-square container that
- * carries the drop shadow (via elevation against its own rounded-rect background - same technique
- * as the Components panel's own mode toggle, see modeSharedFrameBg/modeToggleRow in
- * ComponentsPanel.kt). Inside that shared frame, each segment is its own equally-wide (50/50) tap
- * target with no padding/gap against the frame or against each other: the unselected segment is
- * transparent (the white frame shows straight through it), while the selected segment fills its
- * entire half solid Material blue, its outer corners matched to the frame's own 12dp rounding
- * (so the blue reads as a continuous rounded shape with the frame) and its inner corners - at the
- * seam with the other segment - left square, so the two halves butt together with no visible gap
- * or seam. Just two frame colors exist here: the shared white frame, and the selected segment's
- * solid blue.
+ * The toggle's two segments share ONE outer frame: a rounded-square container, styled as
+ * neomorphism (soft UI) rather than a white card with a normal drop shadow - its fill matches the
+ * surrounding panel background, and a light/dark blurred shadow pair painted behind it
+ * (toggleFrame/neoShadow/segmentsRow below, see NeomorphicRaisedShadowView) makes it read as
+ * raised straight out of that surface. Inside that shared frame, each segment is its own
+ * equally-wide (50/50) tap target with no padding/gap against the frame: the unselected segment is
+ * transparent (the frame's surface shows straight through it), while the selected segment fills
+ * its entire half solid Material blue plus its own subtle pressed-in shadow (see
+ * NeomorphicInsetShadowView/Segment.insetShadow), as a full rounded-square shape - all four
+ * corners (both the outer pair against the frame's own edge, and the inner pair at the seam with
+ * the other segment) share the frame's own 12dp radius, so the blue reads as one consistent
+ * rounded shape rather than only being rounded on one side.
  *
  * customButton sits OUTSIDE that shared frame, to its right in the same row, and is frameless -
  * no background/frame of its own (same convention as e.g. backButton/closeButton in
@@ -89,7 +201,16 @@ fun buildButtonObjectPanelContent(
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
 
-    class Segment(val frame: FrameLayout, val label: TextView, val bg: GradientDrawable, val mode: ButtonObjectMode)
+    class Segment(
+        val frame: FrameLayout,
+        val label: TextView,
+        val bg: GradientDrawable,
+        // Only shown while this segment is selected - see applyState() below - to give the
+        // selected (blue) segment a subtle pressed-in look, distinct from the toggle frame's own
+        // raised look (see NeomorphicRaisedShadowView/segmentsRow).
+        val insetShadow: NeomorphicInsetShadowView,
+        val mode: ButtonObjectMode,
+    )
 
     val segments = mutableListOf<Segment>()
     var activeMode = initialMode
@@ -113,6 +234,9 @@ fun buildButtonObjectPanelContent(
         )
         seg.label.setTextColor(if (selected) MODE_TEXT_SELECTED else MODE_TEXT_UNSELECTED)
         seg.label.setTypeface(null, if (selected) Typeface.BOLD else Typeface.NORMAL)
+        // Pressed-in neomorphic edge only makes sense on the selected (filled-blue) segment - the
+        // unselected one is transparent, so there's nothing for it to read as recessed into.
+        seg.insetShadow.visibility = if (selected) View.VISIBLE else View.GONE
     }
 
     fun setActive(mode: ButtonObjectMode, notify: Boolean) {
@@ -127,11 +251,11 @@ fun buildButtonObjectPanelContent(
     // segment's blue fill and the frame's own edge.
     val frameCornerRadiusPx = dp(12).toFloat()
 
-    // isLeft picks which pair of corners is "outer" (against the shared frame's rounded edge) vs
-    // "inner" (at the flat center seam against the other segment): left segment is rounded on its
-    // left corners/square on its right, right segment is the mirror image - so together the two
-    // segments' outer edges continue the frame's own rounding with no gap anywhere.
-    fun buildSegment(text: String, mode: ButtonObjectMode, isLeft: Boolean): Segment {
+    // Segment corners are uniformly rounded on all four corners to frameCornerRadiusPx, so a
+    // selected segment reads as a full rounded-square shape - both the outer pair (against the
+    // shared frame's own edge) and the inner pair (at the seam with the other segment) match the
+    // frame's 12dp radius, rather than only being rounded on the outer side.
+    fun buildSegment(text: String, mode: ButtonObjectMode): Segment {
         val label = TextView(context).apply {
             this.text = text
             textSize = 14f
@@ -139,22 +263,19 @@ fun buildButtonObjectPanelContent(
         }
         val bg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadii = if (isLeft) {
-                floatArrayOf(
-                    frameCornerRadiusPx, frameCornerRadiusPx, // top-left
-                    0f, 0f,                                   // top-right
-                    0f, 0f,                                   // bottom-right
-                    frameCornerRadiusPx, frameCornerRadiusPx, // bottom-left
-                )
-            } else {
-                floatArrayOf(
-                    0f, 0f,                                   // top-left
-                    frameCornerRadiusPx, frameCornerRadiusPx, // top-right
-                    frameCornerRadiusPx, frameCornerRadiusPx, // bottom-right
-                    0f, 0f,                                   // bottom-left
-                )
-            }
+            cornerRadius = frameCornerRadiusPx
         }
+        // Inset shadow overlay for this segment's own pressed-in look while selected (see
+        // NeomorphicInsetShadowView) - same corner radius as the segment's own fill so its clip
+        // matches exactly, smaller blur/offset than the outer frame's since it lives inside a
+        // single 40dp-tall segment rather than spanning the whole toggle.
+        val insetShadowView = NeomorphicInsetShadowView(
+            context = context,
+            cornerRadiusPx = frameCornerRadiusPx,
+            shadowRadiusPx = dp(4).toFloat(),
+            offsetPx = dp(2).toFloat(),
+        ).apply { visibility = View.GONE }
+
         val frame = FrameLayout(context).apply {
             background = bg
             isClickable = true
@@ -163,12 +284,14 @@ fun buildButtonObjectPanelContent(
             // (no padding/gap - see toggleFrame below) so the selected segment's blue fills its
             // entire half edge-to-edge.
             layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f)
+            // Shadow first (drawn behind), label on top so it stays fully legible.
+            addView(insetShadowView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             addView(
                 label,
                 FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
             )
         }
-        val seg = Segment(frame, label, bg, mode)
+        val seg = Segment(frame, label, bg, insetShadowView, mode)
         segments.add(seg)
 
         // On-tap visual feedback: a quick press-down scale (same 96% -> 100% used by the panel's
@@ -193,34 +316,48 @@ fun buildButtonObjectPanelContent(
         return seg
     }
 
-    val designSegment = buildSegment("Design", ButtonObjectMode.DESIGN, isLeft = true)
-    val prototypeSegment = buildSegment("Prototype", ButtonObjectMode.PROTOTYPE, isLeft = false)
+    val designSegment = buildSegment("Design", ButtonObjectMode.DESIGN)
+    val prototypeSegment = buildSegment("Prototype", ButtonObjectMode.PROTOTYPE)
 
-    // The shared toggle frame: rounded-square, white, drop-shadowed via elevation against its own
-    // rounded-rect outline (ViewOutlineProvider.BACKGROUND gives the shadow a shape to cast
-    // against, so no separate manual shadow-layer view is needed).
+    // The shared toggle frame - now neomorphic (soft UI) rather than a white card with a normal
+    // elevation shadow: its fill (NEO_SURFACE) matches the panel background it sits on, and depth
+    // comes entirely from the light/dark shadow pair painted by neoShadow behind it (see
+    // NeomorphicRaisedShadowView above) so it reads as raised straight out of that surface.
     val sharedFrameBg = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
         cornerRadius = frameCornerRadiusPx
-        setColor(Color.WHITE)
+        setColor(NEO_SURFACE)
     }
-    val toggleFrame = LinearLayout(context).apply {
+    // segmentsRow: unchanged from before other than the background swap above - still the plain
+    // horizontal row of the two 50/50 segments, edge-to-edge with no padding/gap between them.
+    val segmentsRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
-        // 0-width + weight=1f - claims whatever width the row has left after customButton's fixed
-        // width and the gap before it, rather than the row's full width, now that it shares the
-        // row with that button.
-        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         background = sharedFrameBg
-        outlineProvider = ViewOutlineProvider.BACKGROUND
-        elevation = dp(4).toFloat()
-        // No padding and no spacer between the two segments (contrast with the old inset+gap
-        // look): each segment now runs edge-to-edge against the frame's outer border and flush
-        // against the other segment's inner edge, so the selected segment's blue fills its whole
-        // half with no white gap anywhere.
         clipToPadding = false
         clipChildren = false
         addView(designSegment.frame)
         addView(prototypeSegment.frame)
+    }
+    // neoShadow: sized to always match segmentsRow exactly (same MATCH_PARENT bounds within
+    // toggleFrame below), drawn first so it sits behind it. Its own view bounds straddle the
+    // frame's edge with room to spare (clipChildren=false on toggleFrame, below) so the blur isn't
+    // cut off right at the edge.
+    val neoShadow = NeomorphicRaisedShadowView(
+        context = context,
+        cornerRadiusPx = frameCornerRadiusPx,
+        shadowRadiusPx = dp(8).toFloat(),
+        offsetPx = dp(4).toFloat(),
+    )
+    val toggleFrame = FrameLayout(context).apply {
+        // 0-width + weight=1f - claims whatever width the row has left after customButton's fixed
+        // width and the gap before it, rather than the row's full width, now that it shares the
+        // row with that button.
+        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        clipToPadding = false
+        clipChildren = false
+        addView(neoShadow, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        addView(segmentsRow)
     }
 
     // customButton: frameless (no background of its own - see backButton/closeButton in
