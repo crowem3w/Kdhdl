@@ -179,6 +179,20 @@ class SketchActivity : AppCompatActivity() {
     
     
     
+    // Text panel: same two-tier peek/expanded bottom sheet as screensPanel (see setupTextPanel/
+    // openTextPanel/closeTextPanel below). textContentContainer holds the "Add text" action row
+    // built by buildTextPanelContent() (see TextPanel.kt) on first open - more content is
+    // expected to be added below it later.
+    private lateinit var textPanel: FrameLayout
+    private lateinit var textPanelBehavior: BottomSheetBehavior<FrameLayout>
+    private lateinit var textContentContainer: FrameLayout
+    private var textContentBuilt = false
+    private var showingText = false
+
+    
+    
+    
+    
     // Separate bottom sheet shown when a Button part on the Canvas is double-tapped or
     // long-pressed - see onPartDoubleTapped/onPartLongPressed in canvasListener below and
     // setupButtonObjectPanel() further down. buttonObjectContentContainer currently just hosts
@@ -242,6 +256,8 @@ class SketchActivity : AppCompatActivity() {
                 closeButtonObjectPanel()
             } else if (screensPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
                 closeScreensPanel()
+            } else if (textPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
+                closeTextPanel()
             } else {
                 closeElementsPanel()
             }
@@ -261,6 +277,7 @@ class SketchActivity : AppCompatActivity() {
             closeElementsPanel()
             closeScreensPanel()
             closeButtonObjectPanel()
+            closeTextPanel()
             toggleBottomNavBar()
         }
 
@@ -359,6 +376,9 @@ class SketchActivity : AppCompatActivity() {
         buttonObjectPanel = findViewById(R.id.buttonObjectPanel)
         buttonObjectContentContainer = findViewById(R.id.buttonObjectContentContainer)
         buttonObjectPanelBehavior = BottomSheetBehavior.from(buttonObjectPanel)
+        textPanel = findViewById(R.id.textPanel)
+        textContentContainer = findViewById(R.id.textContentContainer)
+        textPanelBehavior = BottomSheetBehavior.from(textPanel)
         screenThumbnailsRow = findViewById(R.id.screenThumbnailsRow)
         onBackPressedDispatcher.addCallback(this, panelBackPressedCallback)
 
@@ -383,6 +403,7 @@ class SketchActivity : AppCompatActivity() {
         setupElementsPanel()
         setupScreensPanel()
         setupButtonObjectPanel()
+        setupTextPanel()
         setupTabs()
         setupSelectionActionsPanel()
 
@@ -638,6 +659,7 @@ class SketchActivity : AppCompatActivity() {
     
     private fun openElementsPanel() {
         if (showingScreens) closeScreensPanel()
+        if (showingText) closeTextPanel()
         setTabActive(tabElements)
         showComponentsContent()
     }
@@ -905,6 +927,7 @@ class SketchActivity : AppCompatActivity() {
     private fun openButtonObjectPanel(part: SketchPart) {
         if (showingComponents) closeComponentsContent()
         if (showingScreens) closeScreensPanel()
+        if (showingText) closeTextPanel()
         buttonObjectPanelPart = part
         val views = buttonObjectPanelViews ?: buildButtonObjectPanelContent(
             context = this,
@@ -1136,6 +1159,104 @@ class SketchActivity : AppCompatActivity() {
         screenThumbnailsRow.visibility = View.GONE
     }
 
+    
+    
+    
+    
+    
+    
+    // Text panel: same fuller wiring as screensPanel above (status-bar inset top-padding synced
+    // while dragging/expanded, plus back-press/other-panel integration via showingText) rather
+    // than buttonObjectPanel's simpler two-tier setup - just without a floating thumbnails row to
+    // sync, since textContentContainer has no content yet (see the panel's declaration in
+    // activity_sketch.xml).
+    private fun setupTextPanel() {
+        textPanelBehavior.isDraggable = true
+
+        ViewCompat.setOnApplyWindowInsetsListener(textPanel) { _, insets ->
+            statusBarInsetTop = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
+            applyTextPanelTopPadding(textPanelBehavior.state == BottomSheetBehavior.STATE_EXPANDED)
+            insets
+        }
+
+        textPanelBehavior.addBottomSheetCallback(object : BottomSheetBehavior.BottomSheetCallback() {
+            override fun onStateChanged(sheetView: View, newState: Int) {
+                when (newState) {
+                    BottomSheetBehavior.STATE_HIDDEN -> {
+                        showingText = false
+                        panelBackPressedCallback.isEnabled = elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN ||
+                            screensPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
+                    }
+                    BottomSheetBehavior.STATE_EXPANDED -> {
+                        panelBackPressedCallback.isEnabled = true
+                        applyTextPanelTopPadding(expanded = true)
+                    }
+                    BottomSheetBehavior.STATE_DRAGGING, BottomSheetBehavior.STATE_SETTLING -> Unit
+                    else -> {
+                        panelBackPressedCallback.isEnabled = true
+                        applyTextPanelTopPadding(expanded = false)
+                    }
+                }
+            }
+
+            override fun onSlide(sheetView: View, slideOffset: Float) {
+                if (slideOffset > 0f) {
+                    // 0 at collapsed, 1 at fully expanded (max height) - same status-bar top
+                    // padding purpose as screensPanel's onSlide above.
+                    applyTextPanelTopPadding(progressToStatusBarInset = slideOffset.coerceIn(0f, 1f))
+                }
+            }
+        })
+
+        textPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+    }
+
+    
+    
+    
+    private fun applyTextPanelTopPadding(expanded: Boolean? = null, progressToStatusBarInset: Float? = null) {
+        val extra = when {
+            progressToStatusBarInset != null -> (statusBarInsetTop * progressToStatusBarInset).roundToInt()
+            expanded == true -> statusBarInsetTop
+            else -> 0
+        }
+        textPanel.setPadding(textPanel.paddingLeft, extra, textPanel.paddingRight, textPanel.paddingBottom)
+    }
+
+    
+    
+    
+    // Opens the Text panel at its default (collapsed/peek) height - same resting height as its
+    // minimum, per setupTextPanel() above. Builds the "Add text" action row into
+    // textContentContainer on first open (see buildTextPanelContent() in TextPanel.kt) - tapping
+    // it places a Text part on the Canvas and closes the panel immediately, same "add + close"
+    // behavior the old showTextInputDialog() flow ended with, just without its text-entry step.
+    private fun openTextPanel() {
+        if (!textContentBuilt) {
+            textContentContainer.addView(
+                buildTextPanelContent(
+                    context = this,
+                    onAddTextRequested = {
+                        addPart(PartKind.TEXT, canvas.width / 2f, canvas.pageHeight / 2f, label = "Text")
+                        canvas.invalidate()
+                        closeTextPanel()
+                    },
+                )
+            )
+            textContentBuilt = true
+        }
+        showingText = true
+        panelBackPressedCallback.isEnabled = true
+        textPanelBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+    }
+
+    private fun closeTextPanel() {
+        if (textPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
+            textPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+        }
+        showingText = false
+    }
+
 
 
     private fun setupTabs() {
@@ -1213,12 +1334,16 @@ class SketchActivity : AppCompatActivity() {
 
     private fun selectShapesTab() {
         if (showingComponents) closeComponentsContent()
+        if (showingText) closeTextPanel()
         setTabActive(tabScreens)
         openScreensPanel()
     }
 
     private fun selectTextTab() {
-        openTextInputModal()
+        if (showingComponents) closeComponentsContent()
+        if (showingScreens) closeScreensPanel()
+        setTabActive(tabText)
+        openTextPanel()
     }
 
     private fun selectMediaTab() {
@@ -1227,6 +1352,7 @@ class SketchActivity : AppCompatActivity() {
 
     private fun selectComponentsTab(expanded: Boolean = false) {
         if (showingScreens) closeScreensPanel()
+        if (showingText) closeTextPanel()
         setTabActive(tabElements)
         showComponentsContent(expanded)
     }
@@ -1236,26 +1362,8 @@ class SketchActivity : AppCompatActivity() {
         
         if (showingComponents) closeComponentsContent()
         if (showingScreens) closeScreensPanel()
+        if (showingText) closeTextPanel()
         setTabActive(tabSelect)
-    }
-
-
-
-    private fun openTextInputModal() {
-        if (showingComponents) closeComponentsContent()
-        if (showingScreens) closeScreensPanel()
-        setTabActive(tabText)
-
-        showTextInputDialog(
-            context = this,
-            onConfirm = { text ->
-                if (text.isNotBlank()) {
-                    addPart(PartKind.TEXT, canvas.width / 2f, canvas.pageHeight / 2f, label = text)
-                }
-                
-            },
-            onCancel = { },
-        )
     }
 
     
@@ -1263,6 +1371,7 @@ class SketchActivity : AppCompatActivity() {
     private fun openPartPickerFromTab(tab: LinearLayout, title: String, kinds: List<PartKind>) {
         if (showingComponents) closeComponentsContent()
         if (showingScreens) closeScreensPanel()
+        if (showingText) closeTextPanel()
         setTabActive(tab)
         openPartPicker(
             title = title,

@@ -345,6 +345,49 @@
             android:clipChildren="false" />
     </FrameLayout>
 
+    <!-- Text panel: a separate bottom sheet, independent of the other panels above, shown once
+         the Text tab is tapped - replaces the old auto-add showTextInputDialog() flow (which
+         placed a Text part on the Canvas straight from a plain alert dialog). Same two-tier
+         height setup as screensPanel: app:behavior_peekHeight below is both its minimum and
+         default resting height, and STATE_EXPANDED (match_parent) is its maximum. Follows
+         screensPanel's fuller wiring (see setupTextPanel/openTextPanel/closeTextPanel in
+         SketchActivity) - status-bar inset top-padding synced while dragging/expanded, and back-
+         press/other-panel integration - rather than buttonObjectPanel's simpler one. Intentionally
+         empty for now - textContentContainer is populated at runtime once this panel's content is
+         designed. Declared BEFORE bottomNavBar (like the other panel sheets) so it always stays
+         behind the nav bar. -->
+    <FrameLayout
+        android:id="@+id/textPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_bottom_panel"
+        android:clipChildren="false"
+        android:elevation="8dp"
+        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
+        app:behavior_hideable="true"
+        app:behavior_draggable="true"
+        app:behavior_skipCollapsed="false"
+        app:behavior_peekHeight="280dp">
+
+        <!-- Present but not shown: keeps the sheet's drag/accessibility affordance functional
+             without drawing the usual visible grab pill, same as the other panels' handles. -->
+        <com.google.android.material.bottomsheet.BottomSheetDragHandleView
+            android:id="@+id/textPanelDragHandle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:visibility="invisible" />
+
+        <!-- Built and attached at runtime by buildTextPanelContent() (see openTextPanel() in
+             SketchActivity) - just the full-width "Add text" action row for now, more content is
+             expected to be added below it later. -->
+        <FrameLayout
+            android:id="@+id/textContentContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipChildren="false" />
+    </FrameLayout>
+
     <!-- Bottom navigation bar: a plain, always-visible tab bar floating just above the bottom
          edge of the screen as a pill-shaped 3D sheet (NOT a BottomSheetBehavior sheet - it
          never drags, collapses, or hides). Tapping Text/Upload opens its own modal picker/dialog;
