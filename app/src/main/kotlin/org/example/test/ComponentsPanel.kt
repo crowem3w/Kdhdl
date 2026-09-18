@@ -591,8 +591,21 @@ fun buildButtonCategoryPanel(
     onClose: () -> Unit,
     onExpandRequested: () -> Unit,
     onLabelRenamed: (String) -> Unit = {},
-    onAddToCanvasRequested: (ButtonStyle) -> Unit = {},
+    // Style/align now travel together, since a placed button needs both to render correctly (see
+    // SketchPart.buttonAlign and drawFramedButtonLabel() in SketchCanvasView.kt).
+    onAddToCanvasRequested: (ButtonStyle, String) -> Unit = { _, _ -> },
+    // Fired on every Align/Label/variant change - not just on "+ Add to Canvas" - so that when
+    // this panel is editing an already-placed button (see initialVariant/initialAlign/
+    // initialButtonText below), the change reaches the Canvas instantly instead of only updating
+    // this panel's own preview.
+    onLiveChanged: (ButtonStyle, String, String) -> Unit = { _, _, _ -> },
     onBack: () -> Unit = {},
+    // When this panel is opened to edit an already-placed FRAMED button (rather than compose a
+    // new one), these seed the controls with that button's current style/align/text instead of
+    // the "fresh instance" defaults.
+    initialVariant: ButtonStyle = ButtonStyle.FRAMELESS,
+    initialAlign: String = "Centered",
+    initialButtonText: String = "Button",
 ): ButtonCategoryPanelViews {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
@@ -723,7 +736,13 @@ fun buildButtonCategoryPanel(
     // below and which style the "Add to Canvas" button (see below) places on the real canvas.
     // Frameless starts selected by default. ButtonStyle is shared with SketchPart (see
     // SketchPart.kt) so the selection maps directly onto the placed part's own styling.
-    var selectedVariant: ButtonStyle = ButtonStyle.FRAMELESS
+    var selectedVariant: ButtonStyle = initialVariant
+
+    // Hoisted above the previews/click-handlers below (rather than declared down by the Align
+    // segmented control where it's used for that UI) so onLiveChanged - fired from the variant
+    // click handlers - can already read the current Align selection. See AlignOptionEntry further
+    // down for the actual segmented control built from this.
+    var selectedAlign = initialAlign
 
     // Assigned once the settings panel (Align/Label, further below) is built, so
     // updateSelectionVisuals() can also refresh which settings rows are visible and keep the
@@ -735,7 +754,7 @@ fun buildButtonCategoryPanel(
     // a further ~17% horizontal-only bump (12->14dp) so the preview itself reads a bit wider
     // without maxing out the row.
     val buttonNoFrame = TextView(context).apply {
-        text = "Button"
+        text = initialButtonText
         setTextColor(PANEL_PRIMARY_TEXT)
         textSize = 17f
         setTypeface(typeface, Typeface.BOLD)
@@ -767,7 +786,7 @@ fun buildButtonCategoryPanel(
     // Kept as a named reference (rather than inline in addView) so the Align/Label settings
     // below (see settings panel further down) can read and update its text and gravity.
     val buttonWithFrameLabel = TextView(context).apply {
-        text = "Button"
+        text = initialButtonText
         setTextColor(Color.WHITE)
         textSize = 17f
         setTypeface(typeface, Typeface.BOLD)
@@ -809,11 +828,13 @@ fun buildButtonCategoryPanel(
         selectedVariant = ButtonStyle.FRAMELESS
         updateSelectionVisuals()
         onExpandRequested()
+        onLiveChanged(selectedVariant, selectedAlign, buttonNoFrame.text.toString())
     }
     buttonWithFrame.setOnClickListener {
         selectedVariant = ButtonStyle.FRAMED
         updateSelectionVisuals()
         onExpandRequested()
+        onLiveChanged(selectedVariant, selectedAlign, buttonWithFrameLabel.text.toString())
     }
 
     // The two contents, laid out side by side directly on the Canvas surface (the previous
@@ -909,7 +930,7 @@ fun buildButtonCategoryPanel(
     }
 
     addToCanvasButton.setOnClickListener {
-        onAddToCanvasRequested(selectedVariant)
+        onAddToCanvasRequested(selectedVariant, selectedAlign)
     }
     root.addView(addToCanvasButton)
 
@@ -920,7 +941,6 @@ fun buildButtonCategoryPanel(
     // Align only appears for the framed button variant; Label always appears (see
     // updateSettingsRowsVisibility() below).
     val settingsLeftBg = Color.parseColor("#E6E7E9")
-    val settingsRowHeight = dp(72)
     val settingsCornerRadius = dp(16).toFloat()
     val settingsFrameBg = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
@@ -939,16 +959,19 @@ fun buildButtonCategoryPanel(
         }
     }
 
-    // Left cell shared by every row: setting icon above setting name, on the gray fill.
+    // Left cell shared by every row: setting icon beside setting name (horizontal), on the gray
+    // fill. Width is content-driven (WRAP_CONTENT), not a fixed weight, so rows don't line up
+    // into table-like columns - the right cell (weight 1f) simply takes whatever space is left.
     fun buildSettingsLeftCell(iconRes: Int, labelText: String): View = LinearLayout(context).apply {
-        orientation = LinearLayout.VERTICAL
+        orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER
         setBackgroundColor(settingsLeftBg)
-        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.3f)
+        setPadding(dp(14), 0, dp(14), 0)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT)
         addView(ImageView(context).apply {
             setImageResource(iconRes)
             setColorFilter(PANEL_SECONDARY_TEXT)
-            layoutParams = LinearLayout.LayoutParams(dp(18), dp(18)).apply { bottomMargin = dp(4) }
+            layoutParams = LinearLayout.LayoutParams(dp(18), dp(18)).apply { marginEnd = dp(6) }
         })
         addView(TextView(context).apply {
             text = labelText
@@ -964,6 +987,17 @@ fun buildButtonCategoryPanel(
         layoutParams = LinearLayout.LayoutParams(dp(1), ViewGroup.LayoutParams.MATCH_PARENT)
     }
 
+    // Bold caption placed above a row's right-side control (segmented control / input box).
+    fun buildRightCellHeader(text: String): TextView = TextView(context).apply {
+        this.text = text
+        setTextColor(PANEL_PRIMARY_TEXT)
+        textSize = 12f
+        setTypeface(typeface, Typeface.BOLD)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(6)
+        }
+    }
+
     // --- Align row: right cell holds a 5-option segmented control (Justify/Start/End/
     // Centered/Stack), each option an icon+label pair stacked vertically, divided by a vertical
     // line, one selected at a time. Applied directly to buttonWithFrame's label - the only
@@ -976,7 +1010,6 @@ fun buildButtonCategoryPanel(
         AlignOptionEntry("Centered", R.drawable.ic_align_center),
         AlignOptionEntry("Stack", R.drawable.ic_align_stack),
     )
-    var selectedAlign = "Centered"
     data class AlignOptionViews(val container: View, val icon: ImageView, val label: TextView)
     val alignOptionViews = LinkedHashMap<String, AlignOptionViews>()
 
@@ -1018,7 +1051,7 @@ fun buildButtonCategoryPanel(
         orientation = LinearLayout.HORIZONTAL
         background = alignSegmentedBg
         clipToOutline = true
-        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, alignSegmentedControlHeight, Gravity.CENTER_VERTICAL)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, alignSegmentedControlHeight)
     }
     alignOptions.forEachIndexed { index, option ->
         val icon = ImageView(context).apply {
@@ -1044,6 +1077,7 @@ fun buildButtonCategoryPanel(
                 selectedAlign = option.id
                 updateAlignVisuals()
                 applyAlignToFramedPreview()
+                onLiveChanged(selectedVariant, selectedAlign, buttonWithFrameLabel.text.toString())
             }
         }
         alignOptionViews[option.id] = AlignOptionViews(optionContainer, icon, labelView)
@@ -1051,17 +1085,25 @@ fun buildButtonCategoryPanel(
         if (index != alignOptions.lastIndex) alignSegmentedControl.addView(buildVerticalDivider())
     }
     updateAlignVisuals()
+    // Seeds buttonWithFrameLabel's gravity/width to match initialAlign immediately (rather than
+    // only once the person taps an Align option), so re-opening this panel on an already-placed
+    // button shows its real current alignment right away.
+    applyAlignToFramedPreview()
 
-    val alignRowHeight = dp(96)
     val alignRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, alignRowHeight)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         addView(buildSettingsLeftCell(R.drawable.ic_align, "Align"))
         addView(buildVerticalDivider())
-        addView(FrameLayout(context).apply {
+        addView(LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.WHITE)
             setPadding(dp(12), dp(12), dp(12), dp(12))
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.7f)
+            // weight 1f: fills whatever space is left after the content-sized left cell,
+            // rather than a fixed fraction - keeps this row's split independent of the other
+            // row's, so the two rows don't line up into table-like columns.
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            addView(buildRightCellHeader("Align"))
             addView(alignSegmentedControl)
         })
     }
@@ -1085,7 +1127,7 @@ fun buildButtonCategoryPanel(
         imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
         importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
         contentDescription = "Button label text"
-        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36), Gravity.CENTER_VERTICAL)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36))
     }
     labelInput.addTextChangedListener(object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -1093,18 +1135,21 @@ fun buildButtonCategoryPanel(
         override fun afterTextChanged(s: Editable?) {
             val text = s?.toString().orEmpty()
             if (selectedVariant == ButtonStyle.FRAMELESS) buttonNoFrame.text = text else buttonWithFrameLabel.text = text
+            onLiveChanged(selectedVariant, selectedAlign, text)
         }
     })
 
     val labelRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, settingsRowHeight)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         addView(buildSettingsLeftCell(R.drawable.ic_cat_typography, "Label"))
         addView(buildVerticalDivider())
-        addView(FrameLayout(context).apply {
+        addView(LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.WHITE)
             setPadding(dp(12), dp(12), dp(12), dp(12))
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.7f)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            addView(buildRightCellHeader("Label"))
             addView(labelInput)
         })
     }
@@ -1131,7 +1176,13 @@ fun buildComponentsContent(
     context: Context,
     onClose: () -> Unit = {},
     onButtonPanelExpandRequested: () -> Unit = {},
-    onAddButtonToCanvasRequested: (ButtonStyle) -> Unit = {},
+    onAddButtonToCanvasRequested: (ButtonStyle, String) -> Unit = { _, _ -> },
+    // Checked fresh every time the Buttons panel is opened (see showButtonCategoryPanel() below):
+    // if it returns an already-placed FRAMED button, the panel opens in "edit" mode for that
+    // exact part instead of composing a new one, and onButtonLiveEdited below keeps it in sync in
+    // real time as Align/Label/style change.
+    getEditableSelectedButton: () -> SketchPart? = { null },
+    onButtonLiveEdited: (SketchPart, ButtonStyle, String, String) -> Unit = { _, _, _, _ -> },
 ): View {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
@@ -2093,9 +2144,19 @@ fun buildComponentsContent(
         bodyRow.visibility = View.GONE
         buttonPanelHost.removeAllViews()
         val instanceNumber = ButtonInstanceCounter.nextInstanceNumber(context)
+        // Re-checked on every open (this whole panel is torn down and rebuilt each time "Buttons"
+        // is selected - see showNormalContent()/onClose() below), so selecting a different placed
+        // button on the Canvas before reopening this panel edits that one instead.
+        val editingPart = getEditableSelectedButton()
         val panel = buildButtonCategoryPanel(
             context = context,
             initialLabel = "Button $instanceNumber",
+            initialVariant = editingPart?.buttonStyle ?: ButtonStyle.FRAMELESS,
+            initialAlign = editingPart?.buttonAlign ?: "Centered",
+            initialButtonText = editingPart?.label?.takeIf { it.isNotBlank() } ?: "Button",
+            onLiveChanged = { style, align, text ->
+                editingPart?.let { onButtonLiveEdited(it, style, align, text) }
+            },
             onClose = {
                 // Closing the Button panel closes the whole Elements panel (same as the normal
                 // header's back/close button), and resets back to the rail's neutral ("All")

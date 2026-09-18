@@ -178,6 +178,33 @@ class SketchActivity : AppCompatActivity() {
     
     
     
+    
+    // Separate bottom sheet shown when a Button part on the Canvas is double-tapped or
+    // long-pressed - see onPartDoubleTapped/onPartLongPressed in canvasListener below and
+    // setupButtonObjectPanel() further down. buttonObjectContentContainer currently just hosts
+    // the Design/Prototype toggle built by buildButtonObjectPanelContent() (see
+    // ButtonObjectPanel.kt); more content is expected to be added below that later.
+    private lateinit var buttonObjectPanel: FrameLayout
+    private lateinit var buttonObjectPanelBehavior: BottomSheetBehavior<FrameLayout>
+    private lateinit var buttonObjectContentContainer: FrameLayout
+    private var showingButtonObjectPanel = false
+    // Built once, then reused/re-synced on every open - see openButtonObjectPanel() below.
+    private var buttonObjectPanelViews: ButtonObjectPanelViews? = null
+    // The Button part the panel is currently open for, so the Design/Prototype toggle's
+    // onModeChanged callback knows which part's objectPanelMode to persist the selection onto.
+    private var buttonObjectPanelPart: SketchPart? = null
+    // Swapped in/out of buttonObjectPanel's background by updateButtonObjectPanelCornerState()
+    // below: rounded is the panel's normal look (24dp top corners, matching bg_bottom_panel.xml);
+    // square is shown instead while ButtonObjectMode.CUSTOM (customButton) is selected.
+    private lateinit var buttonObjectPanelBgRounded: GradientDrawable
+    private lateinit var buttonObjectPanelBgSquare: GradientDrawable
+    // Localized drop-shadow strip shown above the panel's top edge, under customButton, only
+    // while CUSTOM is selected - see buildButtonObjectCornerShadowView() in ButtonObjectPanel.kt.
+    private lateinit var buttonObjectCornerShadowView: View
+
+    
+    
+    
     private var nextScreenPageId = 1L
     private val screenPages = mutableListOf(ScreenPage(id = 0L, type = ScreenPageType.HOME))
     private var selectedScreenPageId = 0L
@@ -211,6 +238,8 @@ class SketchActivity : AppCompatActivity() {
         override fun handleOnBackPressed() {
             if (selectionActionsPanel.visibility == View.VISIBLE) {
                 dismissSelectionActionsPanel(clearSelection = true)
+            } else if (buttonObjectPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
+                closeButtonObjectPanel()
             } else if (screensPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
                 closeScreensPanel()
             } else {
@@ -231,10 +260,17 @@ class SketchActivity : AppCompatActivity() {
         override fun onTapEmptySpace() {
             closeElementsPanel()
             closeScreensPanel()
+            closeButtonObjectPanel()
             toggleBottomNavBar()
         }
 
         override fun onPartLongPressed(part: SketchPart) {
+            if (part.kind == PartKind.BUTTON) {
+                // Buttons already on the Canvas get the dedicated empty panel (see
+                // setupButtonObjectPanel()) instead of the generic rename/delete dialog below.
+                openButtonObjectPanel(part)
+                return
+            }
             showPartOptionsDialog(
                 context = this@SketchActivity,
                 part = part,
@@ -245,6 +281,16 @@ class SketchActivity : AppCompatActivity() {
                 },
                 onDelete = { canvas.removePart(part) },
             )
+        }
+
+        // Buttons already on the Canvas open the same dedicated panel on double-tap as on
+        // long-press (see onPartLongPressed above); returning true tells SketchCanvasView not to
+        // fall back to its default double-tap behavior (zoom reset to 100%) for this part. Any
+        // other part kind returns false and keeps that default zoom-reset behavior untouched.
+        override fun onPartDoubleTapped(part: SketchPart): Boolean {
+            if (part.kind != PartKind.BUTTON) return false
+            openButtonObjectPanel(part)
+            return true
         }
 
         override fun onSelectionChanged(part: SketchPart?) {
@@ -310,6 +356,9 @@ class SketchActivity : AppCompatActivity() {
         screensPanel = findViewById(R.id.screensPanel)
         screensContentContainer = findViewById(R.id.screensContentContainer)
         screensPanelBehavior = BottomSheetBehavior.from(screensPanel)
+        buttonObjectPanel = findViewById(R.id.buttonObjectPanel)
+        buttonObjectContentContainer = findViewById(R.id.buttonObjectContentContainer)
+        buttonObjectPanelBehavior = BottomSheetBehavior.from(buttonObjectPanel)
         screenThumbnailsRow = findViewById(R.id.screenThumbnailsRow)
         onBackPressedDispatcher.addCallback(this, panelBackPressedCallback)
 
@@ -333,6 +382,7 @@ class SketchActivity : AppCompatActivity() {
         setupBottomNavBar()
         setupElementsPanel()
         setupScreensPanel()
+        setupButtonObjectPanel()
         setupTabs()
         setupSelectionActionsPanel()
 
@@ -625,13 +675,33 @@ class SketchActivity : AppCompatActivity() {
                     // The Buttons panel's "+ Add to Canvas" button - places a real Button part,
                     // styled to match whichever preview (frameless/framed) was selected (see
                     // ButtonStyle in SketchPart.kt and buildButtonCategoryPanel()'s
-                    // selectedVariant), at the active screen's canvas center, then closes the
-                    // Elements panel - same pattern as the Screens panel's onPick.
-                    onAddButtonToCanvasRequested = { style ->
-                        addPart(PartKind.BUTTON, canvas.width / 2f, canvas.pageHeight / 2f, label = "Button")
-                            .buttonStyle = style
+                    // selectedVariant) and carrying its chosen Align (see SketchPart.buttonAlign),
+                    // at the active screen's canvas center, then closes the Elements panel - same
+                    // pattern as the Screens panel's onPick.
+                    onAddButtonToCanvasRequested = { style, align ->
+                        addPart(PartKind.BUTTON, canvas.width / 2f, canvas.pageHeight / 2f, label = "Button").apply {
+                            buttonStyle = style
+                            buttonAlign = align
+                        }
                         canvas.invalidate()
                         closeElementsPanel()
+                    },
+                    // If a placed FRAMED button is currently selected on the Canvas when the
+                    // Buttons panel is (re)opened, edit that part instead of composing a fresh
+                    // one - see showButtonCategoryPanel() in ComponentsPanel.kt. FRAMELESS/generic
+                    // parts have no Align UI equivalent yet, so they're left out of edit mode.
+                    getEditableSelectedButton = {
+                        canvas.selectedPart?.takeIf { it.kind == PartKind.BUTTON && it.buttonStyle == ButtonStyle.FRAMED }
+                    },
+                    // Fires on every Align/Label/style change while editing an existing placed
+                    // button (see onLiveChanged in buildButtonCategoryPanel()), so the Canvas
+                    // reflects the change the instant it's made rather than only on "+ Add to
+                    // Canvas" - this is the real-time feedback that was missing.
+                    onButtonLiveEdited = { part, style, align, text ->
+                        part.buttonStyle = style
+                        part.buttonAlign = align
+                        part.label = text
+                        canvas.invalidate()
                     },
                 )
             )
@@ -728,6 +798,135 @@ class SketchActivity : AppCompatActivity() {
         
         
         screensPanel.viewTreeObserver.addOnGlobalLayoutListener { positionScreenThumbnailsRow() }
+    }
+
+    
+    
+    
+    
+    // Simplest of the three panel sheets: no IME-aware peek height (elementsPanel) or floating
+    // thumbnails row to sync (screensPanel) - just the plain two-tier peek/expanded sheet declared
+    // in activity_sketch.xml (app:behavior_peekHeight="280dp" = min = default resting height,
+    // STATE_EXPANDED = max/fullscreen). Content is the Design/Prototype/customButton row from
+    // ButtonObjectPanel.kt (built lazily - see openButtonObjectPanel() below) plus, set up here,
+    // the two swappable panel backgrounds and the localized corner-shadow view that
+    // customButton's selection toggles between (see updateButtonObjectPanelCornerState()).
+    private fun setupButtonObjectPanel() {
+        buttonObjectPanelBehavior.isDraggable = true
+
+        // Rounded matches bg_bottom_panel.xml's own look (24dp top corners, #F3F4F6 fill) - built
+        // as GradientDrawables rather than left as that static XML drawable so the corners can be
+        // swapped to flat/square at runtime without needing a second static drawable resource.
+        val panelFillColor = Color.parseColor("#F3F4F6")
+        val panelCornerRadiusPx = dp(24f)
+        buttonObjectPanelBgRounded = GradientDrawable().apply {
+            setColor(panelFillColor)
+            cornerRadii = floatArrayOf(
+                panelCornerRadiusPx, panelCornerRadiusPx,
+                panelCornerRadiusPx, panelCornerRadiusPx,
+                0f, 0f,
+                0f, 0f,
+            )
+        }
+        buttonObjectPanelBgSquare = GradientDrawable().apply {
+            setColor(panelFillColor)
+            cornerRadii = FloatArray(8) { 0f }
+        }
+        buttonObjectPanel.background = buttonObjectPanelBgRounded
+
+        // Added as a sibling of buttonObjectPanel (both direct children of the root
+        // CoordinatorLayout) so it can float above the panel's top edge rather than being clipped
+        // to the panel's own bounds - same relationship screenThumbnailsRow has to screensPanel.
+        // Elevation kept below buttonObjectPanel's own (8dp, set in activity_sketch.xml) so the
+        // panel draws over it where they meet, leaving only the blur peeking out above the edge.
+        buttonObjectCornerShadowView = buildButtonObjectCornerShadowView(this).also { shadow ->
+            shadow.elevation = dp(3f)
+            (buttonObjectPanel.parent as ViewGroup).addView(shadow)
+        }
+
+        buttonObjectPanelBehavior.addBottomSheetCallback(object : BottomSheetBehavior.BottomSheetCallback() {
+            override fun onStateChanged(sheetView: View, newState: Int) {
+                if (newState == BottomSheetBehavior.STATE_HIDDEN) {
+                    showingButtonObjectPanel = false
+                    panelBackPressedCallback.isEnabled = elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN ||
+                        screensPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
+                } else if (newState != BottomSheetBehavior.STATE_DRAGGING && newState != BottomSheetBehavior.STATE_SETTLING) {
+                    panelBackPressedCallback.isEnabled = true
+                }
+            }
+
+            // The panel's top edge (buttonObjectPanel.top) moves as it's dragged - keep the
+            // corner-shadow strip (when visible) tracking it rather than left behind mid-drag.
+            override fun onSlide(sheetView: View, slideOffset: Float) = positionButtonObjectCornerShadow()
+        })
+
+        buttonObjectPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+
+        buttonObjectPanel.viewTreeObserver.addOnGlobalLayoutListener { positionButtonObjectCornerShadow() }
+    }
+
+    // Reflects buttonObjectPanelPart's persisted objectPanelMode onto the panel chrome that isn't
+    // owned by ButtonObjectPanel.kt's own view tree: flat/square top corners plus the localized
+    // corner-shadow strip under customButton while CUSTOM is selected, back to the normal rounded
+    // look otherwise. Called right after every mode change/sync (see onModeChanged below and
+    // openButtonObjectPanel()).
+    private fun updateButtonObjectPanelCornerState() {
+        val squared = buttonObjectPanelPart?.objectPanelMode == ButtonObjectMode.CUSTOM
+        buttonObjectPanel.background = if (squared) buttonObjectPanelBgSquare else buttonObjectPanelBgRounded
+        buttonObjectCornerShadowView.visibility = if (squared) View.VISIBLE else View.GONE
+        buttonObjectCornerShadowView.post { positionButtonObjectCornerShadow() }
+    }
+
+    // Lines the corner-shadow strip up with customButton: horizontally, directly under it
+    // (walking up the view tree from customButton to buttonObjectPanel to accumulate the offset,
+    // since the strip is a sibling of buttonObjectPanel rather than nested inside it); vertically,
+    // flush against buttonObjectPanel's current top edge - same translation-based approach as
+    // positionScreenThumbnailsRow() uses for screenThumbnailsRow above.
+    private fun positionButtonObjectCornerShadow() {
+        if (!::buttonObjectCornerShadowView.isInitialized || buttonObjectCornerShadowView.visibility != View.VISIBLE) return
+        val customButtonView = buttonObjectPanelViews?.customButtonView ?: return
+        var offsetX = 0f
+        var v: View = customButtonView
+        while (v !== buttonObjectPanel && v.parent is View) {
+            offsetX += v.left
+            v = v.parent as View
+        }
+        buttonObjectCornerShadowView.translationX = buttonObjectPanel.left + offsetX
+        buttonObjectCornerShadowView.translationY = buttonObjectPanel.top.toFloat() - buttonObjectCornerShadowView.height
+    }
+
+    // Opens the Button object panel at its default (collapsed/peek) height - same resting height
+    // as its minimum, per setupButtonObjectPanel() above. Builds the Design/Prototype/customButton
+    // row into buttonObjectContentContainer on first open, then on every open (including
+    // subsequent ones) syncs it - and the panel's corner state - to `part`'s own persisted
+    // objectPanelMode, so reopening the panel on a different Button part, or the same one later,
+    // always shows that part's last-selected mode rather than whatever was left selected from
+    // editing a previous part.
+    private fun openButtonObjectPanel(part: SketchPart) {
+        if (showingComponents) closeComponentsContent()
+        if (showingScreens) closeScreensPanel()
+        buttonObjectPanelPart = part
+        val views = buttonObjectPanelViews ?: buildButtonObjectPanelContent(
+            context = this,
+            initialMode = part.objectPanelMode,
+            onModeChanged = { mode ->
+                buttonObjectPanelPart?.objectPanelMode = mode
+                updateButtonObjectPanelCornerState()
+            },
+        ).also {
+            buttonObjectContentContainer.addView(it.root)
+            buttonObjectPanelViews = it
+        }
+        views.setActiveMode(part.objectPanelMode)
+        updateButtonObjectPanelCornerState()
+        showingButtonObjectPanel = true
+        buttonObjectPanelBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+    }
+
+    private fun closeButtonObjectPanel() {
+        if (buttonObjectPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
+            buttonObjectPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+        }
     }
 
     

@@ -56,6 +56,11 @@ class SketchCanvasView @JvmOverloads constructor(
         
         
         fun onNameTagTapped(part: SketchPart) {}
+
+        // Fired when an existing part is double-tapped (as opposed to onDoubleTapEmptySpace
+        // above). Default no-op preserves the prior behavior (zoom reset to 100%, see onDoubleTap
+        // below) for any listener/part that doesn't care about this.
+        fun onPartDoubleTapped(part: SketchPart): Boolean = false
     }
 
     var listener: Listener? = null
@@ -211,6 +216,10 @@ class SketchCanvasView @JvmOverloads constructor(
     
     private val textWrapHorizontalPadding = 6f * density
     private val textWrapVerticalPadding = 4f * density
+
+    // Inset kept clear of a FRAMED button's edges when its label is Start/End/Justify-aligned
+    // (see drawFramedButtonLabel() below), so the text never touches the button's rounded border.
+    private val buttonLabelHorizontalPadding = 10f * density
 
     
     
@@ -368,7 +377,9 @@ class SketchCanvasView @JvmOverloads constructor(
             if (hit == null) {
                 
                 listener?.onDoubleTapEmptySpace()
-            } else {
+            } else if (listener?.onPartDoubleTapped(hit) != true) {
+                // Listener declined (default no-op returns false, or there's no listener) - fall
+                // back to the original behavior of resetting zoom to 100%.
                 scaleFactor = 1f
                 clampPan()
                 invalidate()
@@ -1024,6 +1035,12 @@ class SketchCanvasView @JvmOverloads constructor(
         val label = part.label.ifBlank { part.kind.displayLabel }
         if (part.kind == PartKind.TEXT) {
             drawWrappedText(canvas, part, label)
+        } else if (buttonStyle == ButtonStyle.FRAMED) {
+            // FRAMED buttons honor part.buttonAlign (set from the Buttons panel's Align control -
+            // see buildButtonCategoryPanel() in ComponentsPanel.kt). FRAMELESS and generic parts
+            // keep the plain centered draw below, matching the panel preview's own behavior
+            // (Align only appears for the framed variant there too).
+            drawFramedButtonLabel(canvas, part, rect, label, textColorOverride)
         } else {
             val previousTextColor = textPaint.color
             if (textColorOverride != null) textPaint.color = textColorOverride
@@ -1031,6 +1048,81 @@ class SketchCanvasView @JvmOverloads constructor(
             canvas.drawText(label, rect.centerX(), rect.centerY() + textPaint.textSize / 3f, textPaint)
             textPaint.color = previousTextColor
         }
+    }
+
+    // Draws a FRAMED button's label according to part.buttonAlign. Justify and Stack have no
+    // natural single-line rendering, so they're given real (not placeholder) treatments: Justify
+    // spreads the label's words edge-to-edge, Stack wraps the label across centered lines.
+    private fun drawFramedButtonLabel(canvas: Canvas, part: SketchPart, rect: RectF, label: String, textColorOverride: Int?) {
+        val previousColor = textPaint.color
+        val previousAlign = textPaint.textAlign
+        if (textColorOverride != null) textPaint.color = textColorOverride
+        textPaint.textSize = part.fontSize.coerceAtLeast(minFontSize)
+        val baselineY = rect.centerY() + textPaint.textSize / 3f
+        when (part.buttonAlign) {
+            "Start" -> {
+                textPaint.textAlign = Paint.Align.LEFT
+                canvas.drawText(label, rect.left + buttonLabelHorizontalPadding, baselineY, textPaint)
+            }
+            "End" -> {
+                textPaint.textAlign = Paint.Align.RIGHT
+                canvas.drawText(label, rect.right - buttonLabelHorizontalPadding, baselineY, textPaint)
+            }
+            "Justify" -> drawJustifiedButtonLabel(canvas, rect, label, baselineY)
+            "Stack" -> drawStackedButtonLabel(canvas, rect, label)
+            else -> {
+                // "Centered" and any unrecognized value fall back to centered - the same default
+                // the panel preview starts on.
+                textPaint.textAlign = Paint.Align.CENTER
+                canvas.drawText(label, rect.centerX(), baselineY, textPaint)
+            }
+        }
+        textPaint.color = previousColor
+        textPaint.textAlign = previousAlign
+    }
+
+    // Real justification: each word is drawn left-to-right with the extra space (available width
+    // minus the words' own width) spread evenly between them, so the line's first and last
+    // characters land on the button's left/right padding. A single word has no gap to stretch, so
+    // it falls back to centered - same as the panel preview's own Justify approximation.
+    private fun drawJustifiedButtonLabel(canvas: Canvas, rect: RectF, label: String, baselineY: Float) {
+        val words = label.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (words.size < 2) {
+            textPaint.textAlign = Paint.Align.CENTER
+            canvas.drawText(label, rect.centerX(), baselineY, textPaint)
+            return
+        }
+        textPaint.textAlign = Paint.Align.LEFT
+        val availableWidth = (rect.width() - buttonLabelHorizontalPadding * 2f).coerceAtLeast(0f)
+        val wordWidths = words.map { textPaint.measureText(it) }
+        val totalWordWidth = wordWidths.sum()
+        val gapCount = words.size - 1
+        val minGap = textPaint.measureText(" ")
+        val gap = ((availableWidth - totalWordWidth) / gapCount).coerceAtLeast(minGap)
+        var x = rect.left + buttonLabelHorizontalPadding
+        words.forEachIndexed { index, word ->
+            canvas.drawText(word, x, baselineY, textPaint)
+            x += wordWidths[index] + gap
+        }
+    }
+
+    // Wraps the label across multiple centered lines instead of one, approximating a "stacked"
+    // label. Reuses wrapTextPaint/StaticLayout the same way drawWrappedText() does for
+    // PartKind.TEXT further below.
+    private fun drawStackedButtonLabel(canvas: Canvas, rect: RectF, label: String) {
+        wrapTextPaint.color = textPaint.color
+        wrapTextPaint.textSize = textPaint.textSize
+        val innerWidth = max(1, (rect.width() - buttonLabelHorizontalPadding * 2f).roundToInt())
+        val layout = StaticLayout.Builder
+            .obtain(label, 0, label.length, wrapTextPaint, innerWidth)
+            .setAlignment(Layout.Alignment.ALIGN_CENTER)
+            .setLineSpacing(0f, 1f)
+            .setIncludePad(false)
+            .build()
+        val saveCount = canvas.save()
+        canvas.translate(rect.left + buttonLabelHorizontalPadding, rect.centerY() - layout.height / 2f)
+        layout.draw(canvas)
+        canvas.restoreToCount(saveCount)
     }
 
     

@@ -307,6 +307,44 @@
         android:clipToPadding="false"
         android:elevation="9dp" />
 
+    <!-- Button object panel: a separate bottom sheet, independent of elementsPanel/screensPanel
+         and bottomNavBar, shown when a Button part already placed on the sketch Canvas is
+         double-tapped or long-pressed (see onButtonPartActivated in SketchActivity, wired from
+         SketchCanvasView.Listener). Same two-tier height setup as elementsPanel/screensPanel
+         above: app:behavior_peekHeight is both its minimum and default resting height, and
+         STATE_EXPANDED (match_parent) is its maximum. Empty for now - buttonObjectContentContainer
+         is populated at runtime once this panel's content is designed. Declared BEFORE
+         bottomNavBar (like the other panel sheets) so it always stays behind the nav bar. -->
+    <FrameLayout
+        android:id="@+id/buttonObjectPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_bottom_panel"
+        android:clipChildren="false"
+        android:elevation="8dp"
+        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
+        app:behavior_hideable="true"
+        app:behavior_draggable="true"
+        app:behavior_skipCollapsed="false"
+        app:behavior_peekHeight="280dp">
+
+        <!-- Present but not shown: keeps the sheet's drag/accessibility affordance functional
+             without drawing the usual visible grab pill, same as the other panels' handles. -->
+        <com.google.android.material.bottomsheet.BottomSheetDragHandleView
+            android:id="@+id/buttonObjectPanelDragHandle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:visibility="invisible" />
+
+        <!-- Intentionally empty for now - content to be built and attached at runtime later. -->
+        <FrameLayout
+            android:id="@+id/buttonObjectContentContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipChildren="false" />
+    </FrameLayout>
+
     <!-- Bottom navigation bar: a plain, always-visible tab bar floating just above the bottom
          edge of the screen as a pill-shaped 3D sheet (NOT a BottomSheetBehavior sheet - it
          never drags, collapses, or hides). Tapping Text/Upload opens its own modal picker/dialog;

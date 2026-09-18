@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <!-- Top-left filled rounded square -->
+    <path android:fillColor="#1D1B20" android:pathData="M4,2 L9,2 A2,2 0 0,1 11,4 L11,9 A2,2 0 0,1 9,11 L4,11 A2,2 0 0,1 2,9 L2,4 A2,2 0 0,1 4,2 Z"/>
+    <!-- Top-right filled rounded square -->
+    <path android:fillColor="#1D1B20" android:pathData="M15,2 L20,2 A2,2 0 0,1 22,4 L22,9 A2,2 0 0,1 20,11 L15,11 A2,2 0 0,1 13,9 L13,4 A2,2 0 0,1 15,2 Z"/>
+    <!-- Bottom-left filled rounded square -->
+    <path android:fillColor="#1D1B20" android:pathData="M4,13 L9,13 A2,2 0 0,1 11,15 L11,20 A2,2 0 0,1 9,22 L4,22 A2,2 0 0,1 2,20 L2,15 A2,2 0 0,1 4,13 Z"/>
+    <!-- Bottom-right plus, filling the same cell footprint as the three squares above -->
+    <path android:fillColor="#1D1B20" android:pathData="M16,13 L19,13 L19,16 L22,16 L22,19 L19,19 L19,22 L16,22 L16,19 L13,19 L13,16 L16,16 Z"/>
+</vector>
