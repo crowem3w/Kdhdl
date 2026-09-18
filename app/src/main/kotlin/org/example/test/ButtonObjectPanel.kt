@@ -16,11 +16,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 
-// Material-blue accent for the selected Design/Prototype segment - the same accent as
-// bg_tab_selected.xml and the Components panel's own Design/Prototype toggle (see
-// PANEL_MODE_SELECTED in ComponentsPanel.kt), so "selected" reads consistently across panels.
-// Also used for customButton's icon tint when ButtonObjectMode.CUSTOM is active, so all three
-// mutually-exclusive selections in this row share one "selected" color language.
+
 private val MODE_SELECTED_BLUE = Color.parseColor("#3D7EFF")
 private val MODE_SELECTED_BLUE_PRESSED = Color.parseColor("#2E68DB")
 
