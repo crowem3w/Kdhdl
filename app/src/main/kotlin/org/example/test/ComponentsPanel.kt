@@ -932,9 +932,10 @@ fun buildButtonCategoryPanel(
         background = settingsFrameBg
         clipToOutline = true
         elevation = dp(6).toFloat()
-        layoutParams = LinearLayout.LayoutParams(dp(200), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        // Same full-width treatment as addToCanvasButton ("Insert instance") above -
+        // MATCH_PARENT rather than a fixed width, no horizontal centering needed as a result.
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dp(16)
-            gravity = Gravity.CENTER_HORIZONTAL
         }
     }
 
@@ -963,17 +964,21 @@ fun buildButtonCategoryPanel(
         layoutParams = LinearLayout.LayoutParams(dp(1), ViewGroup.LayoutParams.MATCH_PARENT)
     }
 
-    fun buildHorizontalDivider(): View = View(context).apply {
-        setBackgroundColor(PANEL_DIVIDER)
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))
-    }
-
     // --- Align row: right cell holds a 5-option segmented control (Justify/Start/End/
-    // Centered/Stack), each option divided by a vertical line, one selected at a time. Applied
-    // directly to buttonWithFrame's label - the only preview Align is shown for.
-    val alignOptions = listOf("Justify", "Start", "End", "Centered", "Stack")
+    // Centered/Stack), each option an icon+label pair stacked vertically, divided by a vertical
+    // line, one selected at a time. Applied directly to buttonWithFrame's label - the only
+    // preview Align is shown for.
+    data class AlignOptionEntry(val id: String, val iconRes: Int)
+    val alignOptions = listOf(
+        AlignOptionEntry("Justify", R.drawable.ic_align_justify),
+        AlignOptionEntry("Start", R.drawable.ic_align_start),
+        AlignOptionEntry("End", R.drawable.ic_align_end),
+        AlignOptionEntry("Centered", R.drawable.ic_align_center),
+        AlignOptionEntry("Stack", R.drawable.ic_align_stack),
+    )
     var selectedAlign = "Centered"
-    val alignOptionViews = LinkedHashMap<String, TextView>()
+    data class AlignOptionViews(val container: View, val icon: ImageView, val label: TextView)
+    val alignOptionViews = LinkedHashMap<String, AlignOptionViews>()
 
     fun applyAlignToFramedPreview() {
         val gravity = when (selectedAlign) {
@@ -993,10 +998,12 @@ fun buildButtonCategoryPanel(
     }
 
     fun updateAlignVisuals() {
-        alignOptionViews.forEach { (opt, tv) ->
+        alignOptionViews.forEach { (opt, views) ->
             val selected = opt == selectedAlign
-            tv.setTextColor(if (selected) Color.WHITE else PANEL_PRIMARY_TEXT)
-            tv.setBackgroundColor(if (selected) BUTTON_PREVIEW_SELECTED_BORDER else Color.TRANSPARENT)
+            val fg = if (selected) Color.WHITE else PANEL_PRIMARY_TEXT
+            views.icon.setColorFilter(fg)
+            views.label.setTextColor(fg)
+            views.container.setBackgroundColor(if (selected) BUTTON_PREVIEW_SELECTED_BORDER else Color.TRANSPARENT)
         }
     }
 
@@ -1006,37 +1013,49 @@ fun buildButtonCategoryPanel(
         setStroke(dp(1), PANEL_DIVIDER)
         setColor(Color.WHITE)
     }
+    val alignSegmentedControlHeight = dp(56)
     val alignSegmentedControl = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         background = alignSegmentedBg
         clipToOutline = true
-        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36), Gravity.CENTER_VERTICAL)
+        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, alignSegmentedControlHeight, Gravity.CENTER_VERTICAL)
     }
     alignOptions.forEachIndexed { index, option ->
-        val optionView = TextView(context).apply {
-            text = option
-            textSize = 10f
+        val icon = ImageView(context).apply {
+            setImageResource(option.iconRes)
+            layoutParams = LinearLayout.LayoutParams(dp(16), dp(16)).apply { bottomMargin = dp(3) }
+        }
+        val labelView = TextView(context).apply {
+            text = option.id
+            textSize = 9f
             gravity = Gravity.CENTER
             setTypeface(typeface, Typeface.BOLD)
+        }
+        val optionContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
             isClickable = true
             isFocusable = true
-            contentDescription = "Align: $option"
+            contentDescription = "Align: ${option.id}"
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+            addView(icon)
+            addView(labelView)
             setOnClickListener {
-                selectedAlign = option
+                selectedAlign = option.id
                 updateAlignVisuals()
                 applyAlignToFramedPreview()
             }
         }
-        alignOptionViews[option] = optionView
-        alignSegmentedControl.addView(optionView)
+        alignOptionViews[option.id] = AlignOptionViews(optionContainer, icon, labelView)
+        alignSegmentedControl.addView(optionContainer)
         if (index != alignOptions.lastIndex) alignSegmentedControl.addView(buildVerticalDivider())
     }
     updateAlignVisuals()
 
+    val alignRowHeight = dp(96)
     val alignRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, settingsRowHeight)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, alignRowHeight)
         addView(buildSettingsLeftCell(R.drawable.ic_align, "Align"))
         addView(buildVerticalDivider())
         addView(FrameLayout(context).apply {
@@ -1090,9 +1109,7 @@ fun buildButtonCategoryPanel(
         })
     }
 
-    val alignRowDivider = buildHorizontalDivider()
     settingsFrame.addView(alignRow)
-    settingsFrame.addView(alignRowDivider)
     settingsFrame.addView(labelRow)
     root.addView(settingsFrame)
 
@@ -1102,7 +1119,6 @@ fun buildButtonCategoryPanel(
     fun updateSettingsRowsVisibility() {
         val framedSelected = selectedVariant == ButtonStyle.FRAMED
         alignRow.visibility = if (framedSelected) View.VISIBLE else View.GONE
-        alignRowDivider.visibility = if (framedSelected) View.VISIBLE else View.GONE
         labelInput.setText(if (framedSelected) buttonWithFrameLabel.text else buttonNoFrame.text)
     }
     onSelectedVariantChanged = { updateSettingsRowsVisibility() }
