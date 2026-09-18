@@ -24,11 +24,13 @@ import android.widget.TextView
 private val MODE_SELECTED_BLUE = Color.parseColor("#3D7EFF")
 private val MODE_SELECTED_BLUE_PRESSED = Color.parseColor("#2E68DB")
 
-// Light neutral "frame" for the unselected segment - visible against the shared frame's white
-// background (so the unselected side still reads as its own tappable segment) without competing
-// with the selected segment's solid blue.
-private val MODE_UNSELECTED_FRAME = Color.parseColor("#EEF0F4")
-private val MODE_UNSELECTED_FRAME_PRESSED = Color.parseColor("#E1E4EA")
+// Unselected segment stays transparent, letting the shared white frame show through directly -
+// only two frame colors exist on this toggle now (white frame, material-blue selected segment),
+// no separate unselected fill.
+private val MODE_UNSELECTED_FRAME = Color.TRANSPARENT
+// A faint tap-feedback tint for the unselected segment (not a "frame" color of its own - just a
+// momentary press cue), since it has no fill to darken the way the selected segment's blue does.
+private val MODE_UNSELECTED_FRAME_PRESSED = Color.parseColor("#14000000")
 
 private val MODE_TEXT_SELECTED = Color.WHITE
 private val MODE_TEXT_UNSELECTED = Color.parseColor("#6B7280")
@@ -56,8 +58,13 @@ data class ButtonObjectPanelViews(
  * carries the drop shadow (via elevation against its own rounded-rect background - same technique
  * as the Components panel's own mode toggle, see modeSharedFrameBg/modeToggleRow in
  * ComponentsPanel.kt). Inside that shared frame, each segment is its own equally-wide (50/50) tap
- * target with its own background: solid Material blue when selected, a light neutral frame when
- * it isn't - so the two states read clearly without either segment needing a separate shadow.
+ * target with no padding/gap against the frame or against each other: the unselected segment is
+ * transparent (the white frame shows straight through it), while the selected segment fills its
+ * entire half solid Material blue, its outer corners matched to the frame's own 12dp rounding
+ * (so the blue reads as a continuous rounded shape with the frame) and its inner corners - at the
+ * seam with the other segment - left square, so the two halves butt together with no visible gap
+ * or seam. Just two frame colors exist here: the shared white frame, and the selected segment's
+ * solid blue.
  *
  * customButton sits OUTSIDE that shared frame, to its right in the same row, and is frameless -
  * no background/frame of its own (same convention as e.g. backButton/closeButton in
@@ -115,7 +122,16 @@ fun buildButtonObjectPanelContent(
         if (notify) onModeChanged(mode)
     }
 
-    fun buildSegment(text: String, mode: ButtonObjectMode): Segment {
+    // toggleFrame's own corner radius (12dp) - reused here so the selected segment's outer
+    // corners match it exactly, reading as one continuous rounded shape with no gap between the
+    // segment's blue fill and the frame's own edge.
+    val frameCornerRadiusPx = dp(12).toFloat()
+
+    // isLeft picks which pair of corners is "outer" (against the shared frame's rounded edge) vs
+    // "inner" (at the flat center seam against the other segment): left segment is rounded on its
+    // left corners/square on its right, right segment is the mirror image - so together the two
+    // segments' outer edges continue the frame's own rounding with no gap anywhere.
+    fun buildSegment(text: String, mode: ButtonObjectMode, isLeft: Boolean): Segment {
         val label = TextView(context).apply {
             this.text = text
             textSize = 14f
@@ -123,13 +139,29 @@ fun buildButtonObjectPanelContent(
         }
         val bg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(8).toFloat()
+            cornerRadii = if (isLeft) {
+                floatArrayOf(
+                    frameCornerRadiusPx, frameCornerRadiusPx, // top-left
+                    0f, 0f,                                   // top-right
+                    0f, 0f,                                   // bottom-right
+                    frameCornerRadiusPx, frameCornerRadiusPx, // bottom-left
+                )
+            } else {
+                floatArrayOf(
+                    0f, 0f,                                   // top-left
+                    frameCornerRadiusPx, frameCornerRadiusPx, // top-right
+                    frameCornerRadiusPx, frameCornerRadiusPx, // bottom-right
+                    0f, 0f,                                   // bottom-left
+                )
+            }
         }
         val frame = FrameLayout(context).apply {
             background = bg
             isClickable = true
             isFocusable = true
-            // 0-width + weight=1f, shared 50/50 with the other segment - see toggleFrame below.
+            // 0-width + weight=1f, shared 50/50 with the other segment, full toggleFrame height
+            // (no padding/gap - see toggleFrame below) so the selected segment's blue fills its
+            // entire half edge-to-edge.
             layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f)
             addView(
                 label,
@@ -161,15 +193,15 @@ fun buildButtonObjectPanelContent(
         return seg
     }
 
-    val designSegment = buildSegment("Design", ButtonObjectMode.DESIGN)
-    val prototypeSegment = buildSegment("Prototype", ButtonObjectMode.PROTOTYPE)
+    val designSegment = buildSegment("Design", ButtonObjectMode.DESIGN, isLeft = true)
+    val prototypeSegment = buildSegment("Prototype", ButtonObjectMode.PROTOTYPE, isLeft = false)
 
     // The shared toggle frame: rounded-square, white, drop-shadowed via elevation against its own
     // rounded-rect outline (ViewOutlineProvider.BACKGROUND gives the shadow a shape to cast
     // against, so no separate manual shadow-layer view is needed).
     val sharedFrameBg = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
-        cornerRadius = dp(12).toFloat()
+        cornerRadius = frameCornerRadiusPx
         setColor(Color.WHITE)
     }
     val toggleFrame = LinearLayout(context).apply {
@@ -181,11 +213,13 @@ fun buildButtonObjectPanelContent(
         background = sharedFrameBg
         outlineProvider = ViewOutlineProvider.BACKGROUND
         elevation = dp(4).toFloat()
-        setPadding(dp(4), dp(4), dp(4), dp(4))
+        // No padding and no spacer between the two segments (contrast with the old inset+gap
+        // look): each segment now runs edge-to-edge against the frame's outer border and flush
+        // against the other segment's inner edge, so the selected segment's blue fills its whole
+        // half with no white gap anywhere.
         clipToPadding = false
         clipChildren = false
         addView(designSegment.frame)
-        addView(FrameLayout(context).apply { layoutParams = LinearLayout.LayoutParams(dp(6), dp(1)) })
         addView(prototypeSegment.frame)
     }
 
