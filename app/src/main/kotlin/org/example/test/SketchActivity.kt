@@ -545,23 +545,7 @@ class SketchActivity : AppCompatActivity() {
         
         
         
-        bottomNavBar.viewTreeObserver.addOnGlobalLayoutListener {
-            val navBarHeight = if (bottomNavBar.visibility == View.VISIBLE) {
-                bottomNavBar.height + bottomNavBar.marginBottom
-            } else {
-                0
-            }
-            val lp = elementsPanel.layoutParams as? CoordinatorLayout.LayoutParams
-            if (lp != null && lp.bottomMargin != navBarHeight) {
-                lp.bottomMargin = navBarHeight
-                elementsPanel.layoutParams = lp
-            }
-            val screensLp = screensPanel.layoutParams as? CoordinatorLayout.LayoutParams
-            if (screensLp != null && screensLp.bottomMargin != navBarHeight) {
-                screensLp.bottomMargin = navBarHeight
-                screensPanel.layoutParams = screensLp
-            }
-        }
+        bottomNavBar.viewTreeObserver.addOnGlobalLayoutListener { applyNavBarPanelMargins() }
     }
 
     
@@ -570,41 +554,98 @@ class SketchActivity : AppCompatActivity() {
     
     private fun showBottomNavBar() {
         if (overviewActive) return
-        if (bottomNavBar.visibility == View.VISIBLE && bottomNavBar.alpha >= 1f && bottomNavBar.translationY == 0f) return
-        bottomNavBar.animate().cancel()
-        bottomNavBar.alpha = 0f
-        bottomNavBar.translationY = bottomNavBar.height.toFloat()
-        bottomNavBar.visibility = View.VISIBLE
-        bottomNavBar.animate()
-            .alpha(1f)
-            .translationY(0f)
-            .setDuration(BOTTOM_NAV_BAR_ANIM_MS)
-            .setInterpolator(DecelerateInterpolator())
-            .start()
+        if (bottomNavTarget == 1f) return
+        animateBottomNavTo(1f)
     }
 
-    
-    
-    
+    // Slides the bar down and fades it out. Elements/Screens panels' bottom margins follow it down
+    // frame by frame (see applyBottomNavProgress), so they glide into the freed space in sync.
     private fun hideBottomNavBar() {
-        if (bottomNavBar.visibility != View.VISIBLE) return
-        bottomNavBar.animate().cancel()
-        bottomNavBar.animate()
-            .alpha(0f)
-            .translationY(bottomNavBar.height.toFloat())
-            .setDuration(BOTTOM_NAV_BAR_ANIM_MS)
-            .setInterpolator(AccelerateInterpolator())
-            .withEndAction {
-                bottomNavBar.visibility = View.GONE
-                bottomNavBar.translationY = 0f
-            }
-            .start()
+        if (bottomNavTarget == 0f) return
+        animateBottomNavTo(0f)
     }
 
-    
-    
+    // The bar is driven by a single 0..1 "progress" (0 = hidden, 1 = fully shown) so the bar and
+    // the panels that sit above it always move together.
+    private var bottomNavProgress = 1f
+    private var bottomNavTarget = 1f
+    private var bottomNavAnimator: ValueAnimator? = null
+
+    private fun animateBottomNavTo(target: Float) {
+        bottomNavTarget = target
+        bottomNavAnimator?.cancel()
+        val start = bottomNavProgress
+        if (target > 0f && bottomNavBar.visibility != View.VISIBLE) {
+            applyBottomNavProgress(start)
+            bottomNavBar.visibility = View.VISIBLE
+        }
+        bottomNavAnimator = ValueAnimator.ofFloat(start, target).apply {
+            duration = (BOTTOM_NAV_BAR_ANIM_MS * abs(target - start)).toLong().coerceAtLeast(1L)
+            interpolator = if (target > start) DecelerateInterpolator() else AccelerateInterpolator()
+            addUpdateListener { applyBottomNavProgress(it.animatedValue as Float) }
+            addListener(object : AnimatorListenerAdapter() {
+                private var cancelled = false
+                override fun onAnimationCancel(animation: Animator) { cancelled = true }
+                override fun onAnimationEnd(animation: Animator) {
+                    if (cancelled) return
+                    if (target == 0f) bottomNavBar.visibility = View.GONE
+                    bottomNavAnimator = null
+                }
+            })
+            start()
+        }
+    }
+
+    private fun applyBottomNavProgress(progress: Float) {
+        bottomNavProgress = progress
+        bottomNavBar.alpha = progress
+        bottomNavBar.translationY = (1f - progress) * bottomNavBar.height
+        applyNavBarPanelMargins()
+    }
+
+    // Elements/Screens panels reserve the bar's height (+ its bottom margin) at the bottom so they
+    // sit above it; that reservation shrinks/grows with the bar's animation progress.
+    private fun applyNavBarPanelMargins() {
+        val margin = ((bottomNavBar.height + bottomNavBar.marginBottom) * bottomNavProgress).roundToInt()
+        (elementsPanel.layoutParams as? CoordinatorLayout.LayoutParams)?.let { lp ->
+            if (lp.bottomMargin != margin) {
+                lp.bottomMargin = margin
+                elementsPanel.layoutParams = lp
+            }
+        }
+        (screensPanel.layoutParams as? CoordinatorLayout.LayoutParams)?.let { lp ->
+            if (lp.bottomMargin != margin) {
+                lp.bottomMargin = margin
+                screensPanel.layoutParams = lp
+            }
+        }
+    }
+
+    // ---- Auto-hide while a panel is open --------------------------------------------------------
+    // Every bottom sheet (Elements, Screens, Text, Button object) registers here when it opens and
+    // unregisters when it closes. The bar hides while ANY panel is open and comes back once none is.
+    // The sync is posted and coalesced, so swapping one panel for another in the same tap (e.g.
+    // Screens -> Elements) doesn't make the bar flicker in and out.
+    private val openPanels = mutableSetOf<View>()
+    private var bottomNavSyncPosted = false
+
+    private fun setPanelOpen(panel: View, open: Boolean) {
+        val changed = if (open) openPanels.add(panel) else openPanels.remove(panel)
+        if (!changed || bottomNavSyncPosted) return
+        bottomNavSyncPosted = true
+        canvasArea.post {
+            bottomNavSyncPosted = false
+            // The zoomed-out carousel manages the bar itself (see enterOverview/exitOverview).
+            if (overviewActive || overviewTransitioning) return@post
+            if (openPanels.isEmpty()) showBottomNavBar() else hideBottomNavBar()
+        }
+    }
+
+    // Manual toggle (tap on empty canvas space) - unchanged in behavior, it just flips the bar's
+    // current state. It now goes by the bar's target rather than its View visibility, since the
+    // latter lags behind while the hide animation is still running.
     private fun toggleBottomNavBar() {
-        if (bottomNavBar.visibility == View.VISIBLE) hideBottomNavBar() else showBottomNavBar()
+        if (bottomNavTarget == 1f) hideBottomNavBar() else showBottomNavBar()
     }
 
     
@@ -632,6 +673,7 @@ class SketchActivity : AppCompatActivity() {
                 when (newState) {
                     BottomSheetBehavior.STATE_HIDDEN -> {
                         panelBackPressedCallback.isEnabled = screensPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
+                        setPanelOpen(elementsPanel, false)
                         resetPanelContent()
                     }
                     BottomSheetBehavior.STATE_EXPANDED -> {
@@ -709,6 +751,7 @@ class SketchActivity : AppCompatActivity() {
         if (elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
             elementsPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
         }
+        setPanelOpen(elementsPanel, false)
     }
 
     
@@ -769,6 +812,7 @@ class SketchActivity : AppCompatActivity() {
             componentsContentBuilt = true
         }
         showingComponents = true
+        setPanelOpen(elementsPanel, true)
         elementsPanelBehavior.state =
             if (expanded) BottomSheetBehavior.STATE_EXPANDED else BottomSheetBehavior.STATE_COLLAPSED
     }
@@ -779,6 +823,7 @@ class SketchActivity : AppCompatActivity() {
         showingComponents = false
         
         
+        setPanelOpen(elementsPanel, false)
         elementsPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
     }
 
@@ -804,6 +849,7 @@ class SketchActivity : AppCompatActivity() {
                 when (newState) {
                     BottomSheetBehavior.STATE_HIDDEN -> {
                         showingScreens = false
+                        setPanelOpen(screensPanel, false)
                         panelBackPressedCallback.isEnabled = elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
                     }
                     BottomSheetBehavior.STATE_EXPANDED -> {
@@ -909,6 +955,7 @@ class SketchActivity : AppCompatActivity() {
             override fun onStateChanged(sheetView: View, newState: Int) {
                 if (newState == BottomSheetBehavior.STATE_HIDDEN) {
                     showingButtonObjectPanel = false
+                    setPanelOpen(buttonObjectPanel, false)
                     panelBackPressedCallback.isEnabled = elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN ||
                         screensPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
                 } else if (newState != BottomSheetBehavior.STATE_DRAGGING && newState != BottomSheetBehavior.STATE_SETTLING) {
@@ -982,6 +1029,7 @@ class SketchActivity : AppCompatActivity() {
         views.setActiveMode(part.objectPanelMode)
         updateButtonObjectPanelCornerState()
         showingButtonObjectPanel = true
+        setPanelOpen(buttonObjectPanel, true)
         buttonObjectPanelBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
 
@@ -989,6 +1037,7 @@ class SketchActivity : AppCompatActivity() {
         if (buttonObjectPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
             buttonObjectPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
         }
+        setPanelOpen(buttonObjectPanel, false)
     }
 
     
@@ -1055,6 +1104,7 @@ class SketchActivity : AppCompatActivity() {
         screenThumbnailsRow.visibility = View.VISIBLE
         screenThumbnailsRow.alpha = 1f
         screenThumbnailsRow.post { positionScreenThumbnailsRow() }
+        setPanelOpen(screensPanel, true)
         screensPanelBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
 
@@ -1195,6 +1245,7 @@ class SketchActivity : AppCompatActivity() {
             screensPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
         }
         showingScreens = false
+        setPanelOpen(screensPanel, false)
         screenThumbnailsRow.visibility = View.GONE
     }
 
@@ -1223,6 +1274,7 @@ class SketchActivity : AppCompatActivity() {
                 when (newState) {
                     BottomSheetBehavior.STATE_HIDDEN -> {
                         showingText = false
+                        setPanelOpen(textPanel, false)
                         panelBackPressedCallback.isEnabled = elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN ||
                             screensPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
                     }
@@ -1286,6 +1338,7 @@ class SketchActivity : AppCompatActivity() {
         }
         showingText = true
         panelBackPressedCallback.isEnabled = true
+        setPanelOpen(textPanel, true)
         textPanelBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
     }
 
@@ -1294,6 +1347,7 @@ class SketchActivity : AppCompatActivity() {
             textPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
         }
         showingText = false
+        setPanelOpen(textPanel, false)
     }
 
 
@@ -1717,6 +1771,9 @@ class SketchActivity : AppCompatActivity() {
     private fun enterOverview() {
         if (overviewActive) return
         overviewActive = true
+        // Captured before the panels are closed below: the bar is auto-hidden while a panel is
+        // open, and it should still come back after the carousel in that case.
+        overviewBottomNavWasVisible = bottomNavTarget == 1f || openPanels.isNotEmpty()
 
         // Abort whatever gesture on the canvas got us here, then swallow the rest of it.
         val now = SystemClock.uptimeMillis()
@@ -1740,7 +1797,6 @@ class SketchActivity : AppCompatActivity() {
         closeTextPanel()
         topBarHideHandler.removeCallbacks(hideTopBarRunnable)
         hideTopBar()
-        overviewBottomNavWasVisible = bottomNavBar.visibility == View.VISIBLE
         hideBottomNavBar()
 
         // Lay the screens out as a carousel centered on the one we came from.
