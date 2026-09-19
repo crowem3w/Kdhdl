@@ -1,7 +1,6 @@
 package org.example.test
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -63,9 +62,11 @@ class SketchCanvasView @JvmOverloads constructor(
         // below) for any listener/part that doesn't care about this.
         fun onPartDoubleTapped(part: SketchPart): Boolean = false
 
-        // Fired once per pinch gesture, the moment the canvas is zoomed out as far as it goes
-        // (minScale). SketchActivity answers by showing the all-screens overview.
-        fun onMaxZoomOutReached() {}
+        // Fired once per pinch gesture when it ends with the canvas clamped at its minimum zoom
+        // (fully zoomed out) - see the scaleGestureDetector's onScaleEnd below. SketchActivity
+        // reacts by opening the zoomed-out screen carousel (see ScreenCarouselView). Default
+        // no-op so any other Listener implementation is unaffected.
+        fun onReachedMinZoom() {}
     }
 
     var listener: Listener? = null
@@ -315,33 +316,32 @@ class SketchCanvasView @JvmOverloads constructor(
     
     fun currentScale(): Float = scaleFactor
 
-    /** Back to 100% zoom, scrolled to the top - used when leaving the screens overview. */
-    fun resetZoom() {
-        scaleFactor = 1f
-        panOffsetY = 0f
-        maxZoomOutNotified = false
+    // Public zoom setter for programmatic changes (as opposed to pinch) - currently used by
+    // SketchActivity to restore a comfortable scale when the zoomed-out screen carousel closes
+    // (see ScreenCarouselView / closeScreenCarousel). Clamped the same as every other zoom
+    // change.
+    fun setZoom(scale: Float) {
+        scaleFactor = scale.coerceIn(minScale, maxScale)
+        clampPan()
         invalidate()
     }
 
-    // So onMaxZoomOutReached() fires once per pinch rather than on every scale event while the
-    // fingers stay pinched at the minimum.
-    private var maxZoomOutNotified = false
-
     private val scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-        override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-            maxZoomOutNotified = false
-            return true
-        }
-
         override fun onScale(detector: ScaleGestureDetector): Boolean {
             scaleFactor = (scaleFactor * detector.scaleFactor).coerceIn(minScale, maxScale)
             clampPan()
             invalidate()
-            if (scaleFactor <= minScale + 0.001f && !maxZoomOutNotified) {
-                maxZoomOutNotified = true
-                listener?.onMaxZoomOutReached()
-            }
             return true
+        }
+
+        // Pinching all the way down to minScale and releasing is the trigger for the zoomed-out
+        // screen carousel. Fired only when the gesture actually ends clamped at the minimum
+        // (not merely while passing through it mid-gesture), so a normal pinch that dips to
+        // 0.5x and comes back out doesn't open anything.
+        override fun onScaleEnd(detector: ScaleGestureDetector) {
+            if (scaleFactor <= minScale + 0.001f) {
+                listener?.onReachedMinZoom()
+            }
         }
     })
 
@@ -1008,36 +1008,13 @@ class SketchCanvasView @JvmOverloads constructor(
 
     
     
-    /**
-     * Renders this screen's page - background plus every visible part, without selection frames,
-     * handles or name tags - into a new bitmap, scaled by [scale]. Used for the screens overview.
-     * [contentWidth] lets a canvas that has never been laid out (still GONE, so width == 0) be
-     * rendered at the width every screen shares. Returns null if there's nothing to size from.
-     */
-    fun renderPageSnapshot(scale: Float, contentWidth: Int = width): Bitmap? {
-        if (contentWidth <= 0 || pageHeight <= 0f) return null
-        val bitmap = Bitmap.createBitmap(
-            max(1, (contentWidth * scale).roundToInt()),
-            max(1, (pageHeight * scale).roundToInt()),
-            Bitmap.Config.ARGB_8888,
-        )
-        val snapshotCanvas = Canvas(bitmap)
-        snapshotCanvas.scale(scale, scale)
-        drawPage(snapshotCanvas, contentWidth.toFloat())
-        for (part in parts) {
-            if (part.hidden) continue
-            drawPart(snapshotCanvas, part)
-        }
-        return bitmap
-    }
-
-    private fun drawPage(canvas: Canvas, pageWidth: Float = width.toFloat()) {
+    private fun drawPage(canvas: Canvas) {
         pageRadii[0] = 0f; pageRadii[1] = 0f 
         pageRadii[2] = 0f; pageRadii[3] = 0f 
         pageRadii[4] = pageCornerRadius; pageRadii[5] = pageCornerRadius 
         pageRadii[6] = pageCornerRadius; pageRadii[7] = pageCornerRadius 
         pagePath.reset()
-        pagePath.addRoundRect(0f, 0f, pageWidth, pageHeight, pageRadii, Path.Direction.CW)
+        pagePath.addRoundRect(0f, 0f, width.toFloat(), pageHeight, pageRadii, Path.Direction.CW)
         canvas.drawPath(pagePath, pagePaint)
     }
 

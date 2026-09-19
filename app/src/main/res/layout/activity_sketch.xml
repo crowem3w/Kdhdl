@@ -467,4 +467,17 @@
             <TextView style="@style/SketchTabLabel" android:text="Elements" android:textColor="#8A8A94" />
         </LinearLayout>
     </org.example.test.BottomNavSheetBar>
+
+    <!-- Zoomed-out screen carousel: a full-screen overlay shown when any screen's canvas is
+         pinched down to its minimum zoom (see SketchCanvasView.Listener.onReachedMinZoom /
+         openScreenCarousel() in SketchActivity). Declared LAST (after bottomNavBar) and at a
+         higher elevation than it so it draws over - and takes touch priority over - every other
+         piece of chrome, all of which is hidden for the duration (see openScreenCarousel()).
+         Hidden by default; built/populated entirely at runtime via ScreenCarouselView.bind(). -->
+    <org.example.test.ScreenCarouselView
+        android:id="@+id/screenCarousel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:elevation="24dp" />
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
