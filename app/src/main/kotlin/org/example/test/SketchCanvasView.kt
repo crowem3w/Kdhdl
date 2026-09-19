@@ -136,6 +136,8 @@ class SketchCanvasView @JvmOverloads constructor(
     private val minPageHeight: Float get() = height.toFloat()
     private val maxPageHeight: Float get() = height.toFloat() * 10f
     private val pagePaint = Paint().apply { color = Color.parseColor("#F3F4F6") }
+    // Fill for the area OUTSIDE the page (visible when zooming out / panning past the page edges).
+    private val outerBackgroundColor = Color.BLACK
     private val pagePath = Path()
     private val pageCornerRadius = 12f * density
     private val pageRadii = FloatArray(8)
@@ -159,6 +161,10 @@ class SketchCanvasView @JvmOverloads constructor(
         setShadowLayer(6f * density, 0f, 2f * density, Color.parseColor("#40000000"))
     }
     private val pageHandleRect = RectF()
+    // White halo drawn behind the handle so its lower half stays visible over the black outer area.
+    private val pageHandleHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+    private val pageHandleHaloRect = RectF()
+    private val pageHandleHaloInset = 1.5f * density
     
 
     
@@ -249,10 +255,14 @@ class SketchCanvasView @JvmOverloads constructor(
     
     
     
+    // Dark text on the page, white text on the black outer area (see drawNameTag()).
+    private val nameTagTextColorOnPage = Color.parseColor("#1D1B20")
+    private val nameTagTextColorOffPage = Color.WHITE
     private val nameTagTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#1D1B20")
+        color = nameTagTextColorOnPage
         textSize = 12f * density
     }
+    private val pageContentRect = RectF()
     private val nameTagHorizontalPad = 8f * density
     private val nameTagVerticalPad = 4f * density
     private val nameTagGap = 6f * density
@@ -922,7 +932,7 @@ class SketchCanvasView @JvmOverloads constructor(
         
         
         
-        canvas.drawColor(Color.parseColor("#F3F4F6"))
+        canvas.drawColor(outerBackgroundColor)
         val saveCount = canvas.save()
         
         
@@ -994,6 +1004,9 @@ class SketchCanvasView @JvmOverloads constructor(
         val halfW = (pageHandleWidth / 2f) * widthScale
         val halfH = pageHandleHeight / 2f
         pageHandleRect.set(centerX - halfW, centerY - halfH, centerX + halfW, centerY + halfH)
+        pageHandleHaloRect.set(pageHandleRect)
+        pageHandleHaloRect.inset(-pageHandleHaloInset, -pageHandleHaloInset)
+        canvas.drawRoundRect(pageHandleHaloRect, halfH + pageHandleHaloInset, halfH + pageHandleHaloInset, pageHandleHaloPaint)
         canvas.drawRoundRect(pageHandleRect, halfH, halfH, pageHandlePaint)
     }
 
@@ -1172,7 +1185,39 @@ class SketchCanvasView @JvmOverloads constructor(
         
         val text = part.name.ifBlank { part.kind.displayLabel }
         val baseline = nameTagRect.top + nameTagVerticalPad - nameTagTextPaint.ascent()
-        canvas.drawText(text, nameTagRect.left + nameTagHorizontalPad, baseline, nameTagTextPaint)
+        val x = nameTagRect.left + nameTagHorizontalPad
+        pageContentRect.set(0f, 0f, width.toFloat(), pageHeight)
+
+        if (pageContentRect.contains(nameTagRect)) {
+            // Fully over the page - the common case.
+            nameTagTextPaint.color = nameTagTextColorOnPage
+            canvas.drawText(text, x, baseline, nameTagTextPaint)
+            return
+        }
+
+        // Tag sits (fully or partly) over the black outer area: draw it twice, once clipped to
+        // the page (dark) and once clipped to everything else (white), so a tag straddling the
+        // page edge stays readable on both sides.
+        var save = canvas.save()
+        canvas.clipRect(pageContentRect)
+        nameTagTextPaint.color = nameTagTextColorOnPage
+        canvas.drawText(text, x, baseline, nameTagTextPaint)
+        canvas.restoreToCount(save)
+
+        save = canvas.save()
+        canvas.clipOutRect(pageContentRect)
+        nameTagTextPaint.color = nameTagTextColorOffPage
+        canvas.drawText(text, x, baseline, nameTagTextPaint)
+        canvas.restoreToCount(save)
+
+        nameTagTextPaint.color = nameTagTextColorOnPage
+    }
+
+    /** True when the centre of [part]'s name tag lies over the page (not the black outer area).
+     *  Used by SketchActivity to pick a readable text colour for the inline name editor. */
+    fun isNameTagOverPage(part: SketchPart): Boolean {
+        val c = nameTagContentRect(part)
+        return c.centerX() in 0f..width.toFloat() && c.centerY() in 0f..pageHeight
     }
 
     

@@ -1554,6 +1554,10 @@ class SketchActivity : AppCompatActivity() {
             android.util.TypedValue.COMPLEX_UNIT_PX,
             canvas.nameTagBaseTextSizePx() * canvas.currentScale(),
         )
+        // Dark text on the page, white when the tag sits over the black outer area.
+        val overPage = canvas.isNameTagOverPage(part)
+        nameTagEditor.setTextColor(if (overPage) 0xFF1D1B20.toInt() else Color.WHITE)
+        nameTagEditor.setHintTextColor(if (overPage) 0x801D1B20.toInt() else 0x80FFFFFF.toInt())
         nameTagEditor.setText(part.name)
         nameTagEditor.visibility = View.VISIBLE
         nameTagEditor.requestFocus()
