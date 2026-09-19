@@ -62,11 +62,10 @@ class SketchCanvasView @JvmOverloads constructor(
         // below) for any listener/part that doesn't care about this.
         fun onPartDoubleTapped(part: SketchPart): Boolean = false
 
-        // Fired once per pinch gesture when it ends with the canvas clamped at its minimum zoom
-        // (fully zoomed out) - see the scaleGestureDetector's onScaleEnd below. SketchActivity
-        // reacts by opening the zoomed-out screen carousel (see ScreenCarouselView). Default
-        // no-op so any other Listener implementation is unaffected.
-        fun onReachedMinZoom() {}
+        // Fired (repeatedly, while the pinch continues) whenever pinch-zoom has been driven all
+        // the way down to the minimum zoom level. SketchActivity uses it to switch into the
+        // zoomed-out screens carousel (see enterOverview() there). Default no-op.
+        fun onMaxZoomOut() {}
     }
 
     var listener: Listener? = null
@@ -316,12 +315,40 @@ class SketchCanvasView @JvmOverloads constructor(
     
     fun currentScale(): Float = scaleFactor
 
-    // Public zoom setter for programmatic changes (as opposed to pinch) - currently used by
-    // SketchActivity to restore a comfortable scale when the zoomed-out screen carousel closes
-    // (see ScreenCarouselView / closeScreenCarousel). Clamped the same as every other zoom
-    // change.
-    fun setZoom(scale: Float) {
+    /** The smallest zoom level pinch-zoom can reach (0.5x). Page width at this zoom is
+     *  width * minZoom - SketchActivity's screens carousel uses it to lay screens out. */
+    val minZoom: Float get() = minScale
+
+    /**
+     * True while SketchActivity's zoomed-out screens carousel is showing this canvas. In this mode
+     * the canvas paints ONLY its page (no opaque outer background, no page-height handle, no
+     * selection chrome) so neighbouring screens' pages can show through beside it, and it never
+     * receives touches (the activity handles swipe/tap itself).
+     */
+    var overviewMode = false
+        private set
+
+    /** Pins zoom to the minimum (0.5x) and switches to the page-only overview rendering. Pan is
+     *  left as-is (only clamped), so the page doesn't shift relative to where it was. */
+    fun enterOverview() {
+        overviewMode = true
+        scaleFactor = minScale
+        clampPan()
+        invalidate()
+    }
+
+    /** Sets the zoom directly (clamped to the normal range) - used by SketchActivity to animate a
+     *  screen between its 0.5x carousel size and 100% while entering/leaving the carousel. */
+    fun setOverviewZoom(scale: Float) {
         scaleFactor = scale.coerceIn(minScale, maxScale)
+        clampPan()
+        invalidate()
+    }
+
+    /** Leaves overview rendering and returns to 100% zoom. */
+    fun exitOverview() {
+        overviewMode = false
+        scaleFactor = 1f
         clampPan()
         invalidate()
     }
@@ -331,17 +358,8 @@ class SketchCanvasView @JvmOverloads constructor(
             scaleFactor = (scaleFactor * detector.scaleFactor).coerceIn(minScale, maxScale)
             clampPan()
             invalidate()
+            if (scaleFactor <= minScale + 0.001f) listener?.onMaxZoomOut()
             return true
-        }
-
-        // Pinching all the way down to minScale and releasing is the trigger for the zoomed-out
-        // screen carousel. Fired only when the gesture actually ends clamped at the minimum
-        // (not merely while passing through it mid-gesture), so a normal pinch that dips to
-        // 0.5x and comes back out doesn't open anything.
-        override fun onScaleEnd(detector: ScaleGestureDetector) {
-            if (scaleFactor <= minScale + 0.001f) {
-                listener?.onReachedMinZoom()
-            }
         }
     })
 
@@ -958,7 +976,7 @@ class SketchCanvasView @JvmOverloads constructor(
         
         
         
-        canvas.drawColor(outerBackgroundColor)
+        if (!overviewMode) canvas.drawColor(outerBackgroundColor)
         val saveCount = canvas.save()
         
         
@@ -1003,7 +1021,7 @@ class SketchCanvasView @JvmOverloads constructor(
         
         
         
-        drawPageHandle(canvas)
+        if (!overviewMode) drawPageHandle(canvas)
     }
 
     

@@ -1,6 +1,9 @@
 package org.example.test
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ArgbEvaluator
+import android.animation.ValueAnimator
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -8,6 +11,11 @@ import android.graphics.drawable.LayerDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
+import android.view.VelocityTracker
+import android.view.ViewConfiguration
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
@@ -29,6 +37,7 @@ import androidx.core.view.marginBottom
 import androidx.core.view.WindowInsetsCompat
 import androidx.coordinatorlayout.widget.CoordinatorLayout
 import com.google.android.material.bottomsheet.BottomSheetBehavior
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 class SketchActivity : AppCompatActivity() {
@@ -243,16 +252,6 @@ class SketchActivity : AppCompatActivity() {
     
     
     
-    // Zoomed-out screen carousel overlay - see ScreenCarouselView / openScreenCarousel() /
-    // closeScreenCarousel() below. showingScreenCarousel guards against re-entering it (e.g. a
-    // second onReachedMinZoom firing while it's already open) and is also what
-    // panelBackPressedCallback checks first.
-    private lateinit var screenCarousel: ScreenCarouselView
-    private var showingScreenCarousel = false
-
-    
-    
-    
     private var statusBarInsetTop = 0
 
 
@@ -260,9 +259,7 @@ class SketchActivity : AppCompatActivity() {
 
     private val panelBackPressedCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
-            if (showingScreenCarousel) {
-                closeScreenCarousel(pickPageId = null, resumeScale = 1f)
-            } else if (selectionActionsPanel.visibility == View.VISIBLE) {
+            if (selectionActionsPanel.visibility == View.VISIBLE) {
                 dismissSelectionActionsPanel(clearSelection = true)
             } else if (buttonObjectPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
                 closeButtonObjectPanel()
@@ -337,9 +334,17 @@ class SketchActivity : AppCompatActivity() {
 
         override fun onMultiSelectionCleared() = hideSelectionActionsPanel()
 
-        // Pinching any screen's canvas all the way out opens the zoomed-out screen carousel -
-        // see openScreenCarousel() below.
-        override fun onReachedMinZoom() = openScreenCarousel()
+        // Pinch-zoom hit the 0.5x floor on the active screen -> show the screens carousel. Posted
+        // (and de-duplicated) because this fires from inside the canvas's own onTouchEvent, and
+        // entering the carousel dispatches a CANCEL back to that same canvas.
+        override fun onMaxZoomOut() {
+            if (overviewActive || overviewEnterPending) return
+            overviewEnterPending = true
+            canvasArea.post {
+                overviewEnterPending = false
+                enterOverview()
+            }
+        }
     }
 
     companion object {
@@ -350,6 +355,14 @@ class SketchActivity : AppCompatActivity() {
         // elementsPanel's minimum/default height when no real keyboard height has been measured
         // yet (i.e. the keyboard isn't currently showing). Matches screensPanel's peekHeight.
         private const val ELEMENTS_PANEL_FALLBACK_PEEK_HEIGHT_DP = 280
+
+        // Zoomed-out screens carousel (see enterOverview()).
+        private const val OVERVIEW_GAP_DP = 16f            // space between neighbouring screens
+        private const val OVERVIEW_SNAP_MS = 220L
+        private const val OVERVIEW_FLING_PROJECTION_S = 0.12f
+        private const val OVERVIEW_PINCH_OUT_THRESHOLD = 1.15f
+        private const val OVERVIEW_TRANSITION_MS = 200L    // enter/leave animation
+        private const val OVERVIEW_ENTER_SPREAD = 0.6f     // neighbours start this close to center
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -396,13 +409,9 @@ class SketchActivity : AppCompatActivity() {
         textContentContainer = findViewById(R.id.textContentContainer)
         textPanelBehavior = BottomSheetBehavior.from(textPanel)
         screenThumbnailsRow = findViewById(R.id.screenThumbnailsRow)
-        screenCarousel = findViewById(R.id.screenCarousel)
-        screenCarousel.listener = object : ScreenCarouselView.Listener {
-            override fun onScreenPicked(pageId: Long) = closeScreenCarousel(pickPageId = pageId)
-            override fun onExitRequested(resumeScale: Float) =
-                closeScreenCarousel(pickPageId = null, resumeScale = resumeScale)
-        }
         onBackPressedDispatcher.addCallback(this, panelBackPressedCallback)
+        // Registered after panelBackPressedCallback so it wins while the carousel is showing.
+        onBackPressedDispatcher.addCallback(this, overviewBackPressedCallback)
 
         canvasArea = findViewById(R.id.canvasArea)
         screenCanvases[screenPages[0].id] = canvas
@@ -456,12 +465,19 @@ class SketchActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         topBarHideHandler.removeCallbacksAndMessages(null)
+        overviewSnapAnimator?.cancel()
+        overviewTransitionAnimator?.removeAllListeners()
+        overviewTransitionAnimator?.cancel()
+        overviewVelocity?.recycle()
+        overviewVelocity = null
     }
 
 
 
     private fun showTopBar(autoHideAfterDelay: Boolean = true) {
         topBarHideHandler.removeCallbacks(hideTopBarRunnable)
+        // The zoomed-out screens carousel keeps every bar hidden (see enterOverview()).
+        if (overviewActive) return
         if (topBar.visibility != View.VISIBLE || topBar.alpha < 1f) {
             topBar.animate().cancel()
             topBar.alpha = 0f
@@ -553,6 +569,7 @@ class SketchActivity : AppCompatActivity() {
     
     
     private fun showBottomNavBar() {
+        if (overviewActive) return
         if (bottomNavBar.visibility == View.VISIBLE && bottomNavBar.alpha >= 1f && bottomNavBar.translationY == 0f) return
         bottomNavBar.animate().cancel()
         bottomNavBar.alpha = 0f
@@ -1103,70 +1120,6 @@ class SketchActivity : AppCompatActivity() {
         canvas = target
     }
 
-    // --- Screen carousel (zoomed-out screen browser) ------------------------------------
-
-    // Pinching any screen's canvas all the way down to its minimum zoom opens this: a
-    // full-screen swipeable carousel of every ScreenPage, shrunk down, so the whole project can
-    // be browsed and jumped between without leaving the canvas - see
-    // SketchCanvasView.Listener.onReachedMinZoom (wired above) and ScreenCarouselView. Every
-    // piece of floating chrome - top bar, bottom nav/tabs, any open panel, the screen
-    // thumbnails row - hides for the duration so nothing clutters the view at max zoom-out.
-    private fun openScreenCarousel() {
-        if (showingScreenCarousel) return
-        showingScreenCarousel = true
-        panelBackPressedCallback.isEnabled = true
-
-        if (editingNamePart != null) commitNameTagEdit()
-        if (selectionActionsPanel.visibility == View.VISIBLE) dismissSelectionActionsPanel(clearSelection = true)
-        closeElementsPanel()
-        closeScreensPanel()
-        closeButtonObjectPanel()
-        closeTextPanel()
-
-        topBarHideHandler.removeCallbacks(hideTopBarRunnable)
-        topBar.animate().cancel()
-        topBar.visibility = View.GONE
-        hideBottomNavBar()
-        screenThumbnailsRow.visibility = View.GONE
-
-        screenCarousel.visibility = View.VISIBLE
-        screenCarousel.bringToFront()
-        screenCarousel.bind(
-            pages = screenPages,
-            initialPageId = selectedScreenPageId,
-            canvasOf = { page -> getOrCreateCanvas(page) },
-        )
-    }
-
-    // [pickPageId] non-null: a card was tapped in the carousel - switch to that screen and zoom
-    // back in at a normal, comfortable scale. Null (pinched back open without picking one): just
-    // restore whichever screen was active before the carousel opened, at [resumeScale].
-    private fun closeScreenCarousel(pickPageId: Long?, resumeScale: Float = 1f) {
-        if (!showingScreenCarousel) return
-        showingScreenCarousel = false
-        panelBackPressedCallback.isEnabled = false
-
-        screenCarousel.releaseCanvasesTo { pageId, canvasView ->
-            canvasArea.addView(canvasView, 0)
-            canvasView.visibility = if (pageId == selectedScreenPageId) View.VISIBLE else View.GONE
-        }
-        screenCarousel.visibility = View.GONE
-
-        if (pickPageId != null && pickPageId != selectedScreenPageId) {
-            val page = screenPages.firstOrNull { it.id == pickPageId }
-            if (page != null) {
-                selectedScreenPageId = page.id
-                switchToScreenPage(page)
-                refreshScreenThumbnails()
-                if (screensContentBuilt) screensPanelContentViews.setDisplayedTitle(page.name)
-            }
-        }
-        canvas.setZoom(if (pickPageId != null) 1f else resumeScale)
-
-        showTopBar()
-        showBottomNavBar()
-    }
-
     // Creates and registers a page's SketchCanvasView the first time it's needed. New canvases
     // start hidden (GONE) and sit at the bottom of canvasArea (index 0), below the top bar,
     // name-tag editor, and other floating chrome - see activity_sketch.xml.
@@ -1665,6 +1618,18 @@ class SketchActivity : AppCompatActivity() {
     }
 
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        // Zoomed-out screens carousel: it owns every touch (swipe / tap / pinch-out) and nothing
+        // underneath - canvases, panels, bars - ever sees them. Events that are left over from the
+        // gesture that entered/left the carousel are swallowed until the next fresh ACTION_DOWN.
+        if (overviewTransitioning) return true
+        if (overviewSwallowUntilDown) {
+            if (ev.actionMasked != android.view.MotionEvent.ACTION_DOWN) return true
+            overviewSwallowUntilDown = false
+        }
+        if (overviewActive) {
+            handleOverviewTouch(ev)
+            return true
+        }
         
         
         if (editingNamePart != null && ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
@@ -1680,6 +1645,316 @@ class SketchActivity : AppCompatActivity() {
 
 
 
+
+
+    // ------------------------------------------------------------------------------------------
+    // Zoomed-out screens carousel
+    //
+    // Pinching the active screen down to its minimum zoom (0.5x) enters this mode:
+    //  - every panel, sheet, bar and sidebar is hidden (system bars are left alone so nothing
+    //    resizes/shifts - each page is exactly the size it already is at 0.5x),
+    //  - all screens' canvases are pinned to 0.5x, made transparent outside their page and laid
+    //    out side by side (one page-width + a small gap apart) so the current screen sits centered
+    //    with its neighbours peeking in,
+    //  - swiping moves one screen at a time, tapping a screen opens it, pinching out (or Back)
+    //    leaves the carousel. Navigate-only: no editing happens while zoomed out.
+    // ------------------------------------------------------------------------------------------
+
+    private var overviewActive = false
+    private var overviewEnterPending = false
+    private var overviewSwallowUntilDown = false
+    private var overviewEntryIndex = 0
+    // Fractional index into screenPages of the screen currently centered (e.g. 1.4 = 40% of the
+    // way from screen 1 toward screen 2 while swiping).
+    private var overviewPos = 0f
+    private var overviewBottomNavWasVisible = false
+    private var overviewSnapAnimator: ValueAnimator? = null
+
+    // Enter/leave animation. While overviewTransitioning every touch is swallowed. overviewExiting
+    // marks the leave animation specifically (overviewActive is already false during it, so the
+    // bars are allowed to fade back in). overviewSpread scales the gap between screens so the
+    // neighbours slide out from behind the current one while entering (1 = normal layout).
+    private var overviewTransitioning = false
+    private var overviewExiting = false
+    private var overviewSpread = 1f
+    private var overviewTransitionAnimator: ValueAnimator? = null
+
+    private var overviewVelocity: VelocityTracker? = null
+    private var overviewDownX = 0f
+    private var overviewLastX = 0f
+    private var overviewStartIndex = 0
+    private var overviewDragging = false
+    private var overviewMultiTouch = false
+    private var overviewPinchScale = 1f
+    private val overviewTouchSlop by lazy { ViewConfiguration.get(this).scaledTouchSlop }
+    private val overviewGapPx by lazy { dp(OVERVIEW_GAP_DP) }
+
+    // Distance between two neighbouring screens' centers: one page width at min zoom + the gap.
+    private val overviewStridePx: Float
+        get() = canvasArea.width * canvas.minZoom + overviewGapPx
+
+    private val overviewBackPressedCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = exitOverview(overviewEntryIndex)
+    }
+
+    private val overviewScaleDetector by lazy {
+        ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                overviewPinchScale = 1f
+                return true
+            }
+
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                overviewPinchScale *= detector.scaleFactor
+                if (overviewPinchScale > OVERVIEW_PINCH_OUT_THRESHOLD) {
+                    exitOverview(overviewPos.roundToInt())
+                }
+                return true
+            }
+        })
+    }
+
+    private fun enterOverview() {
+        if (overviewActive) return
+        overviewActive = true
+
+        // Abort whatever gesture on the canvas got us here, then swallow the rest of it.
+        val now = SystemClock.uptimeMillis()
+        val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+        canvas.dispatchTouchEvent(cancel)
+        cancel.recycle()
+        overviewSwallowUntilDown = true
+
+        // Settle transient UI, and drop selections on every screen so no selection chrome shows.
+        if (editingNamePart != null) commitNameTagEdit()
+        dismissSelectionActionsPanel(clearSelection = true)
+        for (c in screenCanvases.values) {
+            c.clearMultiSelection()
+            c.clearSelection()
+        }
+
+        // Hide every panel / bar / sidebar.
+        closeElementsPanel()
+        closeScreensPanel()
+        closeButtonObjectPanel()
+        closeTextPanel()
+        topBarHideHandler.removeCallbacks(hideTopBarRunnable)
+        hideTopBar()
+        overviewBottomNavWasVisible = bottomNavBar.visibility == View.VISIBLE
+        hideBottomNavBar()
+
+        // Lay the screens out as a carousel centered on the one we came from.
+        overviewEntryIndex = screenPages.indexOfFirst { it.id == selectedScreenPageId }.coerceAtLeast(0)
+        overviewPos = overviewEntryIndex.toFloat()
+        for (page in screenPages) screenCanvases[page.id]?.enterOverview()
+        overviewBackPressedCallback.isEnabled = true
+        startEnterOverviewAnimation()
+    }
+
+    private fun setOverviewNeighborAlpha(alpha: Float) {
+        screenPages.forEachIndexed { i, page ->
+            if (i != overviewEntryIndex) screenCanvases[page.id]?.alpha = alpha
+        }
+    }
+
+    // Neighbours fade in while sliding out from behind the current screen (which is already at
+    // 0.5x from the pinch that got us here, so it needs no animation of its own).
+    private fun startEnterOverviewAnimation() {
+        overviewTransitioning = true
+        overviewSpread = OVERVIEW_ENTER_SPREAD
+        setOverviewNeighborAlpha(0f)
+        layoutOverview()
+        overviewTransitionAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = OVERVIEW_TRANSITION_MS
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                overviewSpread = OVERVIEW_ENTER_SPREAD + (1f - OVERVIEW_ENTER_SPREAD) * t
+                setOverviewNeighborAlpha(t)
+                layoutOverview()
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    overviewSpread = 1f
+                    setOverviewNeighborAlpha(1f)
+                    layoutOverview()
+                    overviewTransitioning = false
+                    overviewTransitionAnimator = null
+                }
+            })
+            start()
+        }
+    }
+
+    // Positions every screen's canvas for the current overviewPos. Each canvas is a full-size
+    // view whose (0.5x-scaled) page is centered, so shifting the view horizontally by
+    // (index - overviewPos) * stride slides its page to the right slot. Only screens near the
+    // center are kept VISIBLE.
+    private fun layoutOverview() {
+        val stride = overviewStridePx
+        screenPages.forEachIndexed { i, page ->
+            val c = screenCanvases[page.id] ?: return@forEachIndexed
+            val offset = i - overviewPos
+            c.translationX = offset * stride * overviewSpread
+            c.visibility = if (abs(offset) < 2.5f) View.VISIBLE else View.GONE
+        }
+    }
+
+    // Leaves the carousel and opens screens[targetIndex] at normal (100%) zoom: the chosen screen
+    // grows from 0.5x to full size (sliding to center if it was a neighbour) while the others
+    // fade out and the bars fade back in. The actual screen switch happens when it finishes.
+    private fun exitOverview(targetIndex: Int) {
+        if (!overviewActive || overviewExiting) return
+        // Settle an unfinished enter animation (its end listener runs synchronously) so we start
+        // from the final carousel layout.
+        overviewTransitionAnimator?.cancel()
+        overviewSnapAnimator?.cancel()
+        overviewSnapAnimator = null
+        overviewVelocity?.recycle()
+        overviewVelocity = null
+
+        overviewExiting = true
+        overviewTransitioning = true
+        overviewActive = false // lets showTopBar()/showBottomNavBar() run again
+
+        val page = screenPages[targetIndex.coerceIn(0, screenPages.lastIndex)]
+        val targetCanvas = screenCanvases[page.id] ?: canvas
+        val others = screenCanvases.values.filter { it !== targetCanvas }
+        val startTx = targetCanvas.translationX
+        val minZoom = targetCanvas.minZoom
+
+        showTopBar()
+        if (overviewBottomNavWasVisible) showBottomNavBar()
+
+        overviewTransitionAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = OVERVIEW_TRANSITION_MS
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                targetCanvas.setOverviewZoom(minZoom + (1f - minZoom) * t)
+                targetCanvas.translationX = startTx * (1f - t)
+                for (c in others) c.alpha = 1f - t
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) = finishExitOverview(page, targetCanvas)
+            })
+            start()
+        }
+    }
+
+    private fun finishExitOverview(page: ScreenPage, targetCanvas: SketchCanvasView) {
+        for (c in screenCanvases.values) {
+            c.alpha = 1f
+            c.translationX = 0f
+            c.exitOverview()
+            c.visibility = if (c === targetCanvas) View.VISIBLE else View.GONE
+        }
+        selectScreenPage(page)
+        overviewBackPressedCallback.isEnabled = false
+        overviewTransitionAnimator = null
+        overviewExiting = false
+        overviewTransitioning = false
+        // If a finger is still down from the gesture that closed the carousel, ignore the rest of it.
+        overviewSwallowUntilDown = true
+    }
+
+    private fun animateOverviewTo(target: Float) {
+        overviewSnapAnimator?.cancel()
+        overviewSnapAnimator = ValueAnimator.ofFloat(overviewPos, target).apply {
+            duration = OVERVIEW_SNAP_MS
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                overviewPos = it.animatedValue as Float
+                layoutOverview()
+            }
+            start()
+        }
+    }
+
+    // Snap to a whole screen, moving at most one screen away from where the swipe started.
+    private fun settleOverview(velocityX: Float) {
+        val projected = overviewPos - velocityX * OVERVIEW_FLING_PROJECTION_S / overviewStridePx
+        val target = projected.roundToInt()
+            .coerceIn(overviewStartIndex - 1, overviewStartIndex + 1)
+            .coerceIn(0, screenPages.lastIndex)
+        animateOverviewTo(target.toFloat())
+    }
+
+    // Index of the screen whose (0.5x) page contains screen-x, or null if x is in a gap/outside.
+    private fun overviewIndexAt(rawX: Float): Int? {
+        val loc = IntArray(2)
+        canvasArea.getLocationOnScreen(loc)
+        val x = rawX - loc[0]
+        val stride = overviewStridePx
+        val halfPage = canvasArea.width * canvas.minZoom / 2f
+        val center = canvasArea.width / 2f
+        for (i in screenPages.indices) {
+            val cx = center + (i - overviewPos) * stride
+            if (x >= cx - halfPage && x <= cx + halfPage) return i
+        }
+        return null
+    }
+
+    private fun handleOverviewTouch(ev: MotionEvent) {
+        overviewScaleDetector.onTouchEvent(ev)
+        if (!overviewActive) return // the pinch-out just closed the carousel
+
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                overviewSnapAnimator?.cancel()
+                overviewVelocity?.recycle()
+                overviewVelocity = VelocityTracker.obtain().also { it.addMovement(ev) }
+                overviewDownX = ev.x
+                overviewLastX = ev.x
+                overviewDragging = false
+                overviewMultiTouch = false
+                overviewStartIndex = overviewPos.roundToInt()
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                overviewMultiTouch = true
+                overviewDragging = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                overviewVelocity?.addMovement(ev)
+                if (overviewMultiTouch || ev.pointerCount > 1) {
+                    overviewMultiTouch = true
+                    return
+                }
+                if (!overviewDragging && abs(ev.x - overviewDownX) > overviewTouchSlop) {
+                    overviewDragging = true
+                    overviewLastX = ev.x
+                }
+                if (overviewDragging) {
+                    val dx = ev.x - overviewLastX
+                    overviewLastX = ev.x
+                    overviewPos = (overviewPos - dx / overviewStridePx)
+                        .coerceIn(0f, screenPages.lastIndex.toFloat())
+                    layoutOverview()
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                overviewVelocity?.addMovement(ev)
+                when {
+                    overviewMultiTouch -> settleOverview(0f)
+                    overviewDragging -> {
+                        overviewVelocity?.computeCurrentVelocity(1000)
+                        settleOverview(overviewVelocity?.xVelocity ?: 0f)
+                    }
+                    else -> {
+                        val hit = overviewIndexAt(ev.rawX)
+                        if (hit != null) exitOverview(hit) else animateOverviewTo(overviewPos.roundToInt().toFloat())
+                    }
+                }
+                overviewVelocity?.recycle()
+                overviewVelocity = null
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                settleOverview(0f)
+                overviewVelocity?.recycle()
+                overviewVelocity = null
+            }
+        }
+    }
 
     private fun openPartPicker(
         title: String,
