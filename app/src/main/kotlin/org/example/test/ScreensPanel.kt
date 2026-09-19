@@ -21,9 +21,8 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 
 // Screens panel palette (light mode) - matches ComponentsPanel.kt's soft-gray surface so the two
 // bottom-sheet panels read as one consistent light system regardless of the app's dark canvas
-// chrome.
-private val PANEL_PRIMARY_TEXT = Color.parseColor("#1A1B24")
-private val PANEL_SECONDARY_TEXT = Color.parseColor("#6B7280")
+// chrome. PANEL_PRIMARY_TEXT / PANEL_SECONDARY_TEXT come from ComponentsPanel.kt (internal, same
+// package) - don't redeclare them here or the compiler reports conflicting declarations.
 private val PANEL_SURFACE = Color.WHITE
 private val PANEL_BORDER = Color.parseColor("#E5E7EB")
 
