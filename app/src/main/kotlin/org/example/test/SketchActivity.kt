@@ -42,6 +42,12 @@ class SketchActivity : AppCompatActivity() {
     // canvasListener; only the active one is View.VISIBLE at a time - see switchToScreenPage().
     private val screenCanvases = mutableMapOf<Long, SketchCanvasView>()
 
+    // All-screens overview shown at maximum zoom-out (see enterScreensOverview()). Sits on top of
+    // every canvas inside canvasArea; while it's up all panels, bars and sidebars are hidden.
+    private lateinit var screensOverview: ScreensOverviewView
+    private var overviewActive = false
+    private var navBarWasVisibleBeforeOverview = false
+
 
 
 
@@ -264,6 +270,13 @@ class SketchActivity : AppCompatActivity() {
         }
     }
 
+    // Registered after panelBackPressedCallback (later callbacks win), and only enabled while the
+    // overview is up - so back leaves the overview first, and the panel callback's own
+    // enable/disable bookkeeping (driven by sheets sliding away) can't switch this one off.
+    private val overviewBackPressedCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = exitScreensOverview(openPageId = null)
+    }
+
     private var nextId = 1L
 
     // Shared across every screen's SketchCanvasView (see screenCanvases) - it only ever acts on
@@ -324,12 +337,19 @@ class SketchActivity : AppCompatActivity() {
         override fun onMultiSelectionFinalized(parts: List<SketchPart>) = showSelectionActionsPanel()
 
         override fun onMultiSelectionCleared() = hideSelectionActionsPanel()
+
+        override fun onMaxZoomOutReached() = enterScreensOverview()
     }
 
     companion object {
         private const val TOP_BAR_AUTO_HIDE_DELAY_MS = 5_000L
         private const val TOP_BAR_FADE_MS = 150L
         private const val BOTTOM_NAV_BAR_ANIM_MS = 250L
+
+        // Overview: each screen is shown at this fraction of its real size (the same 50% the
+        // canvas bottoms out at), shrunk further only if the tallest page wouldn't fit.
+        private const val OVERVIEW_CARD_SCALE = 0.5f
+        private const val OVERVIEW_FADE_MS = 180L
 
         // elementsPanel's minimum/default height when no real keyboard height has been measured
         // yet (i.e. the keyboard isn't currently showing). Matches screensPanel's peekHeight.
@@ -381,9 +401,20 @@ class SketchActivity : AppCompatActivity() {
         textPanelBehavior = BottomSheetBehavior.from(textPanel)
         screenThumbnailsRow = findViewById(R.id.screenThumbnailsRow)
         onBackPressedDispatcher.addCallback(this, panelBackPressedCallback)
+        onBackPressedDispatcher.addCallback(this, overviewBackPressedCallback)
 
         canvasArea = findViewById(R.id.canvasArea)
         screenCanvases[screenPages[0].id] = canvas
+
+        // Added last so it stays above every canvas (new canvases are inserted at index 0).
+        screensOverview = ScreensOverviewView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            visibility = View.GONE
+            listener = object : ScreensOverviewView.Listener {
+                override fun onScreenTapped(pageId: Long) = exitScreensOverview(openPageId = pageId)
+            }
+        }
+        canvasArea.addView(screensOverview)
 
         canvas.listener = canvasListener
 
@@ -439,6 +470,7 @@ class SketchActivity : AppCompatActivity() {
 
 
     private fun showTopBar(autoHideAfterDelay: Boolean = true) {
+        if (overviewActive) return
         topBarHideHandler.removeCallbacks(hideTopBarRunnable)
         if (topBar.visibility != View.VISIBLE || topBar.alpha < 1f) {
             topBar.animate().cancel()
@@ -1065,6 +1097,90 @@ class SketchActivity : AppCompatActivity() {
         val index = screenPages.indexOfFirst { it.id == selectedScreenPageId }
         if (index == -1) return
         screenPages[index] = screenPages[index].copy(name = newName)
+    }
+
+    // ---- All-screens overview (maximum zoom-out) ------------------------------------------------
+
+    // Fired by the canvas when a pinch reaches its minimum zoom. Hides every panel, the bottom
+    // nav bar, the top bar and the multi-select sidebar, then fades in a side-by-side row of all
+    // screens (see ScreensOverviewView). Tapping a screen opens it; back returns to the current one.
+    private fun enterScreensOverview() {
+        if (overviewActive) return
+        overviewActive = true
+        overviewBackPressedCallback.isEnabled = true
+
+        // Settle anything in progress on the active canvas first.
+        if (editingNamePart != null) commitNameTagEdit()
+        if (selectionActionsPanel.visibility == View.VISIBLE) dismissSelectionActionsPanel(clearSelection = true)
+
+        // Panels (bottom sheets), the floating thumbnails row goes with the Screens panel.
+        closeElementsPanel()
+        closeScreensPanel()
+        closeButtonObjectPanel()
+        closeTextPanel()
+
+        // Bars. Remember whether the nav bar was showing so leaving the overview puts things
+        // back the way the person had them.
+        navBarWasVisibleBeforeOverview = bottomNavBar.visibility == View.VISIBLE
+        hideBottomNavBar()
+        topBarHideHandler.removeCallbacks(hideTopBarRunnable)
+        hideTopBar()
+
+        populateScreensOverview()
+        screensOverview.animate().cancel()
+        screensOverview.alpha = 0f
+        screensOverview.visibility = View.VISIBLE
+        screensOverview.animate().alpha(1f).setDuration(OVERVIEW_FADE_MS).start()
+    }
+
+    // Renders a snapshot of every screen at one shared scale and hands them to the overview.
+    private fun populateScreensOverview() {
+        val referenceWidth = canvas.width.takeIf { it > 0 } ?: canvasArea.width
+        var tallestPage = 1f
+        for (page in screenPages) {
+            val pageHeight = screenCanvases[page.id]?.pageHeight ?: 0f
+            if (pageHeight > tallestPage) tallestPage = pageHeight
+        }
+        // Leave room under each card for its name and some breathing space above/below.
+        val availableHeight = (canvasArea.height - dp(96f)).coerceAtLeast(dp(120f))
+        val scale = minOf(OVERVIEW_CARD_SCALE, availableHeight / tallestPage)
+
+        val cards = screenPages.map { page ->
+            val pageCanvas = screenCanvases[page.id] ?: getOrCreateCanvas(page)
+            ScreensOverviewView.Card(
+                pageId = page.id,
+                title = page.name,
+                snapshot = pageCanvas.renderPageSnapshot(scale, referenceWidth),
+            )
+        }
+        screensOverview.setCards(cards, selectedScreenPageId)
+    }
+
+    // Leaves the overview. `openPageId` is the screen that was tapped (null when backing out, which
+    // just returns to the screen that was open). Zoom is reset to 100% on every canvas so nothing
+    // is left stuck at 50%, and the bars come back the way they were.
+    private fun exitScreensOverview(openPageId: Long?) {
+        if (!overviewActive) return
+        overviewActive = false
+        overviewBackPressedCallback.isEnabled = false
+
+        openPageId
+            ?.let { id -> screenPages.firstOrNull { it.id == id } }
+            ?.let { selectScreenPage(it) }
+        screenCanvases.values.forEach { it.resetZoom() }
+
+        screensOverview.animate().cancel()
+        screensOverview.animate()
+            .alpha(0f)
+            .setDuration(OVERVIEW_FADE_MS)
+            .withEndAction {
+                screensOverview.visibility = View.GONE
+                screensOverview.release()
+            }
+            .start()
+
+        if (navBarWasVisibleBeforeOverview) showBottomNavBar()
+        showTopBar()
     }
 
     // Swaps the visible SketchCanvasView to the one belonging to `page`, creating and seeding it
