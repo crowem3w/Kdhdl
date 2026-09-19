@@ -65,6 +65,19 @@
                 android:contentDescription="Back"
                 android:elevation="3dp" />
 
+            <!-- Shows / hides the Elements sidebar (see elementsSidebar below). -->
+            <ImageButton
+                android:id="@+id/btnSidebarToggle"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_top_bar_button_ripple"
+                android:padding="10dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_sidebar_toggle"
+                android:contentDescription="Toggle Elements sidebar"
+                android:elevation="3dp" />
+
             <View
                 android:layout_width="0dp"
                 android:layout_height="1dp"
@@ -188,7 +201,7 @@
     </LinearLayout>
 
     <!-- Elements panel: a separate bottom sheet, independent of bottomNavBar, that shows the
-         Components browser once the Elements tab is tapped. Its bottom margin is padded out at
+         Components browser once a category is tapped in the Elements sidebar. Its bottom margin is padded out at
          runtime to bottomNavBar's measured height (see setupBottomNavBar in SketchActivity) so
          it sits above the nav bar rather than sliding underneath it. Toggles between hidden,
          collapsed (its minimum/default height, matching the on-screen keyboard's height so
@@ -389,10 +402,30 @@
             android:clipChildren="false" />
     </FrameLayout>
 
+    <!-- Elements sidebar: a Material 3 expandable navigation rail docked to the left edge, replacing
+         the old Elements tab. Header (icon + "Elements") on top, the component categories below,
+         collapse/expand toggle at the bottom. Categories open their content in elementsPanel above.
+         Its canvas-facing edge is neumorphic (see ElementsSidebarView), drawn into the view's own
+         transparent padding, which is why this view is wrap_content wide and does not itself take
+         touches outside its surface. Elevated above the bottom sheets (8dp) so it stays usable while
+         one is open - those sheets are inset from the left by the sidebar's width at runtime (see
+         applySidebarInset in SketchActivity) - but below bottomNavBar (16dp). The top/bottom margins
+         are tuned at runtime: bottom follows bottomNavBar (see applyNavBarPanelMargins). -->
+    <org.example.test.ElementsSidebarView
+        android:id="@+id/elementsSidebar"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:layout_marginTop="44dp"
+        android:layout_marginBottom="64dp"
+        android:elevation="10dp"
+        android:clipChildren="false"
+        android:clipToPadding="false" />
+
     <!-- Bottom navigation bar: a plain, always-visible tab bar floating just above the bottom
          edge of the screen as a pill-shaped 3D sheet (NOT a BottomSheetBehavior sheet - it
          never drags, collapses, or hides). Tapping Text/Upload opens its own modal picker/dialog;
-         tapping Screens or Elements opens screensPanel/elementsPanel above, separate sheets that
+         tapping Screens opens screensPanel above (Elements opens from the sidebar), separate sheets that
          float over the canvas but always stay visually and interactively behind this bar
          (see setupBottomNavBar / setupElementsPanel / setupScreensPanel in SketchActivity).
          Declared LAST in this file, and given the highest android:elevation of any popup/panel
@@ -456,16 +489,6 @@
                 <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_upload" app:tint="#8A8A94" />
             </LinearLayout>
             <TextView style="@style/SketchTabLabel" android:text="Upload" android:textColor="#8A8A94" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/tabElements"
-            style="@style/SketchTabColumn">
-
-            <LinearLayout style="@style/SketchTabPill">
-                <ImageView style="@style/SketchTabIcon" android:src="@drawable/ic_tool_elements" app:tint="#8A8A94" />
-            </LinearLayout>
-            <TextView style="@style/SketchTabLabel" android:text="Elements" android:textColor="#8A8A94" />
         </LinearLayout>
     </org.example.test.BottomNavSheetBar>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

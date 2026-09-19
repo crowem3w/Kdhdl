@@ -63,7 +63,6 @@ class SketchActivity : AppCompatActivity() {
     private lateinit var tabScreens: LinearLayout
     private lateinit var tabText: LinearLayout
     private lateinit var tabMedia: LinearLayout
-    private lateinit var tabElements: LinearLayout
     private lateinit var allTabs: List<LinearLayout>
 
     
@@ -173,6 +172,14 @@ class SketchActivity : AppCompatActivity() {
     private lateinit var componentsContentContainer: FrameLayout
     private var componentsContentBuilt = false
     private var showingComponents = false
+
+    // The Elements sidebar (Material rail docked on the left) owns category navigation; the
+    // Elements bottom sheet above only shows the content for whichever category it selects.
+    private lateinit var elementsSidebar: ElementsSidebarView
+    private var componentsHandle: ComponentsContentHandle? = null
+    // Category currently shown in elementsPanel (ALL_CATEGORY.id or a COMPONENT_CATEGORIES id).
+    private var currentComponentsCategory: String? = null
+    private val uiPrefs by lazy { getSharedPreferences("sketch_ui", MODE_PRIVATE) }
 
     
     
@@ -352,6 +359,9 @@ class SketchActivity : AppCompatActivity() {
         private const val TOP_BAR_FADE_MS = 150L
         private const val BOTTOM_NAV_BAR_ANIM_MS = 250L
 
+        private const val PREF_SIDEBAR_SHOWN = "elements_sidebar_shown"
+        private const val PREF_SIDEBAR_EXPANDED = "elements_sidebar_expanded"
+
         // elementsPanel's minimum/default height when no real keyboard height has been measured
         // yet (i.e. the keyboard isn't currently showing). Matches screensPanel's peekHeight.
         private const val ELEMENTS_PANEL_FALLBACK_PEEK_HEIGHT_DP = 280
@@ -381,8 +391,7 @@ class SketchActivity : AppCompatActivity() {
         tabScreens = findViewById(R.id.tabScreens)
         tabText = findViewById(R.id.tabText)
         tabMedia = findViewById(R.id.tabMedia)
-        tabElements = findViewById(R.id.tabElements)
-        allTabs = listOf(tabScreens, tabText, tabSelect, tabMedia, tabElements)
+        allTabs = listOf(tabScreens, tabText, tabSelect, tabMedia)
 
         selectionActionsPanel = findViewById(R.id.selectionActionsPanel)
         actionGroupToggle = findViewById(R.id.actionGroupToggle)
@@ -398,6 +407,7 @@ class SketchActivity : AppCompatActivity() {
         setupNameTagEditor()
         elementsPanel = findViewById(R.id.elementsPanel)
         componentsContentContainer = findViewById(R.id.componentsContentContainer)
+        elementsSidebar = findViewById(R.id.elementsSidebar)
         elementsPanelBehavior = BottomSheetBehavior.from(elementsPanel)
         screensPanel = findViewById(R.id.screensPanel)
         screensContentContainer = findViewById(R.id.screensContentContainer)
@@ -432,6 +442,7 @@ class SketchActivity : AppCompatActivity() {
         setupTopBar()
         setupBottomNavBar()
         setupElementsPanel()
+        setupElementsSidebar()
         setupScreensPanel()
         setupButtonObjectPanel()
         setupTextPanel()
@@ -501,6 +512,7 @@ class SketchActivity : AppCompatActivity() {
 
     private fun setupTopBar() {
         findViewById<View>(R.id.btnBack).setOnClickListener { onBackPressedDispatcher.onBackPressed() }
+        findViewById<View>(R.id.btnSidebarToggle).setOnClickListener { toggleElementsSidebar() }
         findViewById<View>(R.id.btnUndo).setOnClickListener { notAvailableYet("Undo") }
         findViewById<View>(R.id.btnRedo).setOnClickListener { notAvailableYet("Redo") }
         findViewById<View>(R.id.btnPlay).setOnClickListener { notAvailableYet("Preview") }
@@ -617,6 +629,16 @@ class SketchActivity : AppCompatActivity() {
             if (lp.bottomMargin != margin) {
                 lp.bottomMargin = margin
                 screensPanel.layoutParams = lp
+            }
+        }
+        // The Elements sidebar stops just above the bar too (its own transparent shadow padding
+        // supplies most of the visual gap, hence the -8dp), and grows into the freed space when
+        // the bar hides.
+        val sidebarMargin = (margin - (8 * resources.displayMetrics.density).roundToInt()).coerceAtLeast(0)
+        (elementsSidebar.layoutParams as? CoordinatorLayout.LayoutParams)?.let { lp ->
+            if (lp.bottomMargin != sidebarMargin) {
+                lp.bottomMargin = sidebarMargin
+                elementsSidebar.layoutParams = lp
             }
         }
     }
@@ -741,13 +763,13 @@ class SketchActivity : AppCompatActivity() {
     private fun openElementsPanel() {
         if (showingScreens) closeScreensPanel()
         if (showingText) closeTextPanel()
-        setTabActive(tabElements)
-        showComponentsContent()
+        openComponentsCategory(ALL_CATEGORY.id)
     }
 
     
     
     private fun closeElementsPanel() {
+        clearComponentsSelection()
         if (elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
             elementsPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
         }
@@ -758,6 +780,7 @@ class SketchActivity : AppCompatActivity() {
     
     private fun resetPanelContent() {
         showingComponents = false
+        clearComponentsSelection()
         
         
     }
@@ -766,8 +789,7 @@ class SketchActivity : AppCompatActivity() {
 
     private fun showComponentsContent(expanded: Boolean = false) {
         if (!componentsContentBuilt) {
-            componentsContentContainer.addView(
-                buildComponentsContent(
+            val handle = buildComponentsContent(
                     context = this,
                     onClose = { closeComponentsContent() },
                     // Tapping the Button preview in the dedicated Buttons panel (see
@@ -807,20 +829,101 @@ class SketchActivity : AppCompatActivity() {
                         part.label = text
                         canvas.invalidate()
                     },
+                    // The sheet's search field dims the sidebar rows that no longer match.
+                    onSearchFilterChanged = { matching -> elementsSidebar.setSearchMatches(matching) },
+                    // e.g. the Buttons panel's back arrow drops back to "All" - the sidebar follows.
+                    onActiveCategoryChanged = { id ->
+                        currentComponentsCategory = id
+                        elementsSidebar.setSelectedCategory(id)
+                    },
                 )
-            )
+            componentsContentContainer.addView(handle.view)
+            componentsHandle = handle
             componentsContentBuilt = true
         }
+        val wasShowing = showingComponents
         showingComponents = true
         setPanelOpen(elementsPanel, true)
-        elementsPanelBehavior.state =
-            if (expanded) BottomSheetBehavior.STATE_EXPANDED else BottomSheetBehavior.STATE_COLLAPSED
+        // Keep whatever height the person dragged the sheet to when just switching categories;
+        // only pick the default (collapsed) height when the sheet is being opened from hidden.
+        // (STATE_DRAGGING / STATE_SETTLING can't be assigned, so the else case leaves it alone.)
+        if (expanded) {
+            elementsPanelBehavior.state = BottomSheetBehavior.STATE_EXPANDED
+        } else if (!wasShowing || elementsPanelBehavior.state == BottomSheetBehavior.STATE_HIDDEN) {
+            elementsPanelBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
+        }
+    }
+
+    // The sidebar's highlight should disappear the moment the sheet is dismissed, not once its
+    // slide-out animation finishes.
+    private fun clearComponentsSelection() {
+        currentComponentsCategory = null
+        elementsSidebar.setSelectedCategory(null)
+        elementsSidebar.setSearchMatches(null)
+    }
+
+    // Opens (or switches) the Elements sheet to [categoryId]'s content and highlights it in the sidebar.
+    private fun openComponentsCategory(categoryId: String) {
+        showComponentsContent()
+        currentComponentsCategory = categoryId
+        componentsHandle?.showCategory(categoryId)
+        elementsSidebar.setSelectedCategory(categoryId)
+    }
+
+    // ---- Elements sidebar ------------------------------------------------------------------
+
+    private fun setupElementsSidebar() {
+        elementsSidebar.onCategoryClick = { id ->
+            if (showingComponents && currentComponentsCategory == id) {
+                // Tapping the active category again dismisses its sheet.
+                closeComponentsContent()
+            } else {
+                if (showingScreens) closeScreensPanel()
+                if (showingText) closeTextPanel()
+                openComponentsCategory(id)
+            }
+        }
+        elementsSidebar.onOccupiedWidthChanged = { px -> applySidebarInset(px) }
+        elementsSidebar.onExpandedChanged = { expanded ->
+            uiPrefs.edit().putBoolean(PREF_SIDEBAR_EXPANDED, expanded).apply()
+        }
+        elementsSidebar.setExpanded(uiPrefs.getBoolean(PREF_SIDEBAR_EXPANDED, false), animate = false)
+        elementsSidebar.setShown(uiPrefs.getBoolean(PREF_SIDEBAR_SHOWN, true), animate = false)
+    }
+
+    private fun toggleElementsSidebar() {
+        val show = !elementsSidebar.isShown
+        elementsSidebar.setShown(show, animate = true)
+        uiPrefs.edit().putBoolean(PREF_SIDEBAR_SHOWN, show).apply()
+        // Nothing to navigate from once the sidebar is gone.
+        if (!show && showingComponents) closeComponentsContent()
+    }
+
+    // The sidebar is docked over the left edge of the canvas, so every bottom sheet and the
+    // multi-selection actions panel starts to its right instead of sliding underneath it.
+    private fun applySidebarInset(insetPx: Int) {
+        for (panel in listOf(elementsPanel, screensPanel, buttonObjectPanel, textPanel, screenThumbnailsRow)) {
+            (panel.layoutParams as? CoordinatorLayout.LayoutParams)?.let { lp ->
+                if (lp.marginStart != insetPx) {
+                    lp.marginStart = insetPx
+                    panel.layoutParams = lp
+                }
+            }
+        }
+        (selectionActionsPanel.layoutParams as? CoordinatorLayout.LayoutParams)?.let { lp ->
+            val start = insetPx + (16 * resources.displayMetrics.density).roundToInt()
+            if (lp.marginStart != start) {
+                lp.marginStart = start
+                selectionActionsPanel.layoutParams = lp
+            }
+        }
     }
 
 
 
     private fun closeComponentsContent() {
         showingComponents = false
+        clearComponentsSelection()
         
         
         setPanelOpen(elementsPanel, false)
@@ -1400,7 +1503,6 @@ class SketchActivity : AppCompatActivity() {
         tabScreens.setOnClickListener { selectShapesTab() }
         tabText.setOnClickListener { selectTextTab() }
         tabMedia.setOnClickListener { selectMediaTab() }
-        tabElements.setOnClickListener { selectComponentsTab(expanded = true) }
         tabSelect.setOnClickListener { selectSelectTab() }
 
         
@@ -1418,7 +1520,6 @@ class SketchActivity : AppCompatActivity() {
                 tabScreens -> selectShapesTab()
                 tabText -> selectTextTab()
                 tabMedia -> selectMediaTab()
-                tabElements -> selectComponentsTab()
                 tabSelect -> selectSelectTab()
                 else -> {}
             }
@@ -1441,13 +1542,6 @@ class SketchActivity : AppCompatActivity() {
 
     private fun selectMediaTab() {
         openPartPickerFromTab(tabMedia, "Upload", listOf(PartKind.IMAGE))
-    }
-
-    private fun selectComponentsTab(expanded: Boolean = false) {
-        if (showingScreens) closeScreensPanel()
-        if (showingText) closeTextPanel()
-        setTabActive(tabElements)
-        showComponentsContent(expanded)
     }
 
     private fun selectSelectTab() {
@@ -1795,6 +1889,7 @@ class SketchActivity : AppCompatActivity() {
         closeScreensPanel()
         closeButtonObjectPanel()
         closeTextPanel()
+        elementsSidebar.setSuppressed(true)
         topBarHideHandler.removeCallbacks(hideTopBarRunnable)
         hideTopBar()
         hideBottomNavBar()
@@ -1880,6 +1975,7 @@ class SketchActivity : AppCompatActivity() {
         val minZoom = targetCanvas.minZoom
 
         showTopBar()
+        elementsSidebar.setSuppressed(false)
         if (overviewBottomNavWasVisible) showBottomNavBar()
 
         overviewTransitionAnimator = ValueAnimator.ofFloat(0f, 1f).apply {

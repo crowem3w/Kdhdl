@@ -27,12 +27,12 @@ import android.widget.TextView
 import android.widget.Toast
 
 // Elements panel palette (light mode): soft-gray surface with a lime-green secondary/accent color.
-private val PANEL_BG = Color.parseColor("#F3F4F6")
-private val PANEL_PRIMARY_TEXT = Color.parseColor("#1A1B24")
-private val PANEL_SECONDARY_TEXT = Color.parseColor("#6B7280")
-private val PANEL_NEUTRAL_TEXT = Color.parseColor("#9CA3AF")
-private val PANEL_DIVIDER = Color.parseColor("#D1D5DB")
-private val PANEL_ACCENT = Color.parseColor("#355E3B")
+internal val PANEL_BG = Color.parseColor("#F3F4F6")
+internal val PANEL_PRIMARY_TEXT = Color.parseColor("#1A1B24")
+internal val PANEL_SECONDARY_TEXT = Color.parseColor("#6B7280")
+internal val PANEL_NEUTRAL_TEXT = Color.parseColor("#9CA3AF")
+internal val PANEL_DIVIDER = Color.parseColor("#D1D5DB")
+internal val PANEL_ACCENT = Color.parseColor("#355E3B")
 
 // Selection-frame blue for the two Buttons-panel previews in canvasContentRow (see
 // buildButtonCategoryPanel()) - standard Material blue, distinct from the panel's own
@@ -40,72 +40,9 @@ private val PANEL_ACCENT = Color.parseColor("#355E3B")
 private val BUTTON_PREVIEW_SELECTED_BORDER = Color.parseColor("#2196F3")
 // Selected-state frame color for the Design/Prototype toggle - matches the app's existing
 // blue accent (see bg_tab_selected) rather than the sidebar's hunter-green accent.
-private val PANEL_MODE_SELECTED = Color.parseColor("#3D7EFF")
+internal val PANEL_MODE_SELECTED = Color.parseColor("#3D7EFF")
 
-private data class ComponentCategory(val id: String, val label: String, val iconRes: Int)
-
-/**
- * Draws a single shadowed line that traces the Elements-panel sidebar's top edge, bends through
- * its rounded top-right corner, and continues down its right edge - so the sidebar/content
- * divider "blends" into the sidebar's border radius instead of meeting a curved corner with an
- * abrupt straight line, and so the drop shadow reads as one continuous shadow along the sidebar's
- * top and right sides rather than two disconnected shadows.
- *
- * Sized as an overlay slightly wider than the sidebar (see edgeWidthPx vs. actual view width) so
- * the blurred shadow has room to bleed to the right without being clipped at the view's bounds.
- */
-private class SidebarEdgeShadowView(
-    context: Context,
-    edgeWidthPx: Float,
-    private val cornerRadiusPx: Float,
-    private val strokeWidthPx: Float,
-    private val lineColor: Int,
-    private val shadowRadiusPx: Float,
-    private val shadowColor: Int,
-    private val shadowDx: Float,
-    private val shadowDy: Float,
-) : View(context) {
-
-    // Mutable so the drag handle can move the line as the rail is resized, without having to
-    // rebuild this view.
-    var edgeWidthPx: Float = edgeWidthPx
-        set(value) {
-            field = value
-            invalidate()
-        }
-
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = strokeWidthPx
-        strokeCap = Paint.Cap.ROUND
-        color = lineColor
-    }
-
-    init {
-        // View elevation can't cast a shadow along an arbitrary curved path - Paint.setShadowLayer
-        // can, but it only renders on a software-rendered layer.
-        setLayerType(View.LAYER_TYPE_SOFTWARE, paint)
-    }
-
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        // The line itself is drawn at edgeWidthPx (the sidebar's real right edge). The view is
-        // wider than that so the blurred shadow has room to bleed rightward without being
-        // clipped at the view's own bounds.
-        val top = strokeWidthPx
-        val right = edgeWidthPx
-        val r = cornerRadiusPx
-        val path = Path().apply {
-            moveTo(0f, top)
-            lineTo(right - r, top)
-            arcTo(RectF(right - 2 * r, top, right, top + 2 * r), 270f, 90f, false)
-            lineTo(right, height.toFloat())
-        }
-        paint.setShadowLayer(shadowRadiusPx, shadowDx, shadowDy, shadowColor)
-        canvas.drawPath(path, paint)
-    }
-}
-
+internal data class ComponentCategory(val id: String, val label: String, val iconRes: Int)
 private data class GeometrySubCategory(val label: String, val iconRes: Int, val children: List<String>)
 
 private val GEOMETRY_SUBCATEGORIES = listOf(
@@ -116,9 +53,9 @@ private val GEOMETRY_SUBCATEGORIES = listOf(
     GeometrySubCategory("Animate", R.drawable.ic_geo_animate, listOf("Keyframe", "Motion Path", "Constraint", "Timeline", "Graph Editor")),
 )
 
-private val ALL_CATEGORY = ComponentCategory("all", "All", R.drawable.ic_components)
+internal val ALL_CATEGORY = ComponentCategory("all", "All", R.drawable.ic_components)
 
-private val COMPONENT_CATEGORIES = listOf(
+internal val COMPONENT_CATEGORIES = listOf(
     ComponentCategory("structure", "Buttons", R.drawable.ic_cat_buttons),
     ComponentCategory("layout", "Layout", R.drawable.ic_cat_layout),
     ComponentCategory("typography", "Typography", R.drawable.ic_cat_typography),
@@ -133,7 +70,7 @@ private val COMPONENT_CATEGORIES = listOf(
     ComponentCategory("prototype", "Prototype", R.drawable.ic_cat_prototype),
 )
 
-private val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
+internal val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
     // "structure" is the "Buttons" category (see COMPONENT_CATEGORIES below). It now opens a
     // dedicated full-panel Button experience (see buildButtonCategoryPanel()) instead of the
     // generic item grid, so it carries a single real item rather than the placeholder
@@ -152,7 +89,7 @@ private val COMPONENT_ITEMS: Map<String, List<String>> = mapOf(
     "prototype" to listOf("Hotspot", "Overlay", "Transition", "Scroll Group"),
 )
 
-private fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
+internal fun buildGeometrySidebarTree(context: Context): Pair<View, () -> Unit> {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
 
@@ -1172,7 +1109,18 @@ fun buildButtonCategoryPanel(
     return ButtonCategoryPanelViews(root, label, committedLabel)
 }
 
-fun buildComponentsContent(
+/**
+ * Handle returned by [buildComponentsContent]. The Elements *sidebar* (see ElementsSidebarView)
+ * owns category navigation; this content (search row + category content, or the dedicated
+ * Buttons panel) lives in the bottom sheet and is driven from the sidebar through [showCategory].
+ */
+internal class ComponentsContentHandle(
+    val view: View,
+    /** Shows the content for [ALL_CATEGORY] ("all") or one of [COMPONENT_CATEGORIES]' ids. */
+    val showCategory: (String) -> Unit,
+)
+
+internal fun buildComponentsContent(
     context: Context,
     onClose: () -> Unit = {},
     onButtonPanelExpandRequested: () -> Unit = {},
@@ -1183,7 +1131,13 @@ fun buildComponentsContent(
     // real time as Align/Label/style change.
     getEditableSelectedButton: () -> SketchPart? = { null },
     onButtonLiveEdited: (SketchPart, ButtonStyle, String, String) -> Unit = { _, _, _, _ -> },
-): View {
+    // The sheet's search field filters the category sections; this reports which category ids
+    // still match (null = no active query) so the sidebar can dim the rest.
+    onSearchFilterChanged: (Set<String>?) -> Unit = {},
+    // Fired when the content moves itself to another category (e.g. the Buttons panel's back
+    // arrow returns to "all"), so the sidebar's selection can follow.
+    onActiveCategoryChanged: (String) -> Unit = {},
+): ComponentsContentHandle {
     val d = context.resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
 
@@ -1254,68 +1208,18 @@ fun buildComponentsContent(
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             bottomMargin = dp(16)
         }
+        setPadding(dp(8), 0, dp(16), 0)
         addView(closeButton)
         addView(searchField)
         addView(filterButton)
     }
     root.addView(headerRow)
 
-
-
-
-
-
-    data class RailRowViews(
-        val wrapper: FrameLayout,
-        val frameBg: View,
-        val icon: ImageView,
-        val label: TextView,
-        val chevron: ImageView
-    )
-    val railIcons = mutableMapOf<String, RailRowViews>()
     val sectionViews = mutableMapOf<String, View>()
-
-
-
-
-    val railIconSizeDefault = dp(18)
-    val railIconSizeSelected = dp(20)
-    val railLabelTextSizeDefault = 12.5f
-    val railLabelTextSizeSelected = 10f
-
-
-
-
-
-
-    fun setActiveCategory(id: String?) {
-        for ((catId, entry) in railIcons) {
-            val active = id != null && catId == id
-
-
-            entry.frameBg.visibility = if (active) View.VISIBLE else View.GONE
-            val color = if (active) PANEL_ACCENT else PANEL_SECONDARY_TEXT
-            entry.icon.setColorFilter(color)
-
-
-            // Icons + labels are always bold in this sidebar; only size/color/chevron
-            // change to indicate the active category.
-            val iconSize = railIconSizeSelected
-            entry.icon.layoutParams = entry.icon.layoutParams.apply {
-                width = iconSize
-                height = iconSize
-            }
-            entry.label.setTextColor(color)
-            entry.label.textSize = if (active) railLabelTextSizeSelected else railLabelTextSizeDefault
-            entry.label.setTypeface(null, Typeface.BOLD)
-
-            entry.chevron.visibility = if (active) View.VISIBLE else View.GONE
-        }
-    }
 
     val sectionsContainer = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(0, dp(2), 0, dp(28))
+        setPadding(dp(16), dp(2), dp(16), dp(28))
         clipChildren = false
         clipToPadding = false
     }
@@ -1340,8 +1244,7 @@ fun buildComponentsContent(
         addView(emptyCategoryView)
     }
 
-    // Design/Prototype mode toggle - sits above the content body (below the search row from
-    // above, to the right of the sidebar). Purely visual for now: switching between the two
+    // Design/Prototype mode toggle - sits above the content body, below the search row. Purely visual for now: switching between the two
     // just moves which one carries the solid-blue selected shading; it doesn't filter or
     // change contentBody's content yet.
     //
@@ -1393,6 +1296,8 @@ fun buildComponentsContent(
         orientation = LinearLayout.HORIZONTAL
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             bottomMargin = dp(12)
+            marginStart = dp(16)
+            marginEnd = dp(16)
         }
         background = modeSharedFrameBg
         outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
@@ -1410,7 +1315,7 @@ fun buildComponentsContent(
 
     val contentContainer = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
         clipChildren = false
         clipToPadding = false
         addView(modeToggleRow)
@@ -1630,499 +1535,28 @@ fun buildComponentsContent(
         sectionViews[cat.id] = section
     }
 
+    root.addView(contentContainer)
 
-
-
-    val railWidthPx = dp(168).toFloat()
-    val railMinWidthPx = dp(64).toFloat()
-    val railMaxWidthPx = dp(240).toFloat()
-    // Below this width the row labels fade out and rows show icon-only.
-    val railCompactThresholdPx = dp(96).toFloat()
-    val cornerRadiusPx = dp(16).toFloat()
-    val edgeStrokeWidthPx = 1.5f * d
-    val edgeShadowRadiusPx = 4f * d
-    val edgeShadowDyPx = 2f * d
-    // Extra width to the right of the sidebar's real edge so the blurred shadow has room to
-    // bleed without being clipped at the overlay view's own bounds.
-    val edgeShadowBleedPx = kotlin.math.ceil(edgeShadowRadiusPx + edgeShadowDyPx).toInt()
-    val dividerGapPx = dp(16)
-
-    val rail = LinearLayout(context).apply {
-        orientation = LinearLayout.VERTICAL
-        layoutParams = FrameLayout.LayoutParams(dp(168), ViewGroup.LayoutParams.MATCH_PARENT)
-        // Rounded only on the top-right corner, matching the edge that sits against the
-        // sidebar/content divider.
-        background = context.getDrawable(R.drawable.bg_elements_sidebar)
-        clipChildren = false
-        clipToPadding = false
-    }
-
-    // Overlay that traces the sidebar's top edge, bends around its rounded top-right corner, and
-    // continues down its right edge - this is the sidebar/content divider. It's drawn as one
-    // continuous shadowed line so the divider's top blends into the sidebar's border radius
-    // instead of meeting it as an abrupt straight line, and so the drop shadow covers the
-    // sidebar's top side as well as its right side.
-    val sidebarEdgeShadow = SidebarEdgeShadowView(
-        context = context,
-        edgeWidthPx = railWidthPx,
-        cornerRadiusPx = cornerRadiusPx,
-        strokeWidthPx = edgeStrokeWidthPx,
-        lineColor = PANEL_DIVIDER,
-        shadowRadiusPx = edgeShadowRadiusPx,
-        shadowColor = Color.parseColor("#33000000"),
-        shadowDx = 0f,
-        shadowDy = edgeShadowDyPx,
-    )
-
-    val railWrapper = FrameLayout(context).apply {
-        layoutParams = LinearLayout.LayoutParams(dp(168) + edgeShadowBleedPx, ViewGroup.LayoutParams.MATCH_PARENT)
-        clipChildren = false
-        clipToPadding = false
-        addView(rail)
-        addView(
-            sidebarEdgeShadow,
-            FrameLayout.LayoutParams(dp(168) + edgeShadowBleedPx, ViewGroup.LayoutParams.MATCH_PARENT)
-        )
-    }
-
-    // Draggable divider: a plain, wide-enough-to-grab touch target dropped into the gap between
-    // the rail and the content column. It doesn't draw anything itself - the rounded-corner
-    // divider line is still sidebarEdgeShadow above - it just resizes the rail as it's dragged.
-    var railCurrentWidthPx = railWidthPx
-    var railIsCompact = false
-
-    fun applyRailWidth(widthPx: Float, updateShadow: Boolean = true) {
-        val w = widthPx.toInt()
-        (rail.layoutParams as FrameLayout.LayoutParams).width = w
-        rail.requestLayout()
-        val wrapperWidth = w + edgeShadowBleedPx
-        (railWrapper.layoutParams as LinearLayout.LayoutParams).width = wrapperWidth
-        railWrapper.requestLayout()
-        (sidebarEdgeShadow.layoutParams as FrameLayout.LayoutParams).width = wrapperWidth
-        sidebarEdgeShadow.requestLayout()
-        // sidebarEdgeShadow is a software-layer view (Paint.setShadowLayer only renders on
-        // software layers), so every edgeWidthPx write below triggers a CPU-rasterized blurred
-        // redraw - the single most expensive part of this whole resize. Callers doing a live,
-        // continuous drag pass updateShadow = false and sync it separately at a throttled rate
-        // (see the touch listener) so the visible rail/content resize stays smooth even though
-        // the shadow can't afford to repaint on every frame.
-        if (updateShadow) {
-            sidebarEdgeShadow.edgeWidthPx = widthPx
-        }
-    }
-
-    val dividerHandle = View(context).apply {
-        isClickable = true
-        isFocusable = true
-        contentDescription = "Resize sidebar"
-        // sidebarEdgeShadow draws the visible divider line at the rail's true right edge, but
-        // railWrapper (this view's left neighbor) is edgeShadowBleedPx wider than that so the
-        // blurred shadow has room to bleed without clipping. Left at its default position, this
-        // handle's touchable bounds would start edgeShadowBleedPx to the right of the line
-        // itself, leaving a dead gap where tapping directly on the line does nothing. Pull the
-        // handle's bounds left by that same amount (and widen it to match) so the touchable area
-        // actually starts at the line's own position.
-        layoutParams = LinearLayout.LayoutParams(
-            dividerGapPx + edgeShadowBleedPx, ViewGroup.LayoutParams.MATCH_PARENT
-        ).apply {
-            marginStart = -edgeShadowBleedPx
-        }
-    }
-
-
-
-
-    val (geometryAccordion, geometryAccordionReset) = buildGeometrySidebarTree(context)
-    geometryAccordion.visibility = View.GONE
-
-
-
-
-
-
-
-    val frameBleedToScreenEdge = dp(16)
-
-
-
-
-
-
-    val targetIconFromScreenEdge = dp(14)
-    val contentPaddingStart = targetIconFromScreenEdge
-
-
-
-
-
-
-
-
-
-
-
-
-    // Selection is now indicated by a thin, flat accent line running along the bottom edge of
-    // the active rail row (instead of a full-row background wash). It still bleeds flush to the
-    // screen edge on the left, but stops short of the sidebar/content divider on the right by
-    // railSelectionLineEndGap, and carries no elevation/shadow.
-    val railSelectionLineHeight = dp(1)
-    val railSelectionLineEndGap = dp(2)
-
-    fun buildRailRow(iconRes: Int, label: String, topRounded: Boolean = false, onClick: () -> Unit): RailRowViews {
-        lateinit var iconView: ImageView
-        lateinit var labelView: TextView
-        lateinit var chevronView: ImageView
-
-        val frameBg = View(context).apply {
-            background = GradientDrawable().apply { setColor(PANEL_ACCENT) }
-            visibility = View.GONE
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, railSelectionLineHeight
-            ).apply {
-                gravity = Gravity.BOTTOM
-                marginStart = -frameBleedToScreenEdge
-                marginEnd = railSelectionLineEndGap
-            }
-        }
-
-        val content = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            isClickable = true
-            isFocusable = true
-
-
-            elevation = 0f
-            setPadding(contentPaddingStart, 0, dp(10), 0)
-            iconView = ImageView(context).apply {
-                setImageResource(iconRes)
-                layoutParams = LinearLayout.LayoutParams(railIconSizeDefault, railIconSizeDefault)
-            }
-            addView(iconView)
-            labelView = TextView(context).apply {
-                text = label
-                textSize = railLabelTextSizeDefault
-                maxLines = 1
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginStart = dp(8)
-                }
-            }
-            addView(labelView)
-
-
-            chevronView = ImageView(context).apply {
-                setImageResource(R.drawable.ic_chevron_left)
-                setColorFilter(PANEL_ACCENT)
-                rotation = 270f
-                visibility = View.GONE
-                layoutParams = LinearLayout.LayoutParams(dp(14), dp(14))
-            }
-            addView(chevronView)
-            setOnClickListener { onClick() }
-        }
-
-        val wrapper = FrameLayout(context).apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)).apply {
-                bottomMargin = dp(4)
-            }
-            clipChildren = false
-            clipToPadding = false
-            addView(frameBg)
-            addView(content)
-        }
-
-        return RailRowViews(wrapper, frameBg, iconView, labelView, chevronView)
-    }
-
-
-
-
-    data class RailEntry(val view: View, val label: TextView?)
-    val railEntries = mutableListOf<RailEntry>()
-    var activeRailIndex: Int? = null
-    var activeCategoryId: String? = null
-
-    val railStaggerStepMs = 45L
-    val railAnimDurationMs = 200L
-    val railLiftDistancePx = dp(40).toFloat()
-
-    fun railResetAllImmediate() {
-        railEntries.forEach { entry ->
-            entry.view.animate().cancel()
-            entry.view.visibility = View.VISIBLE
-            entry.view.alpha = 1f
-            entry.view.translationY = 0f
-            entry.label?.let { l ->
-                l.animate().cancel()
-                l.visibility = View.VISIBLE
-                l.alpha = 1f
-            }
-        }
-    }
-
-
-
-
-
-
-
-    fun railAnimateSelect(index: Int) {
-        railEntries.forEachIndexed { idx, entry ->
-            if (idx == index) return@forEachIndexed
-            val delay = kotlin.math.abs(idx - index) * railStaggerStepMs
-            entry.view.animate().cancel()
-            entry.view.visibility = View.VISIBLE
-            entry.view.animate()
-                .translationY(-railLiftDistancePx)
-                .alpha(0f)
-                .setStartDelay(delay)
-                .setDuration(railAnimDurationMs)
-                .setInterpolator(AccelerateInterpolator())
-                .withEndAction { if (entry.view.alpha == 0f) entry.view.visibility = View.GONE }
-                .start()
-        }
-    }
-
-
-
-    fun railAnimateRestore(index: Int) {
-        railEntries.forEachIndexed { idx, entry ->
-            if (idx == index) return@forEachIndexed
-            val delay = kotlin.math.abs(idx - index) * railStaggerStepMs
-            entry.view.animate().cancel()
-            entry.view.visibility = View.VISIBLE
-            entry.view.animate()
-                .translationY(0f)
-                .alpha(1f)
-                .setStartDelay(delay)
-                .setDuration(railAnimDurationMs)
-                .setInterpolator(DecelerateInterpolator())
-                .withEndAction(null)
-                .start()
-        }
-    }
-
-
-
-
-    val allItem = buildRailRow(ALL_CATEGORY.iconRes, ALL_CATEGORY.label, topRounded = true) {
-
-
-        setActiveCategory(null)
-        showAllContent()
-        activeRailIndex?.let { railAnimateRestore(it) }
-        activeRailIndex = null
-        if (activeCategoryId == "shapes") {
-            geometryAccordionReset()
-            geometryAccordion.visibility = View.GONE
-        }
-        activeCategoryId = null
-        contentScroll.post { contentScroll.smoothScrollTo(0, 0) }
-    }
-    rail.addView(allItem.wrapper)
-    railIcons[ALL_CATEGORY.id] = allItem
-    railEntries.add(RailEntry(allItem.wrapper, allItem.label))
-
-    val railDivider = View(context).apply {
-        setBackgroundColor(PANEL_DIVIDER)
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
-            topMargin = dp(2)
-            bottomMargin = dp(8)
-        }
-    }
-    rail.addView(railDivider)
-    railEntries.add(RailEntry(railDivider, null))
-
-    // "structure" (Buttons) is set below, once showButtonCategoryPanel() exists - it takes over
-    // the whole panel rather than using the generic showEmptyCategoryContent() content area, so
-    // it's dispatched through this forward reference instead (Kotlin closures capture the var
-    // itself, so it's fine that this is assigned after the rail is built).
-    var onButtonsCategorySelected: (() -> Unit)? = null
-
-    for (cat in COMPONENT_CATEGORIES) {
-        val index = railEntries.size
-        val item: RailRowViews
-
-        item = buildRailRow(cat.iconRes, cat.label) {
-            when (activeRailIndex) {
-                index -> {
-
-
-                    setActiveCategory(null)
-                    railAnimateRestore(index)
-                    activeRailIndex = null
-                    activeCategoryId = null
-                    showAllContent()
-                    if (cat.id == "shapes") {
-                        geometryAccordionReset()
-                        geometryAccordion.visibility = View.GONE
-                    }
-                }
-                null -> {
-
-
-
-                    setActiveCategory(cat.id)
-                    railAnimateSelect(index)
-                    activeRailIndex = index
-                    activeCategoryId = cat.id
-                    if (cat.id == "structure") {
-                        onButtonsCategorySelected?.invoke()
-                    } else {
-                        showEmptyCategoryContent()
-                    }
-                    if (cat.id == "shapes") geometryAccordion.visibility = View.VISIBLE
-                }
-                else -> {
-
-
-                    setActiveCategory(cat.id)
-                    if (activeCategoryId == "shapes") {
-                        geometryAccordionReset()
-                        geometryAccordion.visibility = View.GONE
-                    }
-                    railResetAllImmediate()
-                    railAnimateSelect(index)
-                    activeRailIndex = index
-                    activeCategoryId = cat.id
-                    if (cat.id == "structure") {
-                        onButtonsCategorySelected?.invoke()
-                    } else {
-                        showEmptyCategoryContent()
-                    }
-                    if (cat.id == "shapes") geometryAccordion.visibility = View.VISIBLE
-                }
-            }
-        }
-
-        rail.addView(item.wrapper)
-        railIcons[cat.id] = item
-        railEntries.add(RailEntry(item.wrapper, item.label))
-
-
-
-        if (cat.id == "shapes") {
-            rail.addView(geometryAccordion)
-        }
-    }
-
-
-    setActiveCategory(null)
-
-    // Icon-only mode: below railCompactThresholdPx, fade out every row's label so only icons
-    // remain. Toggled from the drag handle below; also driven off railIcons/allItem so both the
-    // "All" row and every category row respond together.
-    fun setRailCompact(compact: Boolean) {
-        if (compact == railIsCompact) return
-        railIsCompact = compact
-        val labels = railIcons.values.map { it.label } + allItem.label
-        labels.forEach { label ->
-            label.animate().cancel()
-            if (compact) {
-                label.animate()
-                    .alpha(0f)
-                    .setDuration(120L)
-                    .withEndAction { if (label.alpha == 0f) label.visibility = View.GONE }
-                    .start()
-            } else {
-                label.visibility = View.VISIBLE
-                label.animate()
-                    .alpha(1f)
-                    .setDuration(120L)
-                    .start()
-            }
-        }
-    }
-
-    var dragStartRawX = 0f
-    var dragStartWidthPx = 0f
-    var lastAppliedWidthInt = railCurrentWidthPx.toInt()
-    var lastShadowSyncWidthPx = railCurrentWidthPx
-    // How far the width has to move before the (expensive, software-rasterized) shadow line
-    // redraws. Small enough that the lag between the rail's edge and its shadow is never
-    // noticeable, large enough to cut the blur-redraw rate substantially during a fast drag.
-    val shadowSyncThresholdPx = dp(3)
-    dividerHandle.setOnTouchListener { view, event ->
-        when (event.actionMasked) {
-            android.view.MotionEvent.ACTION_DOWN -> {
-                dragStartRawX = event.rawX
-                dragStartWidthPx = railCurrentWidthPx
-                // The Elements panel sits in a draggable BottomSheetBehavior, whose
-                // ViewDragHelper watches every touch stream on the parent CoordinatorLayout for
-                // drag gestures. Without this, a reversal in direction mid-drag (e.g. left then
-                // right) can get intercepted by the sheet and delivered to us as ACTION_CANCEL,
-                // killing the resize gesture. Claim the touch stream for the full drag so the
-                // sheet leaves it alone.
-                view.parent?.requestDisallowInterceptTouchEvent(true)
-                true
-            }
-            android.view.MotionEvent.ACTION_MOVE -> {
-                val deltaX = event.rawX - dragStartRawX
-                val newWidth = (dragStartWidthPx + deltaX).coerceIn(railMinWidthPx, railMaxWidthPx)
-                railCurrentWidthPx = newWidth
-                // Skip the whole pass if it wouldn't move anything by a visible pixel - touch
-                // panels commonly deliver several ACTION_MOVE events per displayed frame, and at
-                // rest (finger not actually moving) that's otherwise pure wasted layout work.
-                val newWidthInt = newWidth.toInt()
-                if (newWidthInt != lastAppliedWidthInt) {
-                    lastAppliedWidthInt = newWidthInt
-                    val syncShadow = kotlin.math.abs(newWidth - lastShadowSyncWidthPx) >= shadowSyncThresholdPx
-                    applyRailWidth(newWidth, updateShadow = syncShadow)
-                    if (syncShadow) lastShadowSyncWidthPx = newWidth
-                    setRailCompact(newWidth < railCompactThresholdPx)
-                }
-                // Re-anchor once clamped so a reversal responds immediately instead of requiring
-                // the finger to travel back through the overshoot distance first.
-                if (newWidth == railMinWidthPx || newWidth == railMaxWidthPx) {
-                    dragStartRawX = event.rawX
-                    dragStartWidthPx = newWidth
-                }
-                true
-            }
-            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
-                // Guarantee the shadow ends up exactly aligned even though it was throttled
-                // during the drag.
-                applyRailWidth(railCurrentWidthPx, updateShadow = true)
-                lastShadowSyncWidthPx = railCurrentWidthPx
-                view.parent?.requestDisallowInterceptTouchEvent(false)
-                true
-            }
-            else -> false
-        }
-    }
 
     searchInput.addTextChangedListener(object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
         override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
         override fun afterTextChanged(s: Editable?) {
             val query = s?.toString()?.trim()?.lowercase().orEmpty()
+            val matching = mutableSetOf<String>()
             for (cat in COMPONENT_CATEGORIES) {
                 val matches = query.isEmpty() ||
                     cat.label.lowercase().contains(query) ||
                     COMPONENT_ITEMS[cat.id].orEmpty().any { it.lowercase().contains(query) }
+                if (matches) matching.add(cat.id)
                 sectionViews[cat.id]?.visibility = if (matches) View.VISIBLE else View.GONE
-                railIcons[cat.id]?.wrapper?.alpha = if (matches) 1f else 0.35f
             }
+            onSearchFilterChanged(if (query.isEmpty()) null else matching)
         }
     })
 
-    val bodyRow = LinearLayout(context).apply {
-        orientation = LinearLayout.HORIZONTAL
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
-
-
-        clipChildren = false
-        clipToPadding = false
-        addView(railWrapper)
-        addView(dividerHandle)
-        addView(contentContainer)
-    }
-    root.addView(bodyRow)
-
     // Host for the dedicated Button-only panel (see buildButtonCategoryPanel()). It takes over
-    // the whole panel - header row and rail/content row both hidden - rather than sitting inside
+    // the whole panel - header row and content area both hidden - rather than sitting inside
     // contentBody, since "Buttons" gets a full replacement panel rather than just a new content
     // section. Built lazily so the instance counter only advances when "Buttons" is actually
     // opened, and torn down on close so the next open gets a fresh instance number.
@@ -2136,17 +1570,17 @@ fun buildComponentsContent(
         buttonPanelHost.visibility = View.GONE
         buttonPanelHost.removeAllViews()
         headerRow.visibility = View.VISIBLE
-        bodyRow.visibility = View.VISIBLE
+        contentContainer.visibility = View.VISIBLE
     }
 
     fun showButtonCategoryPanel() {
         headerRow.visibility = View.GONE
-        bodyRow.visibility = View.GONE
+        contentContainer.visibility = View.GONE
         buttonPanelHost.removeAllViews()
         val instanceNumber = ButtonInstanceCounter.nextInstanceNumber(context)
         // Re-checked on every open (this whole panel is torn down and rebuilt each time "Buttons"
-        // is selected - see showNormalContent()/onClose() below), so selecting a different placed
-        // button on the Canvas before reopening this panel edits that one instead.
+        // is selected in the sidebar - see showNormalContent()/onClose() below), so selecting a
+        // different placed button on the Canvas before reopening this panel edits that one instead.
         val editingPart = getEditableSelectedButton()
         val panel = buildButtonCategoryPanel(
             context = context,
@@ -2159,36 +1593,40 @@ fun buildComponentsContent(
             },
             onClose = {
                 // Closing the Button panel closes the whole Elements panel (same as the normal
-                // header's back/close button), and resets back to the rail's neutral ("All")
-                // state so the next time "Buttons" is opened it starts fresh (and the counter
-                // advances again).
+                // header's back/close button); the sidebar clears its selection when the sheet
+                // hides, and the next open starts fresh (and the counter advances again).
                 showNormalContent()
-                setActiveCategory(null)
-                railResetAllImmediate()
-                activeRailIndex = null
-                activeCategoryId = null
                 showAllContent()
                 onClose()
             },
             onExpandRequested = onButtonPanelExpandRequested,
             onAddToCanvasRequested = onAddButtonToCanvasRequested,
             onBack = {
-                // Same rail/content reset as onClose above, but without dismissing the whole
-                // Elements panel - goes back to the category rail so the person can pick a
-                // different category, rather than closing out entirely.
+                // Same reset as onClose above, but without dismissing the whole Elements panel -
+                // falls back to the "All" view so another category can be picked in the sidebar.
                 showNormalContent()
-                setActiveCategory(null)
-                railResetAllImmediate()
-                activeRailIndex = null
-                activeCategoryId = null
                 showAllContent()
+                onActiveCategoryChanged(ALL_CATEGORY.id)
             },
         )
         buttonPanelHost.addView(panel.root)
         buttonPanelHost.visibility = View.VISIBLE
     }
 
-    onButtonsCategorySelected = { showButtonCategoryPanel() }
-
-    return root
+    // Also serves the sheet's first open: the default state is "all", built above.
+    return ComponentsContentHandle(root) { categoryId ->
+        when (categoryId) {
+            ALL_CATEGORY.id -> {
+                showNormalContent()
+                showAllContent()
+                contentScroll.post { contentScroll.smoothScrollTo(0, 0) }
+            }
+            // "Buttons" takes over the whole sheet with its dedicated panel.
+            "structure" -> showButtonCategoryPanel()
+            else -> {
+                showNormalContent()
+                showEmptyCategoryContent()
+            }
+        }
+    }
 }
