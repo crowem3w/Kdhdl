@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -21,13 +20,11 @@ private val ADD_TEXT_PRESSED_COLOR = Color.parseColor("#1976D2") // Material blu
 
 /**
  * Builds the Text tab's panel content: for now, just the top action row at the top of
- * textContentContainer (see setupTextPanel()/openTextPanel() in SketchActivity) - the frameless
- * addFont icon button on the left, and the full-width-of-the-remaining-space "Add text" button to
- * its right - replacing the old showTextInputDialog() flow. addFont is left non-functional for
- * now (no [onAddFontRequested] callback exists yet - wire one up once it has a real destination).
- * Tapping "Add text" fires [onAddTextRequested], which SketchActivity wires to place a Text part
- * on the Canvas and close the panel immediately, no text-entry step. More content is expected to
- * be added below this row later.
+ * textContentContainer (see setupTextPanel()/openTextPanel() in SketchActivity) - a single
+ * full-width "Add text" button, replacing the old showTextInputDialog() flow. Tapping it fires
+ * [onAddTextRequested], which SketchActivity wires to place a Text part on the Canvas and close
+ * the panel immediately, no text-entry step. More content is expected to be added below this row
+ * later.
  */
 fun buildTextPanelContent(
     context: Context,
@@ -44,9 +41,7 @@ fun buildTextPanelContent(
         clipToPadding = false
     }
 
-    // Top action row: addFont (frameless, outer-left) + addTextButton (blue frame, fills the
-    // rest of the row) side by side - two independently-framed controls sharing one row, rather
-    // than addFont living inside addTextButton's own frame.
+    // Top action row: addTextButton (blue frame), full width.
     val topActionsRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
@@ -55,35 +50,13 @@ fun buildTextPanelContent(
         clipToPadding = false
     }
 
-    // Frameless icon button - square, sized to match addTextButton's own height (60dp: 28dp icon
-    // + 16dp top/bottom padding, see addTextButton below) so the two read as one aligned row.
-    // Non-functional for now: no click listener wired up yet.
-    val addFontRippleBg = run {
-        val outValue = TypedValue()
-        context.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, outValue, true)
-        androidx.core.content.ContextCompat.getDrawable(context, outValue.resourceId)
-    }
-    val addFont = FrameLayout(context).apply {
-        background = addFontRippleBg
-        isClickable = true
-        isFocusable = true
-        contentDescription = "Add font"
-        layoutParams = LinearLayout.LayoutParams(dp(60), dp(60)).apply {
-            marginEnd = dp(12)
-        }
-        addView(ImageView(context).apply {
-            setImageResource(R.drawable.ic_add_font)
-            setColorFilter(Color.BLACK)
-            layoutParams = FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER)
-        })
-    }
-    topActionsRow.addView(addFont)
-
-    // Rounded-square, Material-blue frame - fills the rest of the row (weight = 1) alongside
-    // addFont to its left, rather than the full row width on its own.
+    // Rounded-square, Material-blue frame - fills the full row width. Corner radius and padding
+    // match ComponentsPanel.kt's addToCanvasButton ("Insert instance") frame (12dp radius, 12dp
+    // top/bottom padding) so the two primary-action buttons read as the same size/shape across
+    // panels.
     val addTextBg = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
-        cornerRadius = dp(16).toFloat()
+        cornerRadius = dp(12).toFloat()
         setColor(ADD_TEXT_IDLE_COLOR)
     }
 
@@ -92,8 +65,8 @@ fun buildTextPanelContent(
         isClickable = true
         isFocusable = true
         contentDescription = "Add text"
-        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        setPadding(dp(20), dp(16), dp(20), dp(16))
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        setPadding(dp(20), dp(12), dp(20), dp(12))
     }
 
     // Icon + label laid out horizontally and centered together within the frame - icon on the
