@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  One category row in the Elements sidebar: 24dp leading icon + label, 56dp high, pill-shaped
+  ripple (Material 3 navigation-drawer item). Inflated once per category by
+  bindElementsSidebar() in ComponentsPanel.kt, which fills in the icon and label.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="56dp"
+    android:background="@drawable/bg_elements_sidebar_item"
+    android:clickable="true"
+    android:focusable="true"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="16dp"
+    android:paddingEnd="24dp">
+
+    <ImageView
+        android:id="@+id/elementsItemIcon"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:importantForAccessibility="no"
+        android:tint="?attr/colorOnSurfaceVariant" />
+
+    <TextView
+        android:id="@+id/elementsItemLabel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textAppearance="?attr/textAppearanceLabelLarge"
+        android:textColor="?attr/colorOnSurfaceVariant" />
+</LinearLayout>

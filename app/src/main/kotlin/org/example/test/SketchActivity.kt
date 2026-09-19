@@ -37,6 +37,8 @@ import androidx.core.view.marginBottom
 import androidx.core.view.WindowInsetsCompat
 import androidx.coordinatorlayout.widget.CoordinatorLayout
 import com.google.android.material.bottomsheet.BottomSheetBehavior
+import com.google.android.material.sidesheet.SideSheetBehavior
+import com.google.android.material.sidesheet.SideSheetCallback
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -167,19 +169,14 @@ class SketchActivity : AppCompatActivity() {
 
     
     
-    private lateinit var elementsPanel: FrameLayout
-    private lateinit var elementsPanelBehavior: BottomSheetBehavior<FrameLayout>
-    private lateinit var componentsContentContainer: FrameLayout
-    private var componentsContentBuilt = false
+    // Elements sidebar: a Material 3 standard side sheet docked to the left edge (see
+    // elementsSideSheet in activity_sketch.xml). "showingComponents" is true while it is open.
+    private lateinit var elementsSideSheet: FrameLayout
+    private lateinit var elementsSideSheetBehavior: SideSheetBehavior<FrameLayout>
+    private var elementsSidebar: ElementsSidebarController? = null
     private var showingComponents = false
-
-    // The Elements sidebar (Material rail docked on the left) owns category navigation; the
-    // Elements bottom sheet above only shows the content for whichever category it selects.
-    private lateinit var elementsSidebar: ElementsSidebarView
-    private var componentsHandle: ComponentsContentHandle? = null
-    // Category currently shown in elementsPanel (ALL_CATEGORY.id or a COMPONENT_CATEGORIES id).
-    private var currentComponentsCategory: String? = null
-    private val uiPrefs by lazy { getSharedPreferences("sketch_ui", MODE_PRIVATE) }
+    private var sideSheetNavInsetBottom = 0
+    private var sideSheetImeInsetBottom = 0
 
     
     
@@ -274,7 +271,9 @@ class SketchActivity : AppCompatActivity() {
                 closeScreensPanel()
             } else if (textPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
                 closeTextPanel()
-            } else {
+            } else if (elementsSidebar?.handleBack() != true) {
+                // Back from the sidebar's Button page just steps back to its list (handled above);
+                // from the list it closes the sidebar.
                 closeElementsPanel()
             }
         }
@@ -290,7 +289,8 @@ class SketchActivity : AppCompatActivity() {
         override fun onDoubleTapEmptySpace() = openElementsPanel()
 
         override fun onTapEmptySpace() {
-            closeElementsPanel()
+            // The Elements sidebar is a persistent (non-modal) side sheet: it stays open while
+            // the canvas is tapped, so it is intentionally NOT closed here like the bottom panels.
             closeScreensPanel()
             closeButtonObjectPanel()
             closeTextPanel()
@@ -359,13 +359,6 @@ class SketchActivity : AppCompatActivity() {
         private const val TOP_BAR_FADE_MS = 150L
         private const val BOTTOM_NAV_BAR_ANIM_MS = 250L
 
-        private const val PREF_SIDEBAR_SHOWN = "elements_sidebar_shown"
-        private const val PREF_SIDEBAR_EXPANDED = "elements_sidebar_expanded"
-
-        // elementsPanel's minimum/default height when no real keyboard height has been measured
-        // yet (i.e. the keyboard isn't currently showing). Matches screensPanel's peekHeight.
-        private const val ELEMENTS_PANEL_FALLBACK_PEEK_HEIGHT_DP = 280
-
         // Zoomed-out screens carousel (see enterOverview()).
         private const val OVERVIEW_GAP_DP = 16f            // space between neighbouring screens
         private const val OVERVIEW_SNAP_MS = 220L
@@ -405,10 +398,8 @@ class SketchActivity : AppCompatActivity() {
         bottomNavBar = findViewById(R.id.bottomNavBar)
         nameTagEditor = findViewById(R.id.nameTagEditor)
         setupNameTagEditor()
-        elementsPanel = findViewById(R.id.elementsPanel)
-        componentsContentContainer = findViewById(R.id.componentsContentContainer)
-        elementsSidebar = findViewById(R.id.elementsSidebar)
-        elementsPanelBehavior = BottomSheetBehavior.from(elementsPanel)
+        elementsSideSheet = findViewById(R.id.elementsSideSheet)
+        elementsSideSheetBehavior = SideSheetBehavior.from(elementsSideSheet)
         screensPanel = findViewById(R.id.screensPanel)
         screensContentContainer = findViewById(R.id.screensContentContainer)
         screensPanelBehavior = BottomSheetBehavior.from(screensPanel)
@@ -441,7 +432,6 @@ class SketchActivity : AppCompatActivity() {
 
         setupTopBar()
         setupBottomNavBar()
-        setupElementsPanel()
         setupElementsSidebar()
         setupScreensPanel()
         setupButtonObjectPanel()
@@ -512,7 +502,9 @@ class SketchActivity : AppCompatActivity() {
 
     private fun setupTopBar() {
         findViewById<View>(R.id.btnBack).setOnClickListener { onBackPressedDispatcher.onBackPressed() }
-        findViewById<View>(R.id.btnSidebarToggle).setOnClickListener { toggleElementsSidebar() }
+        findViewById<View>(R.id.btnElements).setOnClickListener {
+            if (showingComponents) closeElementsPanel() else openElementsPanel()
+        }
         findViewById<View>(R.id.btnUndo).setOnClickListener { notAvailableYet("Undo") }
         findViewById<View>(R.id.btnRedo).setOnClickListener { notAvailableYet("Redo") }
         findViewById<View>(R.id.btnPlay).setOnClickListener { notAvailableYet("Preview") }
@@ -570,7 +562,7 @@ class SketchActivity : AppCompatActivity() {
         animateBottomNavTo(1f)
     }
 
-    // Slides the bar down and fades it out. Elements/Screens panels' bottom margins follow it down
+    // Slides the bar down and fades it out. The Elements sidebar and Screens panel's bottom margins follow it down
     // frame by frame (see applyBottomNavProgress), so they glide into the freed space in sync.
     private fun hideBottomNavBar() {
         if (bottomNavTarget == 0f) return
@@ -615,39 +607,31 @@ class SketchActivity : AppCompatActivity() {
         applyNavBarPanelMargins()
     }
 
-    // Elements/Screens panels reserve the bar's height (+ its bottom margin) at the bottom so they
-    // sit above it; that reservation shrinks/grows with the bar's animation progress.
+    // The Elements sidebar and the Screens panel reserve the bar's height (+ its bottom margin) at
+    // the bottom so they sit above it; that reservation shrinks/grows with the bar's animation
+    // progress.
     private fun applyNavBarPanelMargins() {
         val margin = ((bottomNavBar.height + bottomNavBar.marginBottom) * bottomNavProgress).roundToInt()
-        (elementsPanel.layoutParams as? CoordinatorLayout.LayoutParams)?.let { lp ->
+        (elementsSideSheet.layoutParams as? CoordinatorLayout.LayoutParams)?.let { lp ->
             if (lp.bottomMargin != margin) {
                 lp.bottomMargin = margin
-                elementsPanel.layoutParams = lp
+                elementsSideSheet.layoutParams = lp
             }
         }
+        updateElementsSideSheetInsets()
         (screensPanel.layoutParams as? CoordinatorLayout.LayoutParams)?.let { lp ->
             if (lp.bottomMargin != margin) {
                 lp.bottomMargin = margin
                 screensPanel.layoutParams = lp
             }
         }
-        // The Elements sidebar stops just above the bar too (its own transparent shadow padding
-        // supplies most of the visual gap, hence the -8dp), and grows into the freed space when
-        // the bar hides.
-        val sidebarMargin = (margin - (8 * resources.displayMetrics.density).roundToInt()).coerceAtLeast(0)
-        (elementsSidebar.layoutParams as? CoordinatorLayout.LayoutParams)?.let { lp ->
-            if (lp.bottomMargin != sidebarMargin) {
-                lp.bottomMargin = sidebarMargin
-                elementsSidebar.layoutParams = lp
-            }
-        }
     }
 
     // ---- Auto-hide while a panel is open --------------------------------------------------------
-    // Every bottom sheet (Elements, Screens, Text, Button object) registers here when it opens and
+    // Every bottom sheet (Screens, Text, Button object) registers here when it opens and
     // unregisters when it closes. The bar hides while ANY panel is open and comes back once none is.
     // The sync is posted and coalesced, so swapping one panel for another in the same tap (e.g.
-    // Screens -> Elements) doesn't make the bar flicker in and out.
+    // Screens -> Text) doesn't make the bar flicker in and out.
     private val openPanels = mutableSetOf<View>()
     private var bottomNavSyncPosted = false
 
@@ -675,259 +659,129 @@ class SketchActivity : AppCompatActivity() {
     
     
     
-    private fun setupElementsPanel() {
-        elementsPanelBehavior.isDraggable = true
-        // Starting peek height/fallback; kept in sync with the real keyboard afterward by the
-        // insets listener below. See updateElementsPanelPeekHeight.
-        updateElementsPanelPeekHeight(imeInsetBottomPx = 0)
+    private fun setupElementsSidebar() {
+        // Standard (non-modal) side sheet: no scrim, so the canvas stays visible and tappable
+        // beside it. Draggable by default - swiping it toward the left edge closes it.
+        elementsSidebar = bindElementsSidebar(
+            sidebar = elementsSideSheet,
+            onClose = { closeElementsPanel() },
+            // The Button page's "Insert instance" button - places a real Button part, styled to
+            // match whichever preview (frameless/framed) was selected (see ButtonStyle in
+            // SketchPart.kt and buildButtonCategoryPanel()'s selectedVariant) and carrying its
+            // chosen Align (see SketchPart.buttonAlign), at the active screen's canvas center,
+            // then closes the sidebar - same pattern as the Screens panel's onPick.
+            onAddButtonToCanvasRequested = { style, align ->
+                addPart(PartKind.BUTTON, canvas.width / 2f, canvas.pageHeight / 2f, label = "Button").apply {
+                    buttonStyle = style
+                    buttonAlign = align
+                }
+                canvas.invalidate()
+                closeElementsPanel()
+            },
+            // If a placed FRAMED button is currently selected on the Canvas when the Button page
+            // is (re)opened, edit that part instead of composing a fresh one - see
+            // bindElementsSidebar() in ComponentsPanel.kt. FRAMELESS/generic parts have no Align
+            // UI equivalent yet, so they're left out of edit mode.
+            getEditableSelectedButton = {
+                canvas.selectedPart?.takeIf { it.kind == PartKind.BUTTON && it.buttonStyle == ButtonStyle.FRAMED }
+            },
+            // Fires on every Align/Label/style change while editing an existing placed button
+            // (see onLiveChanged in buildButtonCategoryPanel()), so the Canvas reflects the
+            // change the instant it's made rather than only on "Insert instance".
+            onButtonLiveEdited = { part, style, align, text ->
+                part.buttonStyle = style
+                part.buttonAlign = align
+                part.label = text
+                canvas.invalidate()
+            },
+        )
 
-        ViewCompat.setOnApplyWindowInsetsListener(elementsPanel) { _, insets ->
+        // Keeps the sheet clear of the status bar, the bottom nav bar / system nav bar, and the
+        // keyboard (the Button page has text inputs) - see updateElementsSideSheetInsets().
+        ViewCompat.setOnApplyWindowInsetsListener(elementsSideSheet) { _, insets ->
             statusBarInsetTop = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
-            updateElementsPanelPeekHeight(insets.getInsets(WindowInsetsCompat.Type.ime()).bottom)
-            applyElementsPanelTopPadding(elementsPanelBehavior.state == BottomSheetBehavior.STATE_EXPANDED)
+            sideSheetNavInsetBottom = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+            sideSheetImeInsetBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            updateElementsSideSheetInsets()
             insets
         }
 
-        
-        
-        elementsPanelBehavior.addBottomSheetCallback(object : BottomSheetBehavior.BottomSheetCallback() {
-            override fun onStateChanged(sheetView: View, newState: Int) {
+        elementsSideSheetBehavior.addCallback(object : SideSheetCallback() {
+            override fun onStateChanged(sheet: View, newState: Int) {
                 when (newState) {
-                    BottomSheetBehavior.STATE_HIDDEN -> {
-                        panelBackPressedCallback.isEnabled = screensPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
-                        setPanelOpen(elementsPanel, false)
-                        resetPanelContent()
+                    SideSheetBehavior.STATE_HIDDEN -> {
+                        showingComponents = false
+                        // A focused text field on the Button page would otherwise keep the
+                        // keyboard up over an off-screen sheet.
+                        elementsSideSheet.findFocus()?.let { focused ->
+                            (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)
+                                ?.hideSoftInputFromWindow(focused.windowToken, 0)
+                            focused.clearFocus()
+                        }
+                        // Next open starts on the category list again.
+                        elementsSidebar?.resetToList()
+                        syncBackCallbackEnabled()
                     }
-                    BottomSheetBehavior.STATE_EXPANDED -> {
+                    SideSheetBehavior.STATE_EXPANDED -> {
+                        showingComponents = true
                         panelBackPressedCallback.isEnabled = true
-                        applyElementsPanelTopPadding(expanded = true)
                     }
-                    BottomSheetBehavior.STATE_DRAGGING, BottomSheetBehavior.STATE_SETTLING -> Unit
-                    else -> {
-                        panelBackPressedCallback.isEnabled = true
-                        applyElementsPanelTopPadding(expanded = false)
-                    }
+                    else -> Unit
                 }
             }
 
-            
-            
-            override fun onSlide(sheetView: View, slideOffset: Float) {
-                val progress = slideOffset.coerceIn(0f, 1f)
-                applyElementsPanelTopPadding(progressToStatusBarInset = progress)
-            }
+            override fun onSlide(sheet: View, slideOffset: Float) = Unit
         })
-
-        
-        elementsPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
     }
 
-    
-    
-    
-    
-    // Keeps elementsPanel's minimum/default (STATE_COLLAPSED) height equal to the real
-    // on-screen keyboard height whenever the keyboard is actually showing, so content the
-    // keyboard would otherwise cover (e.g. the components search field) stays reachable above
-    // it. Falls back to ELEMENTS_PANEL_FALLBACK_PEEK_HEIGHT_DP - the same approximate value
-    // screensPanel uses - whenever the keyboard isn't currently up. The panel's maximum height
-    // stays full-screen via STATE_EXPANDED (layout_height="match_parent"), unaffected by this.
-    private fun updateElementsPanelPeekHeight(imeInsetBottomPx: Int) {
-        val fallbackPx = (ELEMENTS_PANEL_FALLBACK_PEEK_HEIGHT_DP * resources.displayMetrics.density).roundToInt()
-        val peekHeightPx = if (imeInsetBottomPx > 0) imeInsetBottomPx else fallbackPx
-        if (elementsPanelBehavior.peekHeight != peekHeightPx) {
-            elementsPanelBehavior.peekHeight = peekHeightPx
+    // Vertical insets for elementsSideSheet. Top: the status bar. Bottom: the sheet's own bottom
+    // margin already reserves room for bottomNavBar (see applyNavBarPanelMargins) - and that margin
+    // includes the system nav bar - so padding is only needed for the system nav bar while the
+    // bottom bar is hidden, and for whatever part of the keyboard reaches above the reserved area.
+    private fun updateElementsSideSheetInsets() {
+        val reservedBottom = (elementsSideSheet.layoutParams as? CoordinatorLayout.LayoutParams)?.bottomMargin ?: 0
+        val navPadding = (sideSheetNavInsetBottom * (1f - bottomNavProgress)).roundToInt()
+        val bottomPadding = maxOf(navPadding, sideSheetImeInsetBottom - reservedBottom, 0)
+        if (elementsSideSheet.paddingTop != statusBarInsetTop || elementsSideSheet.paddingBottom != bottomPadding) {
+            elementsSideSheet.setPadding(0, statusBarInsetTop, 0, bottomPadding)
         }
     }
 
-    private fun applyElementsPanelTopPadding(expanded: Boolean? = null, progressToStatusBarInset: Float? = null) {
-        // Content built inside componentsContentContainer (e.g. buildButtonCategoryPanel()'s
-        // root) already carries its own small top padding (dp(8) for the Buttons panel). That
-        // stacks on top of statusBarInsetTop below, pushing the label/(x) row farther from the
-        // top than necessary at max height. Subtracting it here cancels the double-counting so
-        // the row ends up exactly statusBarInsetTop from the true top edge - as close as
-        // possible without sitting under the status bar - rather than statusBarInsetTop + 8dp.
-        val buttonPanelRootTopPaddingPx = (8 * resources.displayMetrics.density).roundToInt()
-        val extra = when {
-            progressToStatusBarInset != null ->
-                ((statusBarInsetTop - buttonPanelRootTopPaddingPx) * progressToStatusBarInset).roundToInt().coerceAtLeast(0)
-            expanded == true -> (statusBarInsetTop - buttonPanelRootTopPaddingPx).coerceAtLeast(0)
-            else -> 0
-        }
-        elementsPanel.setPadding(elementsPanel.paddingLeft, extra, elementsPanel.paddingRight, elementsPanel.paddingBottom)
+    // Back is only intercepted while something is open; recomputed whenever a panel closes.
+    // ignoreSelectionPanel: the multi-selection column stays View.VISIBLE until its slide-out
+    // animation ends, so its own hide path must not count it as still open.
+    private fun syncBackCallbackEnabled(ignoreSelectionPanel: Boolean = false) {
+        panelBackPressedCallback.isEnabled =
+            (!ignoreSelectionPanel && selectionActionsPanel.visibility == View.VISIBLE) ||
+                elementsSideSheetBehavior.state != SideSheetBehavior.STATE_HIDDEN ||
+                screensPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN ||
+                textPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN ||
+                buttonObjectPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
     }
 
-    
-    
-    
     private fun openElementsPanel() {
         if (showingScreens) closeScreensPanel()
         if (showingText) closeTextPanel()
-        openComponentsCategory(ALL_CATEGORY.id)
-    }
-
-    
-    
-    private fun closeElementsPanel() {
-        clearComponentsSelection()
-        if (elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN) {
-            elementsPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
-        }
-        setPanelOpen(elementsPanel, false)
-    }
-
-    
-    
-    private fun resetPanelContent() {
-        showingComponents = false
-        clearComponentsSelection()
-        
-        
-    }
-
-
-
-    private fun showComponentsContent(expanded: Boolean = false) {
-        if (!componentsContentBuilt) {
-            val handle = buildComponentsContent(
-                    context = this,
-                    onClose = { closeComponentsContent() },
-                    // Tapping the Button preview in the dedicated Buttons panel (see
-                    // buildButtonCategoryPanel()) just maxes out the panel's height - it doesn't
-                    // place anything on the canvas.
-                    onButtonPanelExpandRequested = {
-                        elementsPanelBehavior.state = BottomSheetBehavior.STATE_EXPANDED
-                    },
-                    // The Buttons panel's "+ Add to Canvas" button - places a real Button part,
-                    // styled to match whichever preview (frameless/framed) was selected (see
-                    // ButtonStyle in SketchPart.kt and buildButtonCategoryPanel()'s
-                    // selectedVariant) and carrying its chosen Align (see SketchPart.buttonAlign),
-                    // at the active screen's canvas center, then closes the Elements panel - same
-                    // pattern as the Screens panel's onPick.
-                    onAddButtonToCanvasRequested = { style, align ->
-                        addPart(PartKind.BUTTON, canvas.width / 2f, canvas.pageHeight / 2f, label = "Button").apply {
-                            buttonStyle = style
-                            buttonAlign = align
-                        }
-                        canvas.invalidate()
-                        closeElementsPanel()
-                    },
-                    // If a placed FRAMED button is currently selected on the Canvas when the
-                    // Buttons panel is (re)opened, edit that part instead of composing a fresh
-                    // one - see showButtonCategoryPanel() in ComponentsPanel.kt. FRAMELESS/generic
-                    // parts have no Align UI equivalent yet, so they're left out of edit mode.
-                    getEditableSelectedButton = {
-                        canvas.selectedPart?.takeIf { it.kind == PartKind.BUTTON && it.buttonStyle == ButtonStyle.FRAMED }
-                    },
-                    // Fires on every Align/Label/style change while editing an existing placed
-                    // button (see onLiveChanged in buildButtonCategoryPanel()), so the Canvas
-                    // reflects the change the instant it's made rather than only on "+ Add to
-                    // Canvas" - this is the real-time feedback that was missing.
-                    onButtonLiveEdited = { part, style, align, text ->
-                        part.buttonStyle = style
-                        part.buttonAlign = align
-                        part.label = text
-                        canvas.invalidate()
-                    },
-                    // The sheet's search field dims the sidebar rows that no longer match.
-                    onSearchFilterChanged = { matching -> elementsSidebar.setSearchMatches(matching) },
-                    // e.g. the Buttons panel's back arrow drops back to "All" - the sidebar follows.
-                    onActiveCategoryChanged = { id ->
-                        currentComponentsCategory = id
-                        elementsSidebar.setSelectedCategory(id)
-                    },
-                )
-            componentsContentContainer.addView(handle.view)
-            componentsHandle = handle
-            componentsContentBuilt = true
-        }
-        val wasShowing = showingComponents
-        showingComponents = true
-        setPanelOpen(elementsPanel, true)
-        // Keep whatever height the person dragged the sheet to when just switching categories;
-        // only pick the default (collapsed) height when the sheet is being opened from hidden.
-        // (STATE_DRAGGING / STATE_SETTLING can't be assigned, so the else case leaves it alone.)
-        if (expanded) {
-            elementsPanelBehavior.state = BottomSheetBehavior.STATE_EXPANDED
-        } else if (!wasShowing || elementsPanelBehavior.state == BottomSheetBehavior.STATE_HIDDEN) {
-            elementsPanelBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
-        }
-    }
-
-    // The sidebar's highlight should disappear the moment the sheet is dismissed, not once its
-    // slide-out animation finishes.
-    private fun clearComponentsSelection() {
-        currentComponentsCategory = null
-        elementsSidebar.setSelectedCategory(null)
-        elementsSidebar.setSearchMatches(null)
-    }
-
-    // Opens (or switches) the Elements sheet to [categoryId]'s content and highlights it in the sidebar.
-    private fun openComponentsCategory(categoryId: String) {
+        // The sidebar, the multi-selection actions column and the bottom sheets would all fight
+        // for the same screen space, so only one is up at a time.
+        closeButtonObjectPanel()
+        if (selectionActionsPanel.visibility == View.VISIBLE) dismissSelectionActionsPanel(clearSelection = true)
         showComponentsContent()
-        currentComponentsCategory = categoryId
-        componentsHandle?.showCategory(categoryId)
-        elementsSidebar.setSelectedCategory(categoryId)
     }
 
-    // ---- Elements sidebar ------------------------------------------------------------------
+    private fun closeElementsPanel() = closeComponentsContent()
 
-    private fun setupElementsSidebar() {
-        elementsSidebar.onCategoryClick = { id ->
-            if (showingComponents && currentComponentsCategory == id) {
-                // Tapping the active category again dismisses its sheet.
-                closeComponentsContent()
-            } else {
-                if (showingScreens) closeScreensPanel()
-                if (showingText) closeTextPanel()
-                openComponentsCategory(id)
-            }
-        }
-        elementsSidebar.onOccupiedWidthChanged = { px -> applySidebarInset(px) }
-        elementsSidebar.onExpandedChanged = { expanded ->
-            uiPrefs.edit().putBoolean(PREF_SIDEBAR_EXPANDED, expanded).apply()
-        }
-        elementsSidebar.setExpanded(uiPrefs.getBoolean(PREF_SIDEBAR_EXPANDED, false), animate = false)
-        elementsSidebar.setShown(uiPrefs.getBoolean(PREF_SIDEBAR_SHOWN, true), animate = false)
+    private fun showComponentsContent() {
+        showingComponents = true
+        panelBackPressedCallback.isEnabled = true
+        elementsSideSheetBehavior.state = SideSheetBehavior.STATE_EXPANDED
     }
-
-    private fun toggleElementsSidebar() {
-        val show = !elementsSidebar.isShown
-        elementsSidebar.setShown(show, animate = true)
-        uiPrefs.edit().putBoolean(PREF_SIDEBAR_SHOWN, show).apply()
-        // Nothing to navigate from once the sidebar is gone.
-        if (!show && showingComponents) closeComponentsContent()
-    }
-
-    // The sidebar is docked over the left edge of the canvas, so every bottom sheet and the
-    // multi-selection actions panel starts to its right instead of sliding underneath it.
-    private fun applySidebarInset(insetPx: Int) {
-        for (panel in listOf(elementsPanel, screensPanel, buttonObjectPanel, textPanel, screenThumbnailsRow)) {
-            (panel.layoutParams as? CoordinatorLayout.LayoutParams)?.let { lp ->
-                if (lp.marginStart != insetPx) {
-                    lp.marginStart = insetPx
-                    panel.layoutParams = lp
-                }
-            }
-        }
-        (selectionActionsPanel.layoutParams as? CoordinatorLayout.LayoutParams)?.let { lp ->
-            val start = insetPx + (16 * resources.displayMetrics.density).roundToInt()
-            if (lp.marginStart != start) {
-                lp.marginStart = start
-                selectionActionsPanel.layoutParams = lp
-            }
-        }
-    }
-
-
 
     private fun closeComponentsContent() {
         showingComponents = false
-        clearComponentsSelection()
-        
-        
-        setPanelOpen(elementsPanel, false)
-        elementsPanelBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+        if (elementsSideSheetBehavior.state != SideSheetBehavior.STATE_HIDDEN) {
+            elementsSideSheetBehavior.state = SideSheetBehavior.STATE_HIDDEN
+        }
     }
 
     
@@ -953,7 +807,7 @@ class SketchActivity : AppCompatActivity() {
                     BottomSheetBehavior.STATE_HIDDEN -> {
                         showingScreens = false
                         setPanelOpen(screensPanel, false)
-                        panelBackPressedCallback.isEnabled = elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
+                        syncBackCallbackEnabled()
                     }
                     BottomSheetBehavior.STATE_EXPANDED -> {
                         panelBackPressedCallback.isEnabled = true
@@ -1014,8 +868,7 @@ class SketchActivity : AppCompatActivity() {
     
     
     
-    // Simplest of the three panel sheets: no IME-aware peek height (elementsPanel) or floating
-    // thumbnails row to sync (screensPanel) - just the plain two-tier peek/expanded sheet declared
+    // Simplest of the bottom sheets: no floating thumbnails row to sync (screensPanel) - just the plain two-tier peek/expanded sheet declared
     // in activity_sketch.xml (app:behavior_peekHeight="280dp" = min = default resting height,
     // STATE_EXPANDED = max/fullscreen). Content is the Design/Prototype/customButton row from
     // ButtonObjectPanel.kt (built lazily - see openButtonObjectPanel() below) plus, set up here,
@@ -1059,8 +912,7 @@ class SketchActivity : AppCompatActivity() {
                 if (newState == BottomSheetBehavior.STATE_HIDDEN) {
                     showingButtonObjectPanel = false
                     setPanelOpen(buttonObjectPanel, false)
-                    panelBackPressedCallback.isEnabled = elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN ||
-                        screensPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
+                    syncBackCallbackEnabled()
                 } else if (newState != BottomSheetBehavior.STATE_DRAGGING && newState != BottomSheetBehavior.STATE_SETTLING) {
                     panelBackPressedCallback.isEnabled = true
                 }
@@ -1378,8 +1230,7 @@ class SketchActivity : AppCompatActivity() {
                     BottomSheetBehavior.STATE_HIDDEN -> {
                         showingText = false
                         setPanelOpen(textPanel, false)
-                        panelBackPressedCallback.isEnabled = elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN ||
-                            screensPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
+                        syncBackCallbackEnabled()
                     }
                     BottomSheetBehavior.STATE_EXPANDED -> {
                         panelBackPressedCallback.isEnabled = true
@@ -1665,6 +1516,8 @@ class SketchActivity : AppCompatActivity() {
 
     
     private fun showSelectionActionsPanel() {
+        // Both this column and the Elements sidebar are docked to the left edge.
+        closeElementsPanel()
         updateSelectionActionLabels()
         panelBackPressedCallback.isEnabled = true
         selectionActionsPanel.animate().cancel()
@@ -1701,7 +1554,7 @@ class SketchActivity : AppCompatActivity() {
                 selectionActionsPanel.translationX = 0f
             }
             .start()
-        panelBackPressedCallback.isEnabled = elementsPanelBehavior.state != BottomSheetBehavior.STATE_HIDDEN
+        syncBackCallbackEnabled(ignoreSelectionPanel = true)
     }
 
     private fun notAvailableYet(feature: String) {
@@ -1889,7 +1742,6 @@ class SketchActivity : AppCompatActivity() {
         closeScreensPanel()
         closeButtonObjectPanel()
         closeTextPanel()
-        elementsSidebar.setSuppressed(true)
         topBarHideHandler.removeCallbacks(hideTopBarRunnable)
         hideTopBar()
         hideBottomNavBar()
@@ -1975,7 +1827,6 @@ class SketchActivity : AppCompatActivity() {
         val minZoom = targetCanvas.minZoom
 
         showTopBar()
-        elementsSidebar.setSuppressed(false)
         if (overviewBottomNavWasVisible) showBottomNavBar()
 
         overviewTransitionAnimator = ValueAnimator.ofFloat(0f, 1f).apply {

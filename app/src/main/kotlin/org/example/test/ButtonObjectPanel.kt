@@ -17,8 +17,8 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 // Material-blue accent for the selected Design/Prototype segment - the same accent as
-// bg_tab_selected.xml and the Components panel's own Design/Prototype toggle (see
-// PANEL_MODE_SELECTED in ComponentsPanel.kt), so "selected" reads consistently across panels.
+// bg_tab_selected.xml (and the Elements panel's Design/Prototype toggle that used to share it), so
+// "selected" reads consistently across panels.
 // Also used for customButton's icon tint when ButtonObjectMode.CUSTOM is active, so all three
 // mutually-exclusive selections in this row share one "selected" color language.
 private val MODE_SELECTED_BLUE = Color.parseColor("#3D7EFF")
@@ -261,9 +261,8 @@ fun buildButtonObjectPanelContent(
 
 /**
  * A small blurred drop-shadow strip - draws an (invisible) horizontal line and shows only its
- * Paint.setShadowLayer blur, the same software-layer blurred-shadow technique as
- * SidebarEdgeShadowView in ComponentsPanel.kt, just for a plain straight segment rather than a
- * path that bends around a corner.
+ * Paint.setShadowLayer blur (rendered on a software layer, since that's the only place
+ * setShadowLayer works), for a plain straight segment.
  *
  * Positioned by SketchActivity (see positionButtonObjectCornerShadow()) directly above the Button
  * object panel's top edge, width-matched to customButton, and shown only while

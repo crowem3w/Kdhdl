@@ -65,17 +65,20 @@
                 android:contentDescription="Back"
                 android:elevation="3dp" />
 
-            <!-- Shows / hides the Elements sidebar (see elementsSidebar below). -->
+            <!-- Opens/closes the Elements sidebar (elementsSideSheet below). The bottom-bar
+                 Elements tab it replaces is gone, so this is the visible entry point; the
+                 long-press / double-tap on empty canvas gestures still open it too. -->
             <ImageButton
-                android:id="@+id/btnSidebarToggle"
+                android:id="@+id/btnElements"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:layout_marginStart="8dp"
                 android:background="@drawable/bg_top_bar_button_ripple"
                 android:padding="10dp"
                 android:scaleType="fitCenter"
-                android:src="@drawable/ic_sidebar_toggle"
-                android:contentDescription="Toggle Elements sidebar"
+                android:src="@drawable/ic_components"
+                android:tint="#1D1B20"
+                android:contentDescription="Elements"
                 android:elevation="3dp" />
 
             <View
@@ -200,67 +203,114 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Elements panel: a separate bottom sheet, independent of bottomNavBar, that shows the
-         Components browser once a category is tapped in the Elements sidebar. Its bottom margin is padded out at
-         runtime to bottomNavBar's measured height (see setupBottomNavBar in SketchActivity) so
-         it sits above the nav bar rather than sliding underneath it. Toggles between hidden,
-         collapsed (its minimum/default height, matching the on-screen keyboard's height so
-         content the keyboard would otherwise cover stays reachable - see
-         updateElementsPanelPeekHeight in SketchActivity) and fully expanded (its maximum
-         height, full screen). The peekHeight below is only the initial/fallback value used
-         before a real keyboard height has been measured; it's kept in sync with the keyboard
-         at runtime. Declared (and thus drawn) BEFORE bottomNavBar below, and at a lower
-         elevation than it, so that while it's sliding in/out - and even briefly full-height
-         mid-drag - it always renders and receives touches behind the nav bar rather than
-         overshadowing it. Any other popup panel added to this layout should follow the same
-         rule: declare it above (before) bottomNavBar in this file, and keep its
-         android:elevation below bottomNavBar's. -->
+    <!-- Elements sidebar: a Material 3 standard side sheet (SideSheetBehavior) docked to the LEFT
+         edge, opened from btnElements in the top bar or by long-pressing / double-tapping empty
+         canvas space (see openElementsPanel in SketchActivity). It replaces the old Elements
+         bottom sheet and its bottom-bar tab. Standard (non-modal) means there is no scrim: the
+         sheet only covers its own 320dp, so the rest of the canvas stays visible and tappable
+         while it is open. It closes from its own (x), a swipe toward the left edge, Back, or
+         after "Insert instance" in the Button page.
+
+         Layout: a fixed "Elements" header, then the 12 element categories as a Material list
+         (rows inflated from item_elements_category.xml by bindElementsSidebar() in
+         ComponentsPanel.kt). Tapping Buttons swaps the list for the Button setup page
+         (elementsButtonPage), which has its own back arrow.
+
+         fitsSystemWindows + the insets listener in SketchActivity#setupElementsSidebar keep it
+         clear of the status bar / keyboard, and its bottom margin follows bottomNavBar exactly
+         like the bottom sheets do (see applyNavBarPanelMargins). Declared BEFORE bottomNavBar
+         and kept at a lower elevation than it, same rule as the other panels below. -->
     <FrameLayout
-        android:id="@+id/elementsPanel"
-        android:layout_width="match_parent"
+        android:id="@+id/elementsSideSheet"
+        android:layout_width="320dp"
         android:layout_height="match_parent"
-        android:background="@drawable/bg_bottom_panel"
+        android:layout_gravity="start"
+        android:background="?attr/colorSurfaceContainerLow"
         android:clipChildren="false"
         android:elevation="8dp"
-        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
-        app:behavior_hideable="true"
-        app:behavior_draggable="true"
-        app:behavior_skipCollapsed="false"
-        app:behavior_peekHeight="280dp">
+        android:fitsSystemWindows="true"
+        android:theme="@style/ThemeOverlay.Test.ElementsSidebar"
+        app:layout_behavior="com.google.android.material.sidesheet.SideSheetBehavior">
 
-        <!-- Present but not shown: keeps the sheet's drag/accessibility affordance functional
-             without drawing the usual visible grab pill, same as screensPanelDragHandle below. -->
-        <com.google.android.material.bottomsheet.BottomSheetDragHandleView
-            android:id="@+id/elementsPanelDragHandle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="top|center_horizontal"
-            android:visibility="invisible" />
-
-        <!-- Components browser content, built and attached at runtime by
-             buildComponentsContent() in ComponentsPanel.kt. -->
-        <FrameLayout
-            android:id="@+id/componentsContentContainer"
+        <!-- Page 1: header + category list. -->
+        <LinearLayout
+            android:id="@+id/elementsListPage"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:clipChildren="false" />
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="64dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="24dp"
+                android:paddingEnd="12dp">
+
+                <TextView
+                    android:id="@+id/elementsSidebarTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:accessibilityHeading="true"
+                    android:text="Elements"
+                    android:textAppearance="?attr/textAppearanceTitleLarge"
+                    android:textColor="?attr/colorOnSurface" />
+
+                <ImageButton
+                    android:id="@+id/elementsSidebarClose"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Close Elements"
+                    android:padding="12dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_close"
+                    android:tint="?attr/colorOnSurfaceVariant" />
+            </LinearLayout>
+
+            <com.google.android.material.divider.MaterialDivider
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:clipToPadding="false"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/elementsCategoryList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="12dp"
+                    android:paddingVertical="8dp" />
+            </ScrollView>
+        </LinearLayout>
+
+        <!-- Page 2: Button setup, built at runtime by buildButtonCategoryPanel(). -->
+        <FrameLayout
+            android:id="@+id/elementsButtonPage"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
     </FrameLayout>
 
     <!-- Screens panel: a separate bottom sheet, independent of bottomNavBar, that shows the
          Screens picker (Card/Image/Chip) once the Screens tab is tapped. The page-thumbnails
          row/chevron/(+) tile that used to live at the top of this sheet's content now lives
-         outside it, in screenThumbnailsRow below, floating over the canvas instead. Like
-         elementsPanel, its default resting state is a fixed peek height (app:behavior_peekHeight
-         below) approximating an on-screen keyboard's height, rather than jumping straight to
-         full height - it can still be dragged further up toward full height, though unlike
-         elementsPanel this peek height isn't kept in sync with a real measured keyboard height
-         at runtime. Its bottom
+         outside it, in screenThumbnailsRow below, floating over the canvas instead. Its
+         default resting state is a fixed peek height (app:behavior_peekHeight below)
+         approximating an on-screen keyboard's height, rather than jumping straight to full
+         height - it can still be dragged further up toward full height. Its bottom
          margin is padded out at runtime to bottomNavBar's measured height (see setupScreensPanel
          in SketchActivity) so it sits above the nav bar rather than sliding underneath it.
          Declared (and thus drawn) BEFORE bottomNavBar below, and at a lower elevation than it,
          so that while it's sliding in/out - and even briefly full-height mid-drag - it always
          renders and receives touches behind the nav bar rather than overshadowing it (same rule
-         elementsPanel follows above). Light-mode surface (bg_bottom_panel) regardless of the
+         elementsSideSheet follows above). Light-mode surface (bg_bottom_panel) regardless of the
          app's dark canvas chrome. Carries a BottomSheetDragHandleView so the sheet is draggable
          and accessible (e.g. TalkBack expand/collapse actions) without a visible grab affordance -
          it's kept present but invisible rather than removed, since removing it would also drop
@@ -321,10 +371,10 @@
         android:clipToPadding="false"
         android:elevation="9dp" />
 
-    <!-- Button object panel: a separate bottom sheet, independent of elementsPanel/screensPanel
+    <!-- Button object panel: a separate bottom sheet, independent of screensPanel/textPanel
          and bottomNavBar, shown when a Button part already placed on the sketch Canvas is
          double-tapped or long-pressed (see onButtonPartActivated in SketchActivity, wired from
-         SketchCanvasView.Listener). Same two-tier height setup as elementsPanel/screensPanel
+         SketchCanvasView.Listener). Same two-tier height setup as screensPanel
          above: app:behavior_peekHeight is both its minimum and default resting height, and
          STATE_EXPANDED (match_parent) is its maximum. Empty for now - buttonObjectContentContainer
          is populated at runtime once this panel's content is designed. Declared BEFORE
@@ -402,35 +452,16 @@
             android:clipChildren="false" />
     </FrameLayout>
 
-    <!-- Elements sidebar: a Material 3 expandable navigation rail docked to the left edge, replacing
-         the old Elements tab. Header (icon + "Elements") on top, the component categories below,
-         collapse/expand toggle at the bottom. Categories open their content in elementsPanel above.
-         Its canvas-facing edge is neumorphic (see ElementsSidebarView), drawn into the view's own
-         transparent padding, which is why this view is wrap_content wide and does not itself take
-         touches outside its surface. Elevated above the bottom sheets (8dp) so it stays usable while
-         one is open - those sheets are inset from the left by the sidebar's width at runtime (see
-         applySidebarInset in SketchActivity) - but below bottomNavBar (16dp). The top/bottom margins
-         are tuned at runtime: bottom follows bottomNavBar (see applyNavBarPanelMargins). -->
-    <org.example.test.ElementsSidebarView
-        android:id="@+id/elementsSidebar"
-        android:layout_width="wrap_content"
-        android:layout_height="match_parent"
-        android:layout_gravity="start"
-        android:layout_marginTop="44dp"
-        android:layout_marginBottom="64dp"
-        android:elevation="10dp"
-        android:clipChildren="false"
-        android:clipToPadding="false" />
-
     <!-- Bottom navigation bar: a plain, always-visible tab bar floating just above the bottom
          edge of the screen as a pill-shaped 3D sheet (NOT a BottomSheetBehavior sheet - it
          never drags, collapses, or hides). Tapping Text/Upload opens its own modal picker/dialog;
-         tapping Screens opens screensPanel above (Elements opens from the sidebar), separate sheets that
-         float over the canvas but always stay visually and interactively behind this bar
-         (see setupBottomNavBar / setupElementsPanel / setupScreensPanel in SketchActivity).
+         tapping Screens opens screensPanel above, a separate sheet that floats over the
+         canvas but always stays visually and interactively behind this bar (see
+         setupBottomNavBar / setupScreensPanel in SketchActivity). Elements is no longer a tab:
+         it lives in the left-hand elementsSideSheet, opened from the top bar.
          Declared LAST in this file, and given the highest android:elevation of any popup/panel
          here, so it always draws on top of - and always wins touch priority over -
-         selectionActionsPanel, elementsPanel, screensPanel, and any future panel added above it,
+         selectionActionsPanel, elementsSideSheet, screensPanel, and any future panel added above it,
          instead of getting overshadowed by them while they pop up. The extruded ~6dp "sheet
          thickness" is drawn along the TOP
          edge (dark sliver peeking above the lighter face, with its own catch-light) rather

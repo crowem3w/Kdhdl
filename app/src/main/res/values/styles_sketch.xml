@@ -139,4 +139,17 @@
         <item name="android:layout_gravity">center_vertical</item>
     </style>
 
+    <!-- Pins the Elements sidebar (elementsSideSheet) to Material 3 light-surface tokens, no
+         matter which mode ThemeManager is in. Every other panel in the sketch screen is a light
+         surface over the dark canvas chrome, and the Button page inside the sidebar is light too,
+         so the sidebar follows suit. Only the tokens the sidebar actually reads are set; the rest
+         (shapes, type scale, etc.) still come from Theme.Test / Material 3. Applied with
+         android:theme on the sheet, so it also reaches the rows inflated at runtime. -->
+    <style name="ThemeOverlay.Test.ElementsSidebar" parent="">
+        <item name="colorSurfaceContainerLow">#F7F2FA</item>
+        <item name="colorOnSurface">#1D1B20</item>
+        <item name="colorOnSurfaceVariant">#49454F</item>
+        <item name="colorOutlineVariant">#CAC4D0</item>
+        <item name="colorControlHighlight">#1F49454F</item>
+    </style>
 </resources>

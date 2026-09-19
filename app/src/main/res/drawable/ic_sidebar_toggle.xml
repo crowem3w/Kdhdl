@@ -1,6 +1,0 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <!-- Panel outline with a left-hand sidebar column: the top-bar toggle for the Elements sidebar. -->
-    <path android:pathData="M4,6 a2,2 0 0 1 2,-2 h12 a2,2 0 0 1 2,2 v12 a2,2 0 0 1 -2,2 h-12 a2,2 0 0 1 -2,-2 Z" android:strokeColor="#1D1B20" android:strokeWidth="2" android:strokeLineJoin="round" android:fillColor="#00000000"/>
-    <path android:pathData="M9.5,4.5 L9.5,19.5" android:strokeColor="#1D1B20" android:strokeWidth="2" android:strokeLineCap="round" android:fillColor="#00000000"/>
-</vector>
